@@ -18,8 +18,6 @@ if __name__ == '__main__':
         src,
         out,
         thinning=combine(size_threshold(pixels=4), drop_rate(2.5)),
-        zooms=range(2, 17),
-        polygons_from=13,
         carry=[('height', 'f32'), ('class', 'utf8')],
         workers=4,
     )

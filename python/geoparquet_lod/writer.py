@@ -130,6 +130,51 @@ def _bbox_float32(column: pa.ChunkedArray) -> pa.Array:
     return pa.StructArray.from_arrays(parts, fields=list(BBOX_FIELD.type))
 
 
+def guess_zooms(con, sorted_path, geometry, family, zooms, polygons_from, extent, degrees, log):
+    """Tippecanoe's `-zg` in spirit: the coarsest zoom is where the extent fits
+    a tile, footprints start where the median feature spans a pixel, and the
+    finest zoom is where the median vertex spacing reaches a pixel. Explicit
+    values are kept; `'auto'` is replaced and logged."""
+    import math
+
+    import shapely
+
+    from .quantize import resolution as res
+
+    def zoom_where(size: float) -> int:
+        # first zoom whose pixel is no larger than `size`
+        return max(0, min(22, math.ceil(math.log2(res(0, degrees=degrees) / max(size, 1e-12)))))
+
+    auto_zooms = zooms == 'auto'
+    auto_from = polygons_from == 'auto'
+    if auto_zooms or auto_from:
+        sample = con.execute(
+            f"SELECT diag, {geometry} FROM '{sorted_path}' USING SAMPLE 5000 ROWS"
+        ).fetch_arrow_table()
+        diag = float(np.median(sample.column('diag').to_numpy())) if sample.num_rows else 0.0
+        geoms = shapely.from_wkb(sample.column(geometry).to_numpy(zero_copy_only=False))
+        coords, index = shapely.get_coordinates(geoms, return_index=True)
+        steps = np.hypot(*np.diff(coords, axis=0).T)
+        same = index[1:] == index[:-1]
+        spacing = float(np.median(steps[same])) if same.any() else 0.0
+        extent_size = max(extent[2] - extent[0], extent[3] - extent[1])
+        coarsest = max(0, zoom_where(extent_size) - 1)
+        finest = min(18, max(coarsest + 1, zoom_where(spacing) if spacing else 16))
+        first_polygon = zoom_where(diag) if family == 'polygon' and diag else None
+        if auto_from:
+            polygons_from = None if family == 'point' else min(first_polygon, finest)
+        if auto_zooms:
+            zooms = list(range(coarsest, finest + 1))
+        log(
+            f'  zoom guess: extent {extent_size:.3g}, median feature {diag:.3g}, median vertex spacing {spacing:.3g} '
+            f'-> zooms {zooms[0]}-{zooms[-1]}, footprints from {polygons_from}'
+        )
+    zooms = list(zooms)
+    if polygons_from is not None and polygons_from not in zooms:
+        polygons_from = None if polygons_from > zooms[-1] else zooms[0]
+    return zooms, polygons_from
+
+
 def _read_schema(src: str) -> pa.Schema:
     """Arrow schema with geo metadata; a glob reads its first match."""
     if any(ch in src for ch in '*?['):
@@ -171,8 +216,8 @@ def write(
     *,
     thinning: Thin,
     columns=(),
-    zooms=range(2, 17),
-    polygons_from: int | None = 13,
+    zooms='auto',
+    polygons_from: int | None | str = 'auto',
     carry=(),
     geometry: str = 'geometry',
     prefix_zoom: int | None = 6,
@@ -188,7 +233,6 @@ def write(
     LOD columns layout. Returns the output path."""
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    zooms = list(zooms)
     t0 = time.time()
     con = connect(memory_limit, temp_dir)
     source_schema = _read_schema(src)
@@ -202,7 +246,6 @@ def write(
         )
         else 'polygon'
     )
-    band_plan = bands(zooms, polygons_from, family)
 
     # 1. a sorted, slim copy with centroid, diagonal and Hilbert key
     xmin, ymin, xmax, ymax = con.execute(
@@ -239,6 +282,20 @@ def write(
     )
     n_rows = con.execute(f"SELECT count(*) FROM '{sorted_path}'").fetchone()[0]
     log(f'  {n_rows:,} rows sorted, {time.time() - t0:.0f}s')
+    crs = geo.get('columns', {}).get(geometry, {}).get('crs')
+    degrees = crs is None or 'degree' in json.dumps(crs).lower()
+    zooms, polygons_from = guess_zooms(
+        con,
+        sorted_path,
+        geometry,
+        family,
+        zooms,
+        polygons_from,
+        (xmin, ymin, xmax, ymax),
+        degrees,
+        log,
+    )
+    band_plan = bands(zooms, polygons_from, family)
 
     # 2. which rows appear at which zoom: run `thinning` from the finest sampled zoom down
     sample_zooms = zooms[: zooms.index(polygons_from) + 1] if polygons_from in zooms else zooms
@@ -248,9 +305,6 @@ def write(
     rows = con.execute(
         f"SELECT {slim}, (hash(id) % 1000000007) / 1000000007.0 AS u FROM '{sorted_path}' ORDER BY id"
     ).fetch_arrow_table()
-    degrees = 'degree' in json.dumps(
-        geo.get('columns', {}).get(geometry, {}).get('crs', {})
-    ).lower() or (geo.get('columns', {}).get(geometry, {}).get('crs') is None)
     ctx = Context(tuple(zooms), sample_zooms[-1], 512, degrees)
     level = np.full(n_rows, len(sample_zooms) - 1, dtype=np.int32)
     overrides: dict[int, pa.Table] = {}
@@ -274,10 +328,6 @@ def write(
 
     # 3. schema and metadata, known before writing
     origin = (float(xmin), float(ymin))
-    degrees = (
-        geo.get('columns', {}).get(geometry, {}).get('crs') is None
-        or 'degree' in json.dumps(geo).lower()
-    )
     grids = {
         b['name']: (resolution(b['grid_zoom'], degrees=degrees), origin)
         for b in band_plan

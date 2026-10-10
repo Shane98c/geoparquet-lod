@@ -18,8 +18,7 @@ if __name__ == '__main__':
         src,
         out,
         thinning=only('rps_2011 > 0 AND rps_2047 > 0', drop_rate(2.5)),
-        zooms=range(2, 17),
-        polygons_from=13,
+        polygons_from=13,  # the map draws every footprint from z13
         carry=[('rps_2011', 'f32'), ('rps_2047', 'f32')],
         prefix_zoom=6,
     )

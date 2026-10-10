@@ -46,12 +46,19 @@ passes its count along. Built-ins are a few lines each and meant to be copied:
 There are no other knobs. Anything the built-ins cannot express is a short
 function of a table.
 
+Zooms are derived from the data unless given: the coarsest zoom is where the
+dataset's extent fits a tile, footprints start where the median feature spans
+a pixel, and the finest zoom is where the median vertex spacing reaches a
+pixel. The writer logs the guess; pass `zooms=` or `polygons_from=` to override.
+On Overture buildings that is zooms 0 to 14 with footprints from 12; on US
+counties, footprints at every zoom; on census tracts, footprints from 4.
+
 ## Quick start
 
 ```bash
 uv pip install -e .
 geoparquet-lod write buildings.parquet buildings.lod.parquet \
-  --thinning size:4+drop:2.5 --where "risk > 0" --carry risk:f32 --polygons-from 13
+  --thinning size:4+drop:2.5 --where "risk > 0" --carry risk:f32
 geoparquet-lod validate buildings.lod.parquet
 geoparquet-lod inspect buildings.lod.parquet
 ```
@@ -64,7 +71,6 @@ from geoparquet_lod import write, drop_rate, only
 write(
     "buildings.parquet", "buildings.lod.parquet",
     thinning=only("risk > 0", drop_rate(2.5)),
-    zooms=range(2, 17), polygons_from=13,
     carry=[("risk", "f32")],
 )
 ```

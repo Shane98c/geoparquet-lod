@@ -123,6 +123,15 @@ Optional refinement: read the candidate bbox pages first and keep only rows
 whose bbox intersects. Worth it when payloads are large relative to a bbox
 page, such as region outlines.
 
+## Choosing zooms
+
+The extension does not fix zooms. The reference writer derives them from the
+data when not given: the coarsest zoom is the one at which the dataset extent
+fits a tile; footprint bands start at the zoom where the median feature spans
+one pixel; the finest zoom is where the median vertex spacing reaches one
+pixel, capped at 18. Writers SHOULD record the zooms in `zooms` and MAY use
+any rule.
+
 ## Analysis readers
 
 Nothing here changes the primary geometry or attribute columns. `SELECT

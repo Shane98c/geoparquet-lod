@@ -53,13 +53,17 @@ def cli():
     '--where', default=None, help='SQL predicate; rows failing it are never shown zoomed out'
 )
 @click.option('--columns', multiple=True, help='extra source columns the thinning reads')
-@click.option('--zooms', default='2-16', show_default=True, help='inclusive range, e.g. 2-16')
+@click.option(
+    '--zooms',
+    default='auto',
+    show_default=True,
+    help="inclusive range such as 2-16, or 'auto' to derive from the data",
+)
 @click.option(
     '--polygons-from',
-    default=13,
-    type=int,
+    default='auto',
     show_default=True,
-    help='first zoom drawn as footprints; omit for points only',
+    help="first zoom drawn as footprints, or 'auto' (median feature spans a pixel)",
 )
 @click.option('--points-only', is_flag=True, help='draw points at every zoom')
 @click.option(
@@ -98,14 +102,18 @@ def write_cmd(
     temp_dir,
 ):
     """Write SRC (GeoParquet with WKB geometry) to OUT in the LOD columns layout."""
-    lo, _, hi = zooms.partition('-')
+    if zooms != 'auto':
+        lo, _, hi = zooms.partition('-')
+        zooms = range(int(lo), int(hi or lo) + 1)
+    if polygons_from != 'auto':
+        polygons_from = int(polygons_from)
     carried = [tuple(c.split(':', 1)) if ':' in c else c for c in carry]
     write(
         src,
         out,
         thinning=parse_thinning(thinning_spec, where),
         columns=columns,
-        zooms=range(int(lo), int(hi or lo) + 1),
+        zooms=zooms,
         polygons_from=None if points_only else polygons_from,
         carry=carried,
         geometry=geometry,
