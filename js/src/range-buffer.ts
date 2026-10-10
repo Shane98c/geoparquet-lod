@@ -1,0 +1,116 @@
+import type { RangeSource } from './reader.js'
+
+/**
+ * Range requests round-robin over `urls`, alternate hostnames for one file.
+ * Browsers allow six HTTP/1.1 connections per host, so spreading a tile's
+ * requests over several hosts lets them run in fewer waves.
+ */
+export const httpSource = async (urls: string[]): Promise<RangeSource> => {
+  const head = await fetch(urls[0], { method: 'HEAD', cache: 'no-store' })
+  const byteLength = Number(head.headers.get('Content-Length'))
+  if (!head.ok || !Number.isSafeInteger(byteLength)) {
+    throw new Error(`cannot size ${urls[0]}: ${head.status}`)
+  }
+  let next = 0
+  return {
+    byteLength,
+    async slice(start, end = byteLength, signal) {
+      const url = urls[next++ % urls.length]
+      const response = await fetch(url, {
+        headers: { Range: `bytes=${start}-${end - 1}` },
+        cache: 'no-store',
+        signal,
+      })
+      if (response.status !== 206) throw new Error(`range request failed: ${response.status}`)
+      return response.arrayBuffer()
+    },
+  }
+}
+
+/** The same S3 object under the hostnames the service answers on. A CDN makes this unnecessary. */
+export const s3Mirrors = (url: string): string[] => {
+  const match = /^https:\/\/([^./]+)\.s3\.([a-z0-9-]+)\.amazonaws\.com\/(.+)$/.exec(url)
+  if (!match) return [url]
+  const [, bucket, region, key] = match
+  return [url, `https://s3.${region}.amazonaws.com/${bucket}/${key}`, `https://${bucket}.s3-${region}.amazonaws.com/${key}`]
+}
+
+interface Pending {
+  start: number
+  end: number
+  signal?: AbortSignal
+  resolve: (buffer: ArrayBuffer) => void
+  reject: (error: unknown) => void
+}
+
+/**
+ * Merge slices requested within one microtask when the bytes between them are
+ * cheaper than another round trip. Page readers ask for pages one by one, and
+ * the pages a tile needs from one column are usually short runs with gaps.
+ */
+export const coalescing = (
+  source: RangeSource,
+  { maxGap = 32 * 1024, maxRun = 4 * 1024 * 1024 } = {},
+): RangeSource => {
+  let pending: Pending[] = []
+  let scheduled = false
+
+  const flush = () => {
+    scheduled = false
+    const batch = pending.sort((a, b) => a.start - b.start)
+    pending = []
+    let run: Pending[] = []
+    let runStart = 0
+    let runEnd = 0
+    const send = () => {
+      if (!run.length) return
+      const members = run
+      const [start, end] = [runStart, runEnd]
+      const controller = new AbortController()
+      const live = new Set(members.filter((m) => m.signal && !m.signal.aborted))
+      for (const m of live) {
+        m.signal!.addEventListener('abort', () => {
+          live.delete(m)
+          if (!live.size && members.every((x) => x.signal)) controller.abort()
+        })
+      }
+      source.slice(start, end, members.every((m) => m.signal) ? controller.signal : undefined).then(
+        (buffer) => {
+          for (const m of members) {
+            m.resolve(
+              m.start === start && m.end === end
+                ? buffer
+                : buffer.slice(m.start - start, m.end - start),
+            )
+          }
+        },
+        (error) => members.forEach((m) => m.reject(error)),
+      )
+      run = []
+    }
+    for (const p of batch) {
+      if (run.length && (p.start - runEnd > maxGap || Math.max(runEnd, p.end) - runStart > maxRun)) {
+        send()
+      }
+      if (!run.length) runStart = p.start
+      runEnd = run.length ? Math.max(runEnd, p.end) : p.end
+      run.push(p)
+    }
+    send()
+  }
+
+  return {
+    byteLength: source.byteLength,
+    slice(start, end = source.byteLength, signal) {
+      if (start === end) return Promise.resolve(new ArrayBuffer(0))
+      if (signal?.aborted) return Promise.reject(signal.reason ?? new DOMException('Aborted', 'AbortError'))
+      return new Promise<ArrayBuffer>((resolve, reject) => {
+        pending.push({ start, end, signal, resolve, reject })
+        if (!scheduled) {
+          scheduled = true
+          queueMicrotask(flush)
+        }
+      })
+    },
+  }
+}

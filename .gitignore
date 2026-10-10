@@ -1,0 +1,8 @@
+__pycache__/
+*.egg-info/
+.venv/
+dist/
+node_modules/
+js/dist/
+*.parquet
+.DS_Store

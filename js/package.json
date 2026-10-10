@@ -1,0 +1,28 @@
+{
+  "name": "geoparquet-lod",
+  "version": "0.2.0",
+  "description": "Read GeoParquet files with per-zoom display payload columns, and serve them as MapLibre vector tiles",
+  "type": "module",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./maplibre": { "types": "./dist/maplibre.d.ts", "import": "./dist/maplibre.js" }
+  },
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "measure": "node test/measure.mjs"
+  },
+  "dependencies": {
+    "@cogp/reader": "^2.1.4",
+    "hyparquet": "^1.27.1",
+    "hyparquet-compressors": "^1.1.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.8.2"
+  }
+}
