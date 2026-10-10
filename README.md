@@ -100,5 +100,5 @@ Bytes include page-index reads; they are cached for the session.
 
 ## Status
 
-Version 0.2.0 of the metadata. The layout is settled; the payload encodings
-are ours and are the part a standard would replace. See `spec/SPEC.md`.
+Draft. The layout is settled; the payload encodings are ours and are the part
+a standard would replace. See `spec/SPEC.md`.

@@ -44,7 +44,6 @@ from .quantize import render_lines, render_polygons, resolution
 from .thinning import Context, Thin, describe
 
 LOD_KEY = 'lod_columns'
-LOD_VERSION = '0.2.0'
 BBOX_FIELD = pa.field(
     'bbox',
     pa.struct(
@@ -405,7 +404,6 @@ def write(
         'bbox': {k: ['bbox', k] for k in ('xmin', 'ymin', 'xmax', 'ymax')}
     }
     geo[LOD_KEY] = {
-        'version': LOD_VERSION,
         'column': 'lod',
         'order': 'hilbert',
         'zooms': zooms,

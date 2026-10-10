@@ -1,8 +1,8 @@
 # LOD columns
 
-*Version 0.2.0. A layout and metadata contract for GeoParquet files that
-serve a zoomable map directly. Implemented by the writer and reader in this
-repository.*
+*A layout and metadata contract for GeoParquet files that serve a zoomable
+map directly. Implemented by the writer and reader in this repository. Draft;
+not yet versioned.*
 
 ## Goal
 
@@ -61,7 +61,6 @@ Under the `geo` key, a `lod_columns` object:
 
 | field | type | meaning |
 | --- | --- | --- |
-| `version` | string | `0.2.0`. Readers MUST reject other major or minor versions. |
 | `column` | string | name of the payload struct column |
 | `order` | string | `hilbert` |
 | `zooms` | int[] | every zoom the file serves, ascending |

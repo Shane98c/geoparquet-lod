@@ -17,7 +17,6 @@ import type { AttributeSpec } from './payload.js'
 export type Bbox = [number, number, number, number]
 
 export const LOD_KEY = 'lod_columns'
-export const LOD_VERSION = '0.2.0'
 
 export interface Lod {
   name: string
@@ -28,7 +27,6 @@ export interface Lod {
 }
 
 export interface LodMetadata {
-  version: string
   column: string
   order: string
   zooms: number[]
@@ -85,9 +83,6 @@ export class LodReader {
     )
     const lod = geo[LOD_KEY] as LodMetadata | undefined
     if (!lod) throw new Error(`file has no geo.${LOD_KEY} metadata`)
-    if (lod.version !== LOD_VERSION) {
-      throw new Error(`${LOD_KEY} version ${lod.version} is not ${LOD_VERSION}`)
-    }
     for (const [name, child] of Object.entries(lod.lods)) {
       if (!['point_f32', 'polygon_varint', 'line_varint'].includes(child.geometry)) {
         throw new Error(`lod ${name} uses unknown geometry encoding ${child.geometry}`)

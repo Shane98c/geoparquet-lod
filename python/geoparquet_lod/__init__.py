@@ -13,11 +13,10 @@ from .thinning import (
     size_threshold,
 )
 from .validate import ValidationError, inspect, validate
-from .writer import LOD_KEY, LOD_VERSION, write
+from .writer import LOD_KEY, write
 
 __all__ = [
     'LOD_KEY',
-    'LOD_VERSION',
     'Attribute',
     'Context',
     'Thin',
