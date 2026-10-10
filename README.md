@@ -20,22 +20,38 @@ reading data. One nullable binary column per zoom band holds, for exactly the
 rows shown at those zooms, the carried attributes and the geometry quantized
 to that band's grid.
 
-Which rows appear at which zoom is a *thinning function*. Three are built in:
+Which rows appear at which zoom is a *thinning function*, one shape:
+
+```python
+def thin(rows: pa.Table, zoom: int, ctx: Context) -> pa.Table
+```
+
+The writer calls it once per zoom from fine to coarse, each time with the
+rows kept at the zoom just finer, and it returns the subset to keep. Nesting
+is guaranteed by construction. `rows` carries `id`, centroid, bbox diagonal, a
+stable per-row uniform `u`, and the carried attributes; returning a carried
+column overrides its value in that zoom's payload, which is how a cluster
+passes its count along. Built-ins are a few lines each and meant to be copied:
 
 | thinning | rule | good for |
 | --- | --- | --- |
-| `density_budget(60_000, where=...)` | keep a uniform fraction per zoom so the busiest tile holds at most N | points, small polygons |
-| `size_threshold(pixels=4)` | show a feature once it spans N pixels | polygons, lines |
-| `importance(order_by, per_tile)` | keep the top N per tile by an expression | named places, ranked facilities |
+| `drop_rate(2.5)` | each zoom coarser keeps 1/rate, uniformly, so relative density survives (tippecanoe `-r`); the default | points, small polygons |
+| `size_threshold(4)` | keep a feature while it spans 4 pixels | polygons, lines |
+| `importance('population', 300)` | keep the top N per tile by a column | named places, ranked facilities |
+| `cluster(8, count='count')` | one representative per 8 px cell carrying how many it stands for | dense points |
+| `density_budget(60_000)` | cap the busiest tile; flattens dense places | hard byte ceilings |
+| `only('risk > 0', inner)` | restrict eligibility before `inner` | partial datasets |
+| `combine(a, b)` | keep what any part keeps | size plus sample, etc. |
 
-Combine them with `combine(...)`, or write your own `custom(fn)`.
+There are no other knobs. Anything the built-ins cannot express is a short
+function of a table.
 
 ## Quick start
 
 ```bash
 uv pip install -e .
 geoparquet-lod write buildings.parquet buildings.lod.parquet \
-  --thinning "density:60000:risk > 0" --carry risk:f32 --polygons-from 13
+  --thinning size:4+drop:2.5 --where "risk > 0" --carry risk:f32 --polygons-from 13
 geoparquet-lod validate buildings.lod.parquet
 geoparquet-lod inspect buildings.lod.parquet
 ```
@@ -43,11 +59,11 @@ geoparquet-lod inspect buildings.lod.parquet
 Or from Python:
 
 ```python
-from geoparquet_lod import write, density_budget
+from geoparquet_lod import write, drop_rate, only
 
 write(
     "buildings.parquet", "buildings.lod.parquet",
-    thinning=density_budget(60_000, where="risk > 0"),
+    thinning=only("risk > 0", drop_rate(2.5)),
     zooms=range(2, 17), polygons_from=13,
     carry=[("risk", "f32")],
 )

@@ -1,7 +1,17 @@
 """GeoParquet with per-zoom display payload columns."""
 
 from .encoding import Attribute
-from .thinning import Thinning, combine, custom, density_budget, importance, size_threshold
+from .thinning import (
+    Context,
+    Thin,
+    cluster,
+    combine,
+    density_budget,
+    drop_rate,
+    importance,
+    only,
+    size_threshold,
+)
 from .validate import ValidationError, inspect, validate
 from .writer import LOD_KEY, LOD_VERSION, write
 
@@ -9,13 +19,16 @@ __all__ = [
     'LOD_KEY',
     'LOD_VERSION',
     'Attribute',
-    'Thinning',
+    'Context',
+    'Thin',
     'ValidationError',
+    'cluster',
     'combine',
-    'custom',
     'density_budget',
+    'drop_rate',
     'importance',
     'inspect',
+    'only',
     'size_threshold',
     'validate',
     'write',

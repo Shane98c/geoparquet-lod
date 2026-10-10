@@ -1,184 +1,213 @@
-"""Which rows are shown at which zoom.
+"""Which rows are shown at which zoom, as one function shape.
 
-A thinning assigns every row the coarsest zoom at which it appears; it is then
-shown at every finer zoom too. Rows assigned nothing are never drawn, which is
-fine for analysis-only rows. The writer calls `thinning.assign(con, zooms)`
-with a DuckDB connection holding a temp table `rows` and expects it to fill
-`rows.level` with a zoom index (0 = coarsest) or NULL.
+    def thin(rows: pa.Table, zoom: int, ctx: Context) -> pa.Table
 
-`rows` has: id, cx, cy (centroid), diag (bbox diagonal, CRS units), and every
-column the thinning or the payload asked for. Built-ins cover the common cases;
-anything else is a short SQL or Python function.
+The writer starts with every row at the finest sampled zoom and calls `thin`
+once per coarser zoom, passing the rows kept at the zoom just finer. The
+function returns the subset to keep at this zoom. Nesting (shown at z means
+shown at every finer zoom) is therefore guaranteed by construction, and a
+rule only ever answers "of these, which survive one step coarser?".
+
+`rows` always has: `id`, `cx`, `cy` (centroid), `diag` (bbox diagonal in CRS
+units), `u` (a uniform in [0, 1) that is stable per row and across rebuilds),
+and every carried attribute and extra column the writer was told to load.
+A returned table must keep `id`; any carried attribute column it includes
+overrides that attribute in this zoom's payload, which is how accumulated
+values such as cluster counts reach the renderer.
+
+The built-ins below are small enough to read and copy. Write your own when
+they do not fit; the writer does not care how `thin` decides.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 
-import duckdb
 import numpy as np
 import pyarrow as pa
+import pyarrow.compute as pc
 
 from .quantize import resolution
 
-TILE_SIZE = 512
+Thin = Callable[[pa.Table, int, 'Context'], pa.Table]
+RESERVED = ('id', 'cx', 'cy', 'diag', 'u')
 
 
-def _webmerc_tile_cell(n: int) -> str:
-    return (
-        f'floor((cx + 180) / 360 * {n}), '
-        f'floor((1 - ln(tan(radians(cy)) + 1 / cos(radians(cy))) / pi()) / 2 * {n})'
-    )
+@dataclass(frozen=True)
+class Context:
+    """What a thinning may need beyond the rows: the zoom list, the finest
+    sampled zoom, the tile size, and whether CRS units are degrees."""
+
+    zooms: tuple[int, ...]
+    finest_zoom: int
+    tile_size: int = 512
+    degrees: bool = True
+
+    def resolution(self, zoom: int) -> float:
+        """CRS units per pixel at `zoom`."""
+        return resolution(zoom, self.tile_size, self.degrees)
+
+    def tile_of(self, rows: pa.Table, zoom: int) -> np.ndarray:
+        """Web Mercator tile id (x * 2^zoom + y) of each row's centroid."""
+        n = 2**zoom
+        cx = rows.column('cx').to_numpy()
+        cy = np.clip(rows.column('cy').to_numpy(), -85.05, 85.05)
+        tx = np.floor((cx + 180) / 360 * n)
+        lat = np.radians(cy)
+        ty = np.floor((1 - np.log(np.tan(lat) + 1 / np.cos(lat)) / np.pi) / 2 * n)
+        return (tx * n + ty).astype(np.int64)
+
+    def cell_of(self, rows: pa.Table, zoom: int, pixels: float) -> np.ndarray:
+        """Id of a `pixels`-wide grid cell at `zoom` containing each centroid."""
+        size = pixels * self.resolution(zoom)
+        cx = rows.column('cx').to_numpy()
+        cy = rows.column('cy').to_numpy()
+        ix = np.floor((cx + 180) / size).astype(np.int64)
+        iy = np.floor((cy + 90) / size).astype(np.int64)
+        return ix * 4_000_000_000 + iy
 
 
-class Thinning:
-    """Base: subclasses implement `assign`; `columns` lists source columns they read."""
-
-    columns: tuple[str, ...] = ()
-
-    def assign(self, con: duckdb.DuckDBPyConnection, zooms: list[int]) -> None:
-        raise NotImplementedError
-
-    def describe(self) -> dict:
-        return {'kind': type(self).__name__}
+def _mask(rows: pa.Table, keep: np.ndarray) -> pa.Table:
+    return rows.filter(pa.array(np.asarray(keep, dtype=bool)))
 
 
-class density_budget(Thinning):
-    """Tippecanoe-style sampling: at each zoom keep a uniform fraction of the
-    eligible rows so the busiest tile holds at most `budget` of them. Rows kept
-    at a coarse zoom stay kept. `where` limits eligibility, for example
-    `'risk > 0'`; `budget_below` applies a smaller budget to zooms under 4,
-    where tiles cover whole countries."""
+def drop_rate(rate: float = 2.5) -> Thin:
+    """Tippecanoe's `-r`: each zoom coarser keeps 1/`rate` of the rows,
+    uniformly, so relative density is preserved everywhere. The default."""
 
-    def __init__(
-        self, budget: int = 60_000, where: str | None = None, budget_below: int | None = None
-    ):
-        self.budget = budget
-        self.where = where
-        self.budget_below = budget_below if budget_below is not None else budget // 3
+    def thin(rows, zoom, ctx):
+        keep = rows.column('u').to_numpy() < rate ** (zoom - ctx.finest_zoom)
+        return _mask(rows, keep)
 
-    def assign(self, con, zooms):
-        finest = len(zooms) - 1
-        con.execute('ALTER TABLE rows ADD COLUMN IF NOT EXISTS level INTEGER')
-        con.execute(f'UPDATE rows SET level = {finest}')
-        con.execute('ALTER TABLE rows ADD COLUMN IF NOT EXISTS u DOUBLE')
-        con.execute('UPDATE rows SET u = random()')
-        eligible = f'({self.where})' if self.where else 'TRUE'
-        survival = 1.0
-        for i in range(finest - 1, -1, -1):
-            n = 2 ** zooms[i]
-            busiest = con.execute(f"""
-                SELECT max(c) FROM (
-                    SELECT count(*) AS c FROM rows
-                    WHERE level <= {i} OR ({eligible} AND u < {survival})
-                    GROUP BY {_webmerc_tile_cell(n)}
-                )
-            """).fetchone()[0]
-            budget = self.budget if zooms[i] >= 4 else self.budget_below
-            survival *= min(1.0, budget / max(busiest or 1, 1))
-            con.execute(
-                f'UPDATE rows SET level = {i} WHERE level > {i} AND {eligible} AND u < {survival}'
-            )
-
-    def describe(self):
-        return {'kind': 'density_budget', 'budget': self.budget, 'where': self.where}
+    thin.__name__ = f'drop_rate({rate})'
+    return thin
 
 
-class size_threshold(Thinning):
-    """Show a feature from the first zoom where its bbox diagonal spans at least
-    `pixels` pixels. The rule lines, polygons and COGP use."""
+def size_threshold(pixels: float = 4.0) -> Thin:
+    """Keep a feature while its bbox diagonal still spans `pixels` pixels."""
 
-    def __init__(self, pixels: float = 4.0, degrees: bool = True):
-        self.pixels = pixels
-        self.degrees = degrees
+    def thin(rows, zoom, ctx):
+        keep = rows.column('diag').to_numpy() >= pixels * ctx.resolution(zoom)
+        return _mask(rows, keep)
 
-    def assign(self, con, zooms):
-        finest = len(zooms) - 1
-        con.execute('ALTER TABLE rows ADD COLUMN IF NOT EXISTS level INTEGER')
-        con.execute(f'UPDATE rows SET level = {finest}')
-        for i, zoom in reversed(list(enumerate(zooms))):
-            threshold = self.pixels * resolution(zoom, TILE_SIZE, self.degrees)
-            con.execute(f'UPDATE rows SET level = {i} WHERE diag >= {threshold}')
-
-    def describe(self):
-        return {'kind': 'size_threshold', 'pixels': self.pixels}
+    thin.__name__ = f'size_threshold({pixels})'
+    return thin
 
 
-class importance(Thinning):
-    """Rank rows by an expression (higher first) and keep the top `per_tile`
-    per tile at each zoom. Good for named places, large facilities, anything
-    with a natural priority. Combine with `density_budget` through `combine`."""
+def density_budget(budget: int = 60_000) -> Thin:
+    """Keep a uniform fraction so the busiest tile at this zoom holds at most
+    `budget` rows. Flattens the densest places; use when bytes per tile matter
+    more than density character."""
 
-    columns: tuple[str, ...] = ()
+    def thin(rows, zoom, ctx):
+        tiles = ctx.tile_of(rows, zoom)
+        _, counts = np.unique(tiles, return_counts=True)
+        busiest = int(counts.max()) if len(counts) else 1
+        fraction = min(1.0, budget / max(busiest, 1))
+        keep = rows.column('u').to_numpy() < fraction
+        return _mask(rows, keep)
 
-    def __init__(self, order_by: str, per_tile: int = 1000, columns: tuple[str, ...] = ()):
-        self.order_by = order_by
-        self.per_tile = per_tile
-        self.columns = columns
-
-    def assign(self, con, zooms):
-        finest = len(zooms) - 1
-        con.execute('ALTER TABLE rows ADD COLUMN IF NOT EXISTS level INTEGER')
-        con.execute(f'UPDATE rows SET level = {finest}')
-        for i in range(finest - 1, -1, -1):
-            n = 2 ** zooms[i]
-            con.execute(f"""
-                UPDATE rows SET level = {i} WHERE id IN (
-                    SELECT id FROM (
-                        SELECT id, row_number() OVER (
-                            PARTITION BY {_webmerc_tile_cell(n)} ORDER BY ({self.order_by}) DESC
-                        ) AS rk FROM rows
-                    ) WHERE rk <= {self.per_tile}
-                )
-            """)
-
-    def describe(self):
-        return {'kind': 'importance', 'order_by': self.order_by, 'per_tile': self.per_tile}
+    thin.__name__ = f'density_budget({budget})'
+    return thin
 
 
-class combine(Thinning):
-    """Run several thinnings and keep each row's coarsest assignment."""
+def importance(column: str, per_tile: int = 1000, descending: bool = True) -> Thin:
+    """Keep the top `per_tile` rows of each tile by `column`."""
 
-    def __init__(self, *parts: Thinning):
-        self.parts = parts
-        self.columns = tuple(c for p in parts for c in p.columns)
+    def thin(rows, zoom, ctx):
+        tiles = ctx.tile_of(rows, zoom)
+        values = rows.column(column).to_numpy(zero_copy_only=False).astype(float)
+        values = np.where(np.isnan(values), -np.inf, values)
+        order = np.lexsort((-values if descending else values, tiles))
+        sorted_tiles = tiles[order]
+        starts = np.r_[0, np.flatnonzero(np.diff(sorted_tiles)) + 1]
+        sizes = np.diff(np.r_[starts, len(order)])
+        rank = np.arange(len(order)) - np.repeat(starts, sizes)
+        keep = np.zeros(len(order), dtype=bool)
+        keep[order] = rank < per_tile
+        return _mask(rows, keep)
 
-    def assign(self, con, zooms):
-        levels = []
-        for k, part in enumerate(self.parts):
-            part.assign(con, zooms)
-            con.execute(f'ALTER TABLE rows ADD COLUMN IF NOT EXISTS level_{k} INTEGER')
-            con.execute(f'UPDATE rows SET level_{k} = level')
-            levels.append(f'level_{k}')
-        con.execute(f'UPDATE rows SET level = least({", ".join(levels)})')
-
-    def describe(self):
-        return {'kind': 'combine', 'parts': [p.describe() for p in self.parts]}
+    thin.__name__ = f'importance({column}, {per_tile})'
+    return thin
 
 
-class custom(Thinning):
-    """A Python function `fn(table: pyarrow.Table, zooms) -> np.ndarray` returning
-    the zoom index per row (or -1 for never). `table` holds id, cx, cy, diag
-    and `columns`. Simple to write; loads the slim table into memory."""
+def cluster(pixels: float = 8.0, count: str = 'count') -> Thin:
+    """Collapse rows within `pixels` of each other into one representative
+    carrying their total in attribute `count`, which must be a carried
+    attribute. Counts accumulate across zooms because each call sees the
+    previous zoom's counts."""
 
-    def __init__(
-        self, fn: Callable[[pa.Table, list[int]], np.ndarray], columns: tuple[str, ...] = ()
-    ):
-        self.fn = fn
-        self.columns = columns
-
-    def assign(self, con, zooms):
-        cols = ', '.join(['id', 'cx', 'cy', 'diag', *self.columns])
-        table = con.execute(f'SELECT {cols} FROM rows ORDER BY id').fetch_arrow_table()
-        level = np.asarray(self.fn(table, zooms), dtype=np.int32)
-        assigned = pa.table({'id': table.column('id'), 'level_new': pa.array(level)})
-        con.register('assigned', assigned)
-        con.execute('ALTER TABLE rows ADD COLUMN IF NOT EXISTS level INTEGER')
-        con.execute(
-            'UPDATE rows SET level = (SELECT CASE WHEN level_new < 0 THEN NULL ELSE level_new END '
-            'FROM assigned WHERE assigned.id = rows.id)'
+    def thin(rows, zoom, ctx):
+        cells = ctx.cell_of(rows, zoom, pixels)
+        prior = (
+            rows.column(count).to_numpy(zero_copy_only=False).astype(np.int64)
+            if count in rows.column_names
+            else np.ones(len(cells), dtype=np.int64)
         )
-        con.unregister('assigned')
+        prior = np.where(prior <= 0, 1, prior)
+        order = np.argsort(cells, kind='stable')
+        sorted_cells = cells[order]
+        starts = (
+            np.r_[0, np.flatnonzero(np.diff(sorted_cells)) + 1] if len(order) else np.zeros(0, int)
+        )
+        totals = np.add.reduceat(prior[order], starts) if len(order) else np.zeros(0, np.int64)
+        kept = rows.take(pa.array(order[starts]))
+        if count in kept.column_names:
+            kept = kept.set_column(kept.schema.get_field_index(count), count, pa.array(totals))
+        else:
+            kept = kept.append_column(count, pa.array(totals))
+        return kept
 
-    def describe(self):
-        return {'kind': 'custom', 'fn': getattr(self.fn, '__name__', 'fn')}
+    thin.__name__ = f'cluster({pixels})'
+    return thin
+
+
+def only(predicate: Callable[[pa.Table], np.ndarray] | str, inner: Thin) -> Thin:
+    """Apply `inner` to the rows passing `predicate` and drop the rest. The
+    predicate is a function of the table returning a boolean array, or a
+    DuckDB SQL expression over the row columns, e.g. `'risk > 0'`."""
+
+    def thin(rows, zoom, ctx):
+        if isinstance(predicate, str):
+            import duckdb
+
+            con = duckdb.connect()
+            con.register('rows', rows)
+            keep = next(iter(con.execute(f'SELECT ({predicate}) FROM rows').fetchnumpy().values()))
+            keep = np.asarray(keep, dtype=bool)
+        else:
+            keep = np.asarray(predicate(rows), dtype=bool)
+        return inner(_mask(rows, keep), zoom, ctx)
+
+    thin.__name__ = f'only({predicate!r}, {getattr(inner, "__name__", "thin")})'
+    return thin
+
+
+def combine(*parts: Thin) -> Thin:
+    """Keep a row if any part keeps it; attribute overrides from later parts win."""
+
+    def thin(rows, zoom, ctx):
+        kept = [p(rows, zoom, ctx) for p in parts]
+        ids = pc.unique(pa.concat_arrays([k.column('id').combine_chunks() for k in kept]))
+        base = rows.filter(pc.is_in(rows.column('id'), value_set=ids))
+        for k in kept:
+            extra = [c for c in k.column_names if c not in RESERVED]
+            if not extra:
+                continue
+            idx = pc.index_in(base.column('id'), value_set=k.column('id').combine_chunks())
+            for c in extra:
+                values = pc.take(k.column(c).combine_chunks(), idx)
+                if c in base.column_names:
+                    merged = pc.if_else(pc.is_valid(values), values, base.column(c))
+                    base = base.set_column(base.schema.get_field_index(c), c, merged)
+                else:
+                    base = base.append_column(c, values)
+        return base
+
+    thin.__name__ = 'combine(' + ', '.join(getattr(p, '__name__', 'thin') for p in parts) + ')'
+    return thin
+
+
+def describe(thin: Thin) -> dict:
+    return {'name': getattr(thin, '__name__', 'thin')}

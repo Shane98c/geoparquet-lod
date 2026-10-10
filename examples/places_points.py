@@ -1,8 +1,8 @@
 """Point features with a natural importance: the biggest first.
 
 Points at every zoom (no footprint zoom). Zoomed out, each tile keeps its
-top 300 by population; `density_budget` on its own would sample uniformly
-and could drop a capital in favour of a village.
+top 300 by population; `drop_rate` on its own would sample uniformly and
+could drop a capital in favour of a village.
 
     uv run python examples/places_points.py places.parquet out.parquet
 """
@@ -17,7 +17,7 @@ if __name__ == '__main__':
     write(
         src,
         out,
-        thinning=importance(order_by='population', per_tile=300, columns=('population',)),
+        thinning=importance('population', per_tile=300),
         zooms=range(0, 15),
         polygons_from=None,
         carry=[('name', 'utf8'), ('population', 'u32')],

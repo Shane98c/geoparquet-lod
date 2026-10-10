@@ -40,7 +40,7 @@ from .encoding import (
     polygon_tree_bytes,
 )
 from .quantize import render_polygons, resolution
-from .thinning import Thinning
+from .thinning import Context, Thin, describe
 
 LOD_KEY = 'lod_columns'
 LOD_VERSION = '0.2.0'
@@ -142,6 +142,22 @@ def _read_schema(src: str) -> pa.Schema:
     return pq.read_schema(src)
 
 
+def _with_overrides(table: pa.Table, ids: np.ndarray, override: pa.Table) -> pa.Table:
+    """Replace carried attribute values for rows that a thinning overrode at this zoom."""
+    import pyarrow.compute as pc
+
+    idx = pc.index_in(pa.array(ids), value_set=override.column('id').combine_chunks())
+    for name in override.column_names:
+        if name == 'id' or name not in table.column_names:
+            continue
+        values = pc.take(override.column(name).combine_chunks(), idx)
+        merged = pc.if_else(
+            pc.is_valid(values), values.cast(table.column(name).type), table.column(name)
+        )
+        table = table.set_column(table.schema.get_field_index(name), name, merged)
+    return table
+
+
 def _render(args):
     wkb, cx, cy, grids = args
     return [
@@ -153,7 +169,8 @@ def write(
     src: str,
     out: str | Path,
     *,
-    thinning: Thinning,
+    thinning: Thin,
+    columns=(),
     zooms=range(2, 17),
     polygons_from: int | None = 13,
     carry=(),
@@ -223,18 +240,36 @@ def write(
     n_rows = con.execute(f"SELECT count(*) FROM '{sorted_path}'").fetchone()[0]
     log(f'  {n_rows:,} rows sorted, {time.time() - t0:.0f}s')
 
-    # 2. which rows appear at which zoom
-    slim = ', '.join(
-        dict.fromkeys(['id', 'cx', 'cy', 'diag', *[a.name for a in attributes], *thinning.columns])
-    )
-    con.execute(f"CREATE TEMP TABLE rows AS SELECT {slim} FROM '{sorted_path}'")
-    # every row is drawn from the first footprint zoom, so thinning only decides the zooms below it
+    # 2. which rows appear at which zoom: run `thinning` from the finest sampled zoom down
     sample_zooms = zooms[: zooms.index(polygons_from) + 1] if polygons_from in zooms else zooms
-    thinning.assign(con, sample_zooms)
+    slim = ', '.join(
+        dict.fromkeys(['id', 'cx', 'cy', 'diag', *[a.name for a in attributes], *columns])
+    )
+    rows = con.execute(
+        f"SELECT {slim}, (hash(id) % 1000000007) / 1000000007.0 AS u FROM '{sorted_path}' ORDER BY id"
+    ).fetch_arrow_table()
+    degrees = 'degree' in json.dumps(
+        geo.get('columns', {}).get(geometry, {}).get('crs', {})
+    ).lower() or (geo.get('columns', {}).get(geometry, {}).get('crs') is None)
+    ctx = Context(tuple(zooms), sample_zooms[-1], 512, degrees)
+    level = np.full(n_rows, len(sample_zooms) - 1, dtype=np.int32)
+    overrides: dict[int, pa.Table] = {}
+    kept = rows
+    for i in range(len(sample_zooms) - 2, -1, -1):
+        kept = thinning(kept, sample_zooms[i], ctx)
+        ids = kept.column('id').to_numpy()
+        level[ids - 1] = i
+        carried = [a.name for a in attributes if a.name in kept.column_names]
+        if carried:
+            overrides[i] = kept.select(['id', *carried])
+    con.register(
+        'levels', pa.table({'id': np.arange(1, n_rows + 1, dtype=np.int64), 'level': level})
+    )
+    con.execute('CREATE TEMP TABLE rows AS SELECT * FROM levels')
     counts = dict(con.execute('SELECT level, count(*) FROM rows GROUP BY 1 ORDER BY 1').fetchall())
     log(
         '  rows entering at each zoom: '
-        + ', '.join(f'z{zooms[k]}={v:,}' for k, v in counts.items() if k is not None)
+        + ', '.join(f'z{zooms[k]}={v:,}' for k, v in counts.items())
     )
 
     # 3. schema and metadata, known before writing
@@ -276,7 +311,7 @@ def write(
         'tile_size': 512,
         'prefix': None if prefix_end < 0 else {'zoom': prefix_zoom, 'row_group_end': prefix_end},
         'attributes': [{'name': a.name, 'type': a.type} for a in attributes],
-        'thinning': thinning.describe(),
+        'thinning': describe(thinning),
         'bands': {
             b['name']: {
                 'zooms': b['zooms'],
@@ -333,12 +368,19 @@ def write(
         attrs = pack_attributes(table, attributes)
         points = point_bytes(table.column('cx').to_numpy(), table.column('cy').to_numpy())
         rendered = fut.result() if fut is not None else []
+        ids = table.column('id').to_numpy()
         arrays = []
         k = 0
         for b in band_plan:
             mask = level <= band_level[b['name']]
             if b['geometry'] == POINT_GEOMETRY:
-                arrays.append(interleave(table.num_rows, [attrs, points], mask))
+                z_index = zooms.index(b['zooms'][0])
+                band_attrs = attrs
+                if z_index in overrides:
+                    band_attrs = pack_attributes(
+                        _with_overrides(table, ids, overrides[z_index]), attributes
+                    )
+                arrays.append(interleave(table.num_rows, [band_attrs, points], mask))
             else:
                 arrays.append(interleave(table.num_rows, [attrs, rendered[k]], mask))
                 k += 1

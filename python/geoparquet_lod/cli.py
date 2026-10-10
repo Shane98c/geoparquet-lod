@@ -11,18 +11,27 @@ from .validate import ValidationError, inspect, validate
 from .writer import write
 
 
-def parse_thinning(spec: str) -> th.Thinning:
-    """`density:60000`, `density:60000:risk > 0`, `size:4`, `importance:population:500`."""
-    kind, _, rest = spec.partition(':')
-    if kind == 'density':
-        budget, _, where = rest.partition(':')
-        return th.density_budget(int(budget or 60_000), where or None)
-    if kind == 'size':
-        return th.size_threshold(float(rest or 4))
-    if kind == 'importance':
-        order_by, _, per_tile = rest.partition(':')
-        return th.importance(order_by, int(per_tile or 1000))
-    raise click.BadParameter(f'unknown thinning {spec!r}; use density, size or importance')
+def parse_thinning(spec: str, where: str | None) -> th.Thin:
+    """`drop[:rate]`, `density[:budget]`, `size[:pixels]`, `importance:column[:per_tile]`,
+    `cluster[:pixels]`; `+` combines, e.g. `size:4+drop:2.5`. `where` restricts eligibility."""
+    parts = []
+    for part in spec.split('+'):
+        kind, _, rest = part.partition(':')
+        if kind == 'drop':
+            parts.append(th.drop_rate(float(rest or 2.5)))
+        elif kind == 'density':
+            parts.append(th.density_budget(int(rest or 60_000)))
+        elif kind == 'size':
+            parts.append(th.size_threshold(float(rest or 4)))
+        elif kind == 'importance':
+            column, _, per_tile = rest.partition(':')
+            parts.append(th.importance(column, int(per_tile or 1000)))
+        elif kind == 'cluster':
+            parts.append(th.cluster(float(rest or 8)))
+        else:
+            raise click.BadParameter(f'unknown thinning {part!r}')
+    thin = parts[0] if len(parts) == 1 else th.combine(*parts)
+    return th.only(where, thin) if where else thin
 
 
 @click.group()
@@ -36,10 +45,14 @@ def cli():
 @click.option(
     '--thinning',
     'thinning_spec',
-    default='density:60000',
+    default='drop:2.5',
     show_default=True,
-    help='density[:budget[:where]] | size[:pixels] | importance:expr[:per_tile]',
+    help='drop[:rate] | density[:budget] | size[:pixels] | importance:column[:n] | cluster[:px]; join with +',
 )
+@click.option(
+    '--where', default=None, help='SQL predicate; rows failing it are never shown zoomed out'
+)
+@click.option('--columns', multiple=True, help='extra source columns the thinning reads')
 @click.option('--zooms', default='2-16', show_default=True, help='inclusive range, e.g. 2-16')
 @click.option(
     '--polygons-from',
@@ -69,6 +82,8 @@ def write_cmd(
     src,
     out,
     thinning_spec,
+    where,
+    columns,
     zooms,
     polygons_from,
     points_only,
@@ -88,7 +103,8 @@ def write_cmd(
     write(
         src,
         out,
-        thinning=parse_thinning(thinning_spec),
+        thinning=parse_thinning(thinning_spec, where),
+        columns=columns,
         zooms=range(int(lo), int(hi or lo) + 1),
         polygons_from=None if points_only else polygons_from,
         carry=carried,
