@@ -53,6 +53,14 @@ pixel. The writer logs the guess; pass `zooms=` or `polygons_from=` to override.
 On Overture buildings that is zooms 0 to 14 with footprints from 12; on US
 counties, footprints at every zoom; on census tracts, footprints from 4.
 
+## Geometry
+
+Points, lines and polygons, one family per file. Below the shape zoom every
+family is drawn as a point; from it up, lines and polygons carry a quantized
+copy per band. When the full-detail shapes of the whole dataset are small
+(16 MB by default) a single band serves every zoom instead of copies, which
+is what happens for things like counties.
+
 ## Quick start
 
 ```bash

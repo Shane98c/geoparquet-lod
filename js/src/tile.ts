@@ -76,9 +76,10 @@ export const renderTile = async (
     )
   }
   const builder = new PolygonBuilder()
+  const type = band.geometry === 'line_varint' ? 5 : 6
   values.forEach((v, i) => {
     const { values: attrs, pos } = decodeAttributes(v, spec)
-    builder.add(v, pos)
+    builder.add(v, pos, type)
     keptRows.push(rows[i])
     for (const n of names) columns[n].push(attrs[n])
   })

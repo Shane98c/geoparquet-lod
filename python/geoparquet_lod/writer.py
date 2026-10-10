@@ -31,6 +31,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from .encoding import (
+    LINE_GEOMETRY,
     POINT_GEOMETRY,
     POLYGON_GEOMETRY,
     Attribute,
@@ -39,7 +40,7 @@ from .encoding import (
     point_bytes,
     polygon_tree_bytes,
 )
-from .quantize import render_polygons, resolution
+from .quantize import render_lines, render_polygons, resolution
 from .thinning import Context, Thin, describe
 
 LOD_KEY = 'lod_columns'
@@ -91,26 +92,38 @@ def infer_attributes(schema: pa.Schema, carry) -> list[Attribute]:
     return out
 
 
-def bands(zooms: list[int], polygons_from: int | None, geometry_family: str) -> list[dict]:
-    """Zoom bands: one point band per zoom below `polygons_from`, then pairs of
-    zooms sharing a polygon band on the finer zoom's grid. Point datasets get
-    point bands at every zoom."""
-    out = []
+def bands(
+    zooms: list[int],
+    polygons_from: int | None,
+    geometry_family: str,
+    single_shape_band: bool = False,
+) -> list[dict]:
+    """Zoom bands: one point band per zoom below `polygons_from` (the sampled
+    set changes every zoom), then shape bands from `polygons_from` up: pairs of
+    zooms sharing one quantized copy on the finer zoom's grid, or a single band
+    for every zoom when the full-detail payload is small enough that copies
+    would cost more than they save. Point datasets get point bands at every zoom."""
+    point = lambda z: {'name': f'p{z}', 'zooms': [z], 'geometry': POINT_GEOMETRY, 'grid_zoom': None}  # noqa: E731
     if geometry_family == 'point' or polygons_from is None:
-        return [
-            {'name': f'p{z}', 'zooms': [z], 'geometry': POINT_GEOMETRY, 'grid_zoom': None}
-            for z in zooms
-        ]
-    for z in zooms:
-        if z < polygons_from:
-            out.append(
-                {'name': f'p{z}', 'zooms': [z], 'geometry': POINT_GEOMETRY, 'grid_zoom': None}
-            )
+        return [point(z) for z in zooms]
+    shape, prefix = (LINE_GEOMETRY, 'l') if geometry_family == 'line' else (POLYGON_GEOMETRY, 'f')
+    out = [point(z) for z in zooms if z < polygons_from]
+    shape_zooms = [z for z in zooms if z >= polygons_from]
+    if single_shape_band:
+        out.append(
+            {
+                'name': f'{prefix}{shape_zooms[0]}',
+                'zooms': shape_zooms,
+                'geometry': shape,
+                'grid_zoom': shape_zooms[-1],
+            }
+        )
+        return out
     z = polygons_from
     while z <= zooms[-1]:
         pair = [z] + ([z + 1] if z + 1 <= zooms[-1] else [])
         out.append(
-            {'name': f'f{z}', 'zooms': pair, 'geometry': POLYGON_GEOMETRY, 'grid_zoom': pair[-1]}
+            {'name': f'{prefix}{z}', 'zooms': pair, 'geometry': shape, 'grid_zoom': pair[-1]}
         )
         z += 2
     return out
@@ -160,7 +173,7 @@ def guess_zooms(con, sorted_path, geometry, family, zooms, polygons_from, extent
         extent_size = max(extent[2] - extent[0], extent[3] - extent[1])
         coarsest = max(0, zoom_where(extent_size) - 1)
         finest = min(18, max(coarsest + 1, zoom_where(spacing) if spacing else 16))
-        first_polygon = zoom_where(diag) if family == 'polygon' and diag else None
+        first_polygon = zoom_where(diag) if family != 'point' and diag else None
         if auto_from:
             polygons_from = None if family == 'point' else min(first_polygon, finest)
         if auto_zooms:
@@ -173,6 +186,24 @@ def guess_zooms(con, sorted_path, geometry, family, zooms, polygons_from, extent
     if polygons_from is not None and polygons_from not in zooms:
         polygons_from = None if polygons_from > zooms[-1] else zooms[0]
     return zooms, polygons_from
+
+
+def _full_detail_bytes(
+    con, sorted_path, geometry, family, finest_zoom, origin, degrees, n_rows
+) -> float:
+    """Estimated payload bytes of the whole dataset at the finest zoom, from a sample."""
+    sample = con.execute(
+        f"SELECT {geometry} FROM '{sorted_path}' USING SAMPLE 2000 ROWS"
+    ).fetch_arrow_table()
+    if not sample.num_rows:
+        return 0.0
+    wkb = sample.column(geometry).to_numpy(zero_copy_only=False)
+    zeros = np.zeros(len(wkb))
+    render = render_lines if family == 'line' else render_polygons
+    _, offsets = polygon_tree_bytes(
+        render(wkb, zeros, zeros, resolution(finest_zoom, degrees=degrees), origin)
+    )
+    return float(np.diff(offsets).mean()) * n_rows
 
 
 def _read_schema(src: str) -> pa.Schema:
@@ -204,10 +235,9 @@ def _with_overrides(table: pa.Table, ids: np.ndarray, override: pa.Table) -> pa.
 
 
 def _render(args):
-    wkb, cx, cy, grids = args
-    return [
-        polygon_tree_bytes(render_polygons(wkb, cx, cy, scale, offset)) for scale, offset in grids
-    ]
+    wkb, cx, cy, grids, family = args
+    render = render_lines if family == 'line' else render_polygons
+    return [polygon_tree_bytes(render(wkb, cx, cy, scale, offset)) for scale, offset in grids]
 
 
 def write(
@@ -221,6 +251,7 @@ def write(
     carry=(),
     geometry: str = 'geometry',
     prefix_zoom: int | None = 6,
+    single_band_bytes: int = 16 * 1024 * 1024,
     row_group_rows: int = 1_048_576,
     page_bytes: int = 4096,
     batch_rows: int | None = None,
@@ -238,14 +269,22 @@ def write(
     source_schema = _read_schema(src)
     attributes = infer_attributes(source_schema, carry)
     geo = json.loads(dict(source_schema.metadata or {}).get(b'geo', b'{}') or b'{}')
-    family = (
-        'point'
-        if any(
-            t.lower().startswith('point')
-            for t in geo.get('columns', {}).get(geometry, {}).get('geometry_types', [])
+    types = [t.lower() for t in geo.get('columns', {}).get(geometry, {}).get('geometry_types', [])]
+    if not types:
+        sample = con.execute(
+            f"SELECT ST_GeometryType({geometry}) FROM read_parquet('{src}') LIMIT 1000"
+        ).fetchall()
+        types = [str(t[0]).lower() for t in sample]
+    if types and all('point' in t for t in types):
+        family = 'point'
+    elif types and all('linestring' in t for t in types):
+        family = 'line'
+    elif types and all('polygon' in t for t in types):
+        family = 'polygon'
+    else:
+        raise ValueError(
+            f'mixed or unknown geometry types {sorted(set(types))}; one family per file'
         )
-        else 'polygon'
-    )
 
     # 1. a sorted, slim copy with centroid, diagonal and Hilbert key
     xmin, ymin, xmax, ymax = con.execute(
@@ -295,7 +334,17 @@ def write(
         degrees,
         log,
     )
-    band_plan = bands(zooms, polygons_from, family)
+    single = False
+    if family != 'point' and polygons_from is not None:
+        single = (
+            _full_detail_bytes(
+                con, sorted_path, geometry, family, zooms[-1], (xmin, ymin), degrees, n_rows
+            )
+            <= single_band_bytes
+        )
+        if single:
+            log('  full-detail shapes are small; one shape band serves every zoom')
+    band_plan = bands(zooms, polygons_from, family, single_shape_band=single)
 
     # 2. which rows appear at which zoom: run `thinning` from the finest sampled zoom down
     sample_zooms = zooms[: zooms.index(polygons_from) + 1] if polygons_from in zooms else zooms
@@ -384,11 +433,13 @@ def write(
         sample = con.execute(
             f"SELECT {geometry} FROM '{sorted_path}' LIMIT 2000"
         ).fetch_arrow_table()
-        if family == 'polygon' and polygons_from is not None and sample.num_rows:
+        if family != 'point' and polygons_from is not None and sample.num_rows:
             wkb = sample.column(geometry).to_numpy(zero_copy_only=False)
             finest = band_plan[-1]
             cx0 = np.zeros(len(wkb))
-            parts = render_polygons(wkb, cx0, cx0, *grids[finest['name']])
+            parts = (render_lines if family == 'line' else render_polygons)(
+                wkb, cx0, cx0, *grids[finest['name']]
+            )
             _, offsets = polygon_tree_bytes(parts)
             avg = max(8, np.diff(offsets).mean() + sum(4 for _ in attributes))
         else:
@@ -464,6 +515,7 @@ def write(
                     table.column('cx').to_numpy(),
                     table.column('cy').to_numpy(),
                     [grids[b['name']] for b in band_plan if b['grid_zoom']],
+                    family,
                 )
                 fut = pool.submit(_render, job)
             pending.append((table, fut))

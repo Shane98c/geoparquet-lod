@@ -73,3 +73,35 @@ def render_polygons(wkb, cx, cy, scale: float, offset: tuple[float, float]):
         np.rint(coords[:, 0]).astype(np.int32),
         np.rint(coords[:, 1]).astype(np.int32),
     )
+
+
+def render_lines(wkb, cx, cy, scale: float, offset: tuple[float, float]):
+    """Quantized MultiLineString per row in the polygon tree shape: each part is
+    one 'ring' that is not closed. A line that collapses on the grid becomes a
+    two-cell segment at its centroid so it still draws."""
+    g = shapely.transform(shapely.from_wkb(wkb), lambda c: (c - offset) / scale)
+    g = _quantize(g, scale)
+    minx, miny, maxx, maxy = shapely.bounds(g).T
+    with np.errstate(invalid='ignore'):
+        small = shapely.is_missing(g) | shapely.is_empty(g)
+        small |= (maxx - minx < 1) & (maxy - miny < 1)
+    if small.any():
+        g = g.copy()
+        qx = np.floor((cx[small] - offset[0]) / scale)
+        qy = np.floor((cy[small] - offset[1]) / scale)
+        g[small] = shapely.linestrings(
+            np.stack([np.stack([qx, qy], 1), np.stack([qx + DOT_CELLS, qy], 1)], 1)
+        )
+    parts, parent = shapely.get_parts(g, return_index=True)
+    coords = shapely.get_coordinates(parts)
+    geom_offsets = np.zeros(len(g) + 1, dtype=np.int64)
+    np.add.at(geom_offsets, parent + 1, 1)
+    part_offsets = np.arange(len(parts) + 1, dtype=np.int64)
+    ring_offsets = np.concatenate([[0], shapely.get_num_coordinates(parts)])
+    return (
+        np.cumsum(geom_offsets),
+        part_offsets,
+        np.cumsum(ring_offsets),
+        np.rint(coords[:, 0]).astype(np.int32),
+        np.rint(coords[:, 1]).astype(np.int32),
+    )

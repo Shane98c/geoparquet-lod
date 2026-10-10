@@ -15,6 +15,7 @@ import pyarrow as pa
 
 POINT_GEOMETRY = 'point_f32'
 POLYGON_GEOMETRY = 'polygon_varint'
+LINE_GEOMETRY = 'line_varint'
 NONE_GEOMETRY = 'none'
 
 FIXED_DTYPES = {

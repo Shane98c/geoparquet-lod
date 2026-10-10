@@ -130,7 +130,8 @@ export class PolygonBuilder {
   x = new Int32Array(8192)
   y = new Int32Array(8192)
 
-  add(bytes: Uint8Array, start: number): void {
+  /** `type` is the GeoArrow family code: 6 for multipolygon, 5 for multilinestring. */
+  add(bytes: Uint8Array, start: number, type: 5 | 6 = 6): void {
     let pos = start
     const varint = (): number => {
       let result = 0
@@ -149,7 +150,7 @@ export class PolygonBuilder {
       t.set(this.types)
       this.types = t
     }
-    this.types[this.length] = 6
+    this.types[this.length] = type
     this.geometryOffsets = ensure(this.geometryOffsets, this.length + 2)
     this.geometryOffsets[this.length] = this.polygons
     const nPolys = varint()

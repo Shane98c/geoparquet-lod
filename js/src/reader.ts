@@ -22,7 +22,7 @@ export const LOD_VERSION = '0.2.0'
 export interface Band {
   name: string
   zooms: number[]
-  geometry: 'point_f32' | 'polygon_varint'
+  geometry: 'point_f32' | 'polygon_varint' | 'line_varint'
   scale?: [number, number]
   offset?: [number, number]
 }
@@ -89,7 +89,7 @@ export class LodReader {
       throw new Error(`${LOD_KEY} version ${lod.version} is not ${LOD_VERSION}`)
     }
     for (const [name, band] of Object.entries(lod.bands)) {
-      if (band.geometry !== 'point_f32' && band.geometry !== 'polygon_varint') {
+      if (!['point_f32', 'polygon_varint', 'line_varint'].includes(band.geometry)) {
         throw new Error(`band ${name} uses unknown geometry encoding ${band.geometry}`)
       }
     }

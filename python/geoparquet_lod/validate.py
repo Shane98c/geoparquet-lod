@@ -9,6 +9,7 @@ import numpy as np
 import pyarrow.parquet as pq
 
 from .encoding import (
+    LINE_GEOMETRY,
     POINT_GEOMETRY,
     POLYGON_GEOMETRY,
     Attribute,
@@ -50,9 +51,9 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
     for name, band in bands.items():
         if name not in children:
             raise ValidationError(f'band {name} declared but column {column}.{name} missing')
-        if band['geometry'] not in (POINT_GEOMETRY, POLYGON_GEOMETRY):
+        if band['geometry'] not in (POINT_GEOMETRY, POLYGON_GEOMETRY, LINE_GEOMETRY):
             raise ValidationError(f'band {name} has unknown geometry encoding {band["geometry"]}')
-        if band['geometry'] == POLYGON_GEOMETRY and ('scale' not in band or 'offset' not in band):
+        if band['geometry'] != POINT_GEOMETRY and ('scale' not in band or 'offset' not in band):
             raise ValidationError(f'polygon band {name} lacks scale/offset')
     prefix = lod.get('prefix')
     if prefix and not (0 <= prefix['row_group_end'] < md.num_row_groups):
