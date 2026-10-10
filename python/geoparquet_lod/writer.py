@@ -12,7 +12,7 @@ Layout, in order of what matters:
    cheap pages and dense ones short pages.
 5. One nullable binary column per LOD under `lod`, non-null exactly
    for the rows shown there, holding the carried attributes and the geometry
-   at that band's resolution.
+   at that LOD's resolution.
 
 Everything the renderer reads is in 3 and 5. A plain reader sees ordinary
 GeoParquet with two extra columns.
@@ -165,7 +165,7 @@ def guess_zooms(con, sorted_path, geometry, family, zooms, polygons_from, extent
     if auto_zooms or auto_from:
         sample = con.execute(
             f"SELECT diag, {geometry} FROM '{sorted_path}' USING SAMPLE 5000 ROWS"
-        ).fetch_arrow_table()
+        ).to_arrow_table()
         diag = float(np.median(sample.column('diag').to_numpy())) if sample.num_rows else 0.0
         geoms = shapely.from_wkb(sample.column(geometry).to_numpy(zero_copy_only=False))
         coords, index = shapely.get_coordinates(geoms, return_index=True)
@@ -196,7 +196,7 @@ def _full_detail_bytes(
     """Estimated payload bytes of the whole dataset at the finest zoom, from a sample."""
     sample = con.execute(
         f"SELECT {geometry} FROM '{sorted_path}' USING SAMPLE 2000 ROWS"
-    ).fetch_arrow_table()
+    ).to_arrow_table()
     if not sample.num_rows:
         return 0.0
     wkb = sample.column(geometry).to_numpy(zero_copy_only=False)
@@ -264,6 +264,7 @@ def write(
 ) -> Path:
     """Write `src` (any GeoParquet with a WKB geometry column) to `out` in the
     LOD columns layout. Returns the output path."""
+    src = str(src)
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
@@ -325,6 +326,10 @@ def write(
     log(f'  {n_rows:,} rows sorted, {time.time() - t0:.0f}s')
     crs = geo.get('columns', {}).get(geometry, {}).get('crs')
     degrees = crs is None or 'degree' in json.dumps(crs).lower()
+    if not degrees:
+        raise NotImplementedError(
+            'only geographic coordinates (EPSG:4326) are supported for now; reproject first'
+        )
     zooms, polygons_from = guess_zooms(
         con,
         sorted_path,
@@ -354,8 +359,8 @@ def write(
         dict.fromkeys(['id', 'cx', 'cy', 'diag', *[a.name for a in attributes], *columns])
     )
     rows = con.execute(
-        f"SELECT {slim}, (hash(id) % 1000000007) / 1000000007.0 AS u FROM '{sorted_path}' ORDER BY id"
-    ).fetch_arrow_table()
+        f"SELECT {slim}, (hash({geometry}) % 1000000007) / 1000000007.0 AS u FROM '{sorted_path}' ORDER BY id"
+    ).to_arrow_table()
     ctx = Context(tuple(zooms), sample_zooms[-1], 512, degrees)
     level = np.full(n_rows, len(sample_zooms) - 1, dtype=np.int32)
     overrides: dict[int, pa.Table] = {}
@@ -384,7 +389,11 @@ def write(
         for b in lod_plan
         if b['grid_zoom']
     }
-    prefix_level = None if prefix_zoom is None else zooms.index(prefix_zoom)
+    # the prefix covers the zooms up to prefix_zoom that the file actually serves
+    prefix_candidates = [
+        z for z in sample_zooms[:-1] if prefix_zoom is not None and z <= prefix_zoom
+    ]
+    prefix_level = zooms.index(prefix_candidates[-1]) if prefix_candidates else None
     prefix_rows = (
         0
         if prefix_level is None
@@ -410,7 +419,9 @@ def write(
         'order': 'hilbert',
         'zooms': zooms,
         'tile_size': 512,
-        'prefix': None if prefix_end < 0 else {'zoom': prefix_zoom, 'row_group_end': prefix_end},
+        'prefix': None
+        if prefix_end < 0
+        else {'zoom': zooms[prefix_level], 'row_group_end': prefix_end},
         'attributes': [{'name': a.name, 'type': a.type} for a in attributes],
         'thinning': describe(thinning),
         'lods': {
@@ -434,7 +445,7 @@ def write(
     if batch_rows is None:
         sample = con.execute(
             f"SELECT {geometry} FROM '{sorted_path}' LIMIT 2000"
-        ).fetch_arrow_table()
+        ).to_arrow_table()
         if family != 'point' and polygons_from is not None and sample.num_rows:
             wkb = sample.column(geometry).to_numpy(zero_copy_only=False)
             finest = lod_plan[-1]
@@ -527,6 +538,7 @@ def write(
             flush(t, f)
 
     if prefix_end >= 0:
+        log(f'  prefix: rows shown by z{zooms[prefix_level]} come first')
         write_rows(f'r.level <= {prefix_level}')
         if row_groups - 1 != prefix_end:
             raise RuntimeError(

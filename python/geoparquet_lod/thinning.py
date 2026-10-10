@@ -2,14 +2,15 @@
 
     def thin(rows: pa.Table, zoom: int, ctx: Context) -> pa.Table
 
-The writer starts with every row at the finest sampled zoom and calls `thin`
-once per coarser zoom, passing the rows kept at the zoom just finer. The
+The writer starts with every row at the shape zoom (every feature is present
+at every shape zoom) and calls `thin` once per coarser point zoom, passing the
+rows kept at the zoom just finer. The
 function returns the subset to keep at this zoom. Nesting (shown at z means
 shown at every finer zoom) is therefore guaranteed by construction, and a
 rule only ever answers "of these, which survive one step coarser?".
 
 `rows` always has: `id`, `cx`, `cy` (centroid), `diag` (bbox diagonal in CRS
-units), `u` (a uniform in [0, 1) that is stable per row and across rebuilds),
+units), `u` (a uniform in [0, 1) hashed from the geometry, so stable across rebuilds),
 and every carried attribute and extra column the writer was told to load.
 A returned table must keep `id`; any carried attribute column it includes
 overrides that attribute in this zoom's payload, which is how accumulated
@@ -85,7 +86,8 @@ def drop_rate(rate: float = 2.5) -> Thin:
 
 
 def size_threshold(pixels: float = 4.0) -> Thin:
-    """Keep a feature while its bbox diagonal still spans `pixels` pixels."""
+    """Keep a feature at a point zoom while its bbox would still span `pixels`
+    pixels there: large features earn a dot before small ones do."""
 
     def thin(rows, zoom, ctx):
         keep = rows.column('diag').to_numpy() >= pixels * ctx.resolution(zoom)

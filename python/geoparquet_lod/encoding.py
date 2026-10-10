@@ -57,10 +57,12 @@ def pack_attributes(table: pa.Table, attributes: list[Attribute]) -> tuple[bytes
     if dtype is not None:
         block = np.empty(n, dtype=dtype)
         for a in attributes:
-            values = table.column(a.name).to_numpy(zero_copy_only=False)
-            block[a.name] = (
-                np.nan_to_num(values, nan=np.nan) if dtype[a.name].kind == 'f' else values
-            )
+            column = table.column(a.name)
+            if dtype[a.name].kind == 'f':
+                block[a.name] = column.to_numpy(zero_copy_only=False)
+            else:
+                # integer nulls have no sentinel on the wire: they are written as 0
+                block[a.name] = column.fill_null(0).to_numpy(zero_copy_only=False)
         width = dtype.itemsize
         return block.tobytes(), np.arange(n + 1, dtype=np.int64) * width
     out = bytearray()

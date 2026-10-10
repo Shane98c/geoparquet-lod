@@ -60,19 +60,32 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
     if prefix and not (0 <= prefix['row_group_end'] < md.num_row_groups):
         raise ValidationError('prefix row_group_end out of range')
 
-    # statistics and page indexes on every row group
+    # statistics on the covering and page indexes on every column, in every row group
     for g in range(md.num_row_groups):
         rg = md.row_group(g)
         for i in range(rg.num_columns):
             c = rg.column(i)
-            if c.path_in_schema.startswith('bbox.') and not c.is_stats_set:
-                raise ValidationError(f'row group {g}: {c.path_in_schema} has no statistics')
-    if (
-        not f.metadata.row_group(0).column(0).has_offset_index
-        if hasattr(md.row_group(0).column(0), 'has_offset_index')
-        else False
-    ):
-        pass  # pyarrow does not expose offset indexes; the JS reader checks them on open
+            if c.path_in_schema.startswith('bbox.'):
+                if not c.is_stats_set:
+                    raise ValidationError(f'row group {g}: {c.path_in_schema} has no statistics')
+                if not c.has_column_index:
+                    raise ValidationError(f'row group {g}: {c.path_in_schema} has no column index')
+            if not c.has_offset_index:
+                raise ValidationError(f'row group {g}: {c.path_in_schema} has no offset index')
+    if prefix:
+        # prefix row groups hold only rows shown at the prefix zoom: every row has that LOD
+        coarsest = next(n for n, b in lods.items() if prefix['zoom'] in b['zooms'])
+        for g in range(prefix['row_group_end'] + 1):
+            col = (
+                f.read_row_group(g, columns=[column])
+                .column(column)
+                .combine_chunks()
+                .field(coarsest)
+            )
+            if col.null_count:
+                raise ValidationError(
+                    f'prefix row group {g} holds rows not shown at z{prefix["zoom"]}'
+                )
 
     # decode a sample of every LOD and require exact byte consumption
     head = f.read_row_group(0, columns=[column]).slice(0, sample_rows)

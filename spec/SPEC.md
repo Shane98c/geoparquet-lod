@@ -21,8 +21,10 @@ extension sees ordinary GeoParquet with two extra columns.
 - **Payload**: one binary value per feature per LOD: carried attributes,
   then geometry on the LOD's grid.
 - **Thinning**: the rule assigning each feature the coarsest zoom at which it
-  is shown. A feature shown at zoom z is shown at every finer zoom. This
-  extension records the rule's description; it does not define rules.
+  is shown. A feature shown at zoom z is shown at every finer zoom. The
+  reference writer thins only below the shape zoom; every feature is present
+  at every shape zoom. This extension records the rule's description; it
+  does not define rules.
 
 ## Layout
 
@@ -30,7 +32,8 @@ A conforming file MUST satisfy:
 
 1. **Order.** Rows sorted by a space-filling curve over the primary
    geometry, within each of the two sections below. `order` names the curve
-   (`hilbert`).
+   (`hilbert`). The per-row uniform `u` the reference writer hands thinnings is
+a hash of the geometry bytes, so it does not depend on sort order.
 2. **Prefix.** When `prefix` is present, every row whose coarsest zoom is at
    or below `prefix.zoom` is stored in row groups `0..prefix.row_group_end`,
    and no other row is. Those row groups are sorted on their own; the rest of
@@ -46,6 +49,11 @@ A conforming file MUST satisfy:
    zooms; since zooms sharing an LOD agree on row selection, that is one
    condition per LOD.
 
+The validator checks the metadata, covering statistics, page indexes, the
+prefix partition and a decode of every LOD. It does not verify the sort
+order or the "non-null iff shown" rule beyond the prefix; those are what the
+reference writer does.
+
 The following SHOULD hold and are what the reference writer does:
 
 - Row groups of about one million rows; data pages of about 4 KB
@@ -60,7 +68,7 @@ Under the `geo` key, a `lod_columns` object:
 
 | field | type | meaning |
 | --- | --- | --- |
-| `version` | string | `0.1.0`; readers reject a different major version |
+| `version` | string | `0.1.0`; readers reject a different major version. While the major is 0 a minor bump may change the layout. |
 | `column` | string | name of the payload struct column |
 | `order` | string | `hilbert` |
 | `zooms` | int[] | every zoom the file serves, ascending |
@@ -68,7 +76,7 @@ Under the `geo` key, a `lod_columns` object:
 | `prefix` | object or null | `{zoom, row_group_end}`, see Layout 2 |
 | `attributes` | object[] | `{name, type}` in payload order, see Attributes |
 | `thinning` | object | description of the rule used; informational |
-| `lods` | object | LOD name to `{zooms, geometry, scale?, offset?}` |
+| `lods` | object | LOD name to `{zooms, geometry, scale?, offset?}`; `scale` and `offset` are `[x, y]` pairs in CRS units |
 
 Every zoom in `zooms` MUST appear in exactly one LOD. An LOD's zooms are
 contiguous and ascending. Which zooms share an LOD is writer policy: the
@@ -91,8 +99,9 @@ Little-endian, in `attributes` order:
 | `utf8` | one length byte, then that many UTF-8 bytes (max 255) |
 | `f32[]`, `i32[]`, `u8[]` | one count byte, then that many items |
 
-A fixed-width float that is NaN means the value is unknown. Other nulls are
-not representable; writers MUST choose a sentinel or omit the attribute.
+A fixed-width float that is NaN means the value is unknown. Integer nulls
+have no sentinel and are written as 0. A value a thinning overrides for one
+LOD is cast to the declared wire type.
 
 ### Geometry
 
@@ -116,7 +125,7 @@ not representable; writers MUST choose a sentinel or omit the attribute.
 2. For a tile at zoom z choose the LOD containing z, clamping to the
    coarsest or finest LOD outside `zooms`.
 3. Candidate row groups: those whose bbox column statistics intersect the
-   tile. If the band's finest zoom is at or below `prefix.zoom`, only the
+   tile. If the LOD's finest zoom is at or below `prefix.zoom`, only the
    prefix row groups.
 4. Candidate pages: for each bbox leaf, the pages whose statistics admit
    the tile; intersect the four row ranges.
@@ -165,6 +174,6 @@ struct of binaries a reader can drop.
 ## Open questions
 
 - A standard geometry encoding for LODs.
-- Whether attributes should be a nested struct column per band instead of
+- Whether attributes should be a nested struct column per LOD instead of
   packed bytes, trading one range per tile for native typing.
 - Partitioned datasets: one manifest listing files and their extents.

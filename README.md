@@ -26,17 +26,18 @@ Which rows appear at which zoom is a *thinning function*, one shape:
 def thin(rows: pa.Table, zoom: int, ctx: Context) -> pa.Table
 ```
 
-The writer calls it once per zoom from fine to coarse, each time with the
-rows kept at the zoom just finer, and it returns the subset to keep. Nesting
-is guaranteed by construction. `rows` carries `id`, centroid, bbox diagonal, a
-stable per-row uniform `u`, and the carried attributes; returning a carried
+The writer calls it once per point zoom from fine to coarse, starting from
+the shape zoom where every feature is present, each time with the rows kept
+at the zoom just finer, and it returns the subset to keep. Nesting is
+guaranteed by construction; shape zooms are never thinned. `rows` carries `id`, centroid, bbox diagonal, a
+per-row uniform `u` hashed from the geometry, and the carried attributes; returning a carried
 column overrides its value in that zoom's payload, which is how a cluster
 passes its count along. Built-ins are a few lines each and meant to be copied:
 
 | thinning | rule | good for |
 | --- | --- | --- |
 | `drop_rate(2.5)` | each zoom coarser keeps 1/rate, uniformly, so relative density survives (tippecanoe `-r`); the default | points, small polygons |
-| `size_threshold(4)` | keep a feature while it spans 4 pixels | polygons, lines |
+| `size_threshold(4)` | a feature earns a dot at a point zoom once it would span 4 pixels | large polygons and lines first |
 | `importance('population', 300)` | keep the top N per tile by a column | named places, ranked facilities |
 | `cluster(8, count='count')` | one representative per 8 px cell carrying how many it stands for | dense points |
 | `density_budget(60_000)` | cap the busiest tile; flattens dense places | hard byte ceilings |

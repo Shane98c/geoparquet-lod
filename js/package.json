@@ -14,7 +14,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "measure": "node test/measure.mjs"
+    "measure": "node test/measure.mjs",
+    "test": "node test/decode.test.mjs"
   },
   "dependencies": {
     "@cogp/reader": "^2.1.4",

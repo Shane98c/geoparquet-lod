@@ -64,9 +64,9 @@ const BBOX_LEAVES = ['bbox.xmin', 'bbox.ymin', 'bbox.xmax', 'bbox.ymax'] as cons
 
 /**
  * Reads the LOD columns layout: rows in one Hilbert order with a coarse prefix,
- * a covering bbox with page statistics, and one binary column per zoom band.
+ * a covering bbox with page statistics, and one binary column per LOD.
  * A tile read is: row groups by bbox statistics, pages by the bbox page index,
- * then only the overlapping pages of the one band column.
+ * then only the overlapping pages of the one LOD column.
  */
 export class LodReader {
   readonly metadata: FileMetaData
