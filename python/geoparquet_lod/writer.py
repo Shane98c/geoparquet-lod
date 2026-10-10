@@ -10,7 +10,7 @@ Layout, in order of what matters:
    column, so pages can be chosen without reading data.
 4. Small byte-sized pages with v1 page headers, so sparse columns get long
    cheap pages and dense ones short pages.
-5. One nullable binary column per zoom band under `lod`, non-null exactly
+5. One nullable binary column per LOD under `lod`, non-null exactly
    for the rows shown there, holding the carried attributes and the geometry
    at that band's resolution.
 

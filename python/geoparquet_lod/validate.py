@@ -52,7 +52,7 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
         if name not in children:
             raise ValidationError(f'lod {name} declared but column {column}.{name} missing')
         if child['geometry'] not in (POINT_GEOMETRY, POLYGON_GEOMETRY, LINE_GEOMETRY):
-            raise ValidationError(f'lod {name} has unknown geometry encoding {band["geometry"]}')
+            raise ValidationError(f'lod {name} has unknown geometry encoding {child["geometry"]}')
         if child['geometry'] != POINT_GEOMETRY and ('scale' not in child or 'offset' not in child):
             raise ValidationError(f'shape lod {name} lacks scale/offset')
     prefix = lod.get('prefix')
@@ -99,7 +99,7 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
 
 
 def inspect(path: str | Path) -> dict:
-    """Metadata plus per-band column sizes in the first body row group."""
+    """Metadata plus per-LOD column sizes in the first body row group."""
     f = pq.ParquetFile(path)
     md = f.metadata
     geo = json.loads(dict(f.schema_arrow.metadata or {}).get(b'geo', b'{}') or b'{}')
