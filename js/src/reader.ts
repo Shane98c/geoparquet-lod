@@ -19,7 +19,7 @@ export type Bbox = [number, number, number, number]
 export const LOD_KEY = 'lod_columns'
 export const LOD_VERSION = '0.2.0'
 
-export interface Band {
+export interface Lod {
   name: string
   zooms: number[]
   geometry: 'point_f32' | 'polygon_varint' | 'line_varint'
@@ -36,7 +36,7 @@ export interface LodMetadata {
   prefix: { zoom: number; row_group_end: number } | null
   attributes: AttributeSpec[]
   thinning: Record<string, unknown>
-  bands: Record<string, Omit<Band, 'name'>>
+  lods: Record<string, Omit<Lod, 'name'>>
 }
 
 /** A hyparquet-style byte source whose slices can be aborted. */
@@ -71,7 +71,7 @@ const BBOX_LEAVES = ['bbox.xmin', 'bbox.ymin', 'bbox.xmax', 'bbox.ymax'] as cons
 export class LodReader {
   readonly metadata: FileMetaData
   readonly lod: LodMetadata
-  readonly bands: Record<string, Band>
+  readonly lods: Record<string, Lod>
   private readonly file: RangeSource
   private readonly rowGroupStarts: number[]
   private readonly cache = new Map<string, Promise<unknown>>()
@@ -88,14 +88,14 @@ export class LodReader {
     if (lod.version !== LOD_VERSION) {
       throw new Error(`${LOD_KEY} version ${lod.version} is not ${LOD_VERSION}`)
     }
-    for (const [name, band] of Object.entries(lod.bands)) {
-      if (!['point_f32', 'polygon_varint', 'line_varint'].includes(band.geometry)) {
-        throw new Error(`band ${name} uses unknown geometry encoding ${band.geometry}`)
+    for (const [name, child] of Object.entries(lod.lods)) {
+      if (!['point_f32', 'polygon_varint', 'line_varint'].includes(child.geometry)) {
+        throw new Error(`lod ${name} uses unknown geometry encoding ${child.geometry}`)
       }
     }
     this.lod = lod
-    this.bands = Object.fromEntries(
-      Object.entries(lod.bands).map(([name, band]) => [name, { ...band, name }]),
+    this.lods = Object.fromEntries(
+      Object.entries(lod.lods).map(([name, child]) => [name, { ...child, name }]),
     )
     let acc = 0
     this.rowGroupStarts = metadata.row_groups.map((rg) => {
@@ -119,9 +119,9 @@ export class LodReader {
     return reader
   }
 
-  /** The band whose zooms contain `zoom`, clamped to the coarsest or finest band. */
-  bandForZoom(zoom: number): Band {
-    const all = Object.values(this.bands)
+  /** The LOD whose zooms contain `zoom`, clamped to the coarsest or finest LOD. */
+  lodForZoom(zoom: number): Lod {
+    const all = Object.values(this.lods)
     const exact = all.find((b) => b.zooms.includes(zoom))
     if (exact) return exact
     const zooms = all.flatMap((b) => b.zooms)
@@ -131,20 +131,20 @@ export class LodReader {
 
   /** Non-null payloads of every row whose covering bbox may intersect `bbox`. */
   async readPayloads(
-    band: Band,
+    lod: Lod,
     bbox: Bbox,
     signal?: AbortSignal,
     options: { refine?: boolean } = {},
   ): Promise<Payloads> {
     const out: Payloads = { rows: [], values: [] }
     const prefix = this.lod.prefix
-    const coarse = prefix && Math.max(...band.zooms) <= prefix.zoom
+    const coarse = prefix && Math.max(...lod.zooms) <= prefix.zoom
     const groups = this.metadata.row_groups
       .map((_, g) => g)
       .filter(
         (g) => (!coarse || g <= prefix!.row_group_end) && intersects(this.rowGroupBbox(g), bbox),
       )
-    const leaf = `${this.lod.column}.${band.name}`
+    const leaf = `${this.lod.column}.${lod.name}`
     await Promise.all(
       groups.map(async (g) => {
         const start = this.rowGroupStarts[g]

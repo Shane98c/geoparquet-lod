@@ -16,9 +16,9 @@ Rows are sorted once along a Hilbert curve in large row groups, so a city
 tile touches one or two of them. The rows shown at the coarsest zooms come
 first in their own order, so a view of the whole dataset reads one row group.
 A float32 bbox covering with page statistics lets a reader pick pages without
-reading data. One nullable binary column per zoom band holds, for exactly the
-rows shown at those zooms, the carried attributes and the geometry quantized
-to that band's grid.
+reading data. One nullable binary column per LOD, a zoom or a run of zooms, holds for
+exactly the rows shown there the carried attributes and the geometry on that
+LOD's grid.
 
 Which rows appear at which zoom is a *thinning function*, one shape:
 
@@ -57,9 +57,9 @@ counties, footprints at every zoom; on census tracts, footprints from 4.
 
 Points, lines and polygons, one family per file. Below the shape zoom every
 family is drawn as a point; from it up, lines and polygons carry a quantized
-copy per band. When the full-detail shapes of the whole dataset are small
-(16 MB by default) a single band serves every zoom instead of copies, which
-is what happens for things like counties.
+copy per LOD, one column serving two zooms. When the full-detail shapes of
+the whole dataset are small (16 MB by default) a single LOD serves every zoom
+instead of copies, which is what happens for things like counties.
 
 ## Quick start
 

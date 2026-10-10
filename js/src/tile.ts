@@ -5,9 +5,9 @@ import type { Bbox, LodReader } from './reader.js'
 const VECTOR_TILE_SIZE = 512
 
 export interface TileOptions {
-  /** MVT layer name for polygon bands (default `features`). */
+  /** MVT layer name for shape LODs (default `features`). */
   layer?: string
-  /** MVT layer name for point bands (default: same as `layer`). */
+  /** MVT layer name for point LODs (default: same as `layer`). */
   pointLayer?: string
   /** Attribute names to copy into MVT properties (default: all carried attributes). */
   properties?: string[]
@@ -28,7 +28,7 @@ export const tileBounds = (z: number, x: number, y: number): Bbox => {
   ]
 }
 
-/** One MVT tile from the band that serves zoom `z`. Feature ids are file row indexes. */
+/** One MVT tile from the LOD that serves zoom `z`. Feature ids are file row indexes. */
 export const renderTile = async (
   reader: LodReader,
   z: number,
@@ -38,14 +38,14 @@ export const renderTile = async (
 ): Promise<ArrayBuffer> => {
   const { signal } = options
   const bbox = tileBounds(z, x, y)
-  const band = reader.bandForZoom(z)
-  const { rows, values } = await reader.readPayloads(band, bbox, signal)
+  const lod = reader.lodForZoom(z)
+  const { rows, values } = await reader.readPayloads(lod, bbox, signal)
   signal?.throwIfAborted()
   const spec = reader.lod.attributes
   const names = options.properties ?? spec.map((a) => a.name)
   const columns: Record<string, AttributeValue[]> = Object.fromEntries(names.map((n) => [n, []]))
   const keptRows: number[] = []
-  if (band.geometry === 'point_f32') {
+  if (lod.geometry === 'point_f32') {
     const xs: number[] = []
     const ys: number[] = []
     values.forEach((v, i) => {
@@ -76,14 +76,14 @@ export const renderTile = async (
     )
   }
   const builder = new PolygonBuilder()
-  const type = band.geometry === 'line_varint' ? 5 : 6
+  const type = lod.geometry === 'line_varint' ? 5 : 6
   values.forEach((v, i) => {
     const { values: attrs, pos } = decodeAttributes(v, spec)
     builder.add(v, pos, type)
     keptRows.push(rows[i])
     for (const n of names) columns[n].push(attrs[n])
   })
-  const geometry = builder.finish(band.scale!, band.offset!)
+  const geometry = builder.finish(lod.scale!, lod.offset!)
   return toMvt(
     { geometry: geometry as never, rowIndex: keptRows, columns },
     { z, x, y, layer: options.layer ?? 'features', signal },

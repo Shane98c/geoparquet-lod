@@ -131,7 +131,7 @@ def write_cmd(
 @cli.command('validate')
 @click.argument('path')
 def validate_cmd(path):
-    """Check the layout contract and decode a sample of every band."""
+    """Check the layout contract and decode a sample of every LOD."""
     try:
         summary = validate(path)
     except ValidationError as e:

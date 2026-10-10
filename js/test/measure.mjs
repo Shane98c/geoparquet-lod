@@ -8,11 +8,11 @@ const real = globalThis.fetch
 globalThis.fetch = async (u, i) => { const r = await real(u, i); if (r.status === 206) { reqs++; bytes += Number(r.headers.get('content-length') || 0) } return r }
 const t0 = performance.now()
 const reader = await LodReader.open(coalescing(await httpSource([url])))
-console.log(`open ${Math.round(performance.now() - t0)} ms, ${reqs} req, ${(bytes / 1e6).toFixed(2)} MB; bands ${Object.keys(reader.bands).join(',')}; attributes ${reader.lod.attributes.map((a) => a.name).join(',') || 'none'}`)
+console.log(`open ${Math.round(performance.now() - t0)} ms, ${reqs} req, ${(bytes / 1e6).toFixed(2)} MB; lods ${Object.keys(reader.lods).join(',')}; attributes ${reader.lod.attributes.map((a) => a.name).join(',') || 'none'}`)
 for (const z of zooms) {
   const x = Math.floor(((lon + 180) / 360) * 2 ** z)
   const y = Math.floor(((1 - Math.log(Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)) / Math.PI) / 2) * 2 ** z)
   reqs = 0; bytes = 0; const t = performance.now()
   const tile = await renderTile(reader, z, x, y, { layer: 'features' })
-  console.log(`z${z} (${reader.bandForZoom(z).name}): mvt ${(tile.byteLength / 1e3).toFixed(0)} KB, ${reqs} req, ${(bytes / 1e6).toFixed(2)} MB, ${Math.round(performance.now() - t)} ms`)
+  console.log(`z${z} (${reader.lodForZoom(z).name}): mvt ${(tile.byteLength / 1e3).toFixed(0)} KB, ${reqs} req, ${(bytes / 1e6).toFixed(2)} MB, ${Math.round(performance.now() - t)} ms`)
 }

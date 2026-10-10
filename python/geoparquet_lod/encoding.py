@@ -2,7 +2,7 @@
 
 Every payload value is self-contained: the attributes a renderer needs for one
 row, in the declared order and widths, then the row's geometry at the zoom
-band's resolution. Fixed-width attributes are packed with numpy; variable
+LOD's resolution. Fixed-width attributes are packed with numpy; variable
 width ones (`utf8`, arrays) fall back to a row loop.
 """
 

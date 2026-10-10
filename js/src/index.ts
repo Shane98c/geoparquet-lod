@@ -1,5 +1,5 @@
 export { LodReader, LOD_KEY, LOD_VERSION } from './reader.js'
-export type { Band, Bbox, LodMetadata, Payloads, RangeSource } from './reader.js'
+export type { Lod, Bbox, LodMetadata, Payloads, RangeSource } from './reader.js'
 export { decodeAttributes, decodePoint, decodePolygonTree, PolygonBuilder } from './payload.js'
 export type { AttributeSpec, AttributeType, AttributeValue } from './payload.js'
 export { coalescing, httpSource, s3Mirrors } from './range-buffer.js'

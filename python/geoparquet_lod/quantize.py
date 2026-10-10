@@ -1,6 +1,6 @@
-"""Geometry on a zoom band's grid.
+"""Geometry on an LOD's grid.
 
-A band's grid is the Web Mercator pixel size at its finest zoom, expressed in
+An LOD's grid is the Web Mercator pixel size at its finest zoom, expressed in
 the file's CRS units, anchored at the dataset's minimum corner. Footprints are
 simplified and snapped to that grid; anything that collapses becomes a small
 square around its centroid so it still draws.

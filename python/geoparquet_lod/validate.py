@@ -43,18 +43,18 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
     if not covering:
         raise ValidationError('geo.columns.<geometry>.covering missing')
     attributes = [Attribute(a['name'], a['type']) for a in lod.get('attributes', [])]
-    bands = lod.get('bands') or {}
-    if not bands:
-        raise ValidationError('no bands declared')
+    lods = lod.get('lods') or {}
+    if not lods:
+        raise ValidationError('no lods declared')
     struct = f.schema_arrow.field(column).type
     children = {struct.field(i).name for i in range(struct.num_fields)}
-    for name, band in bands.items():
+    for name, child in lods.items():
         if name not in children:
-            raise ValidationError(f'band {name} declared but column {column}.{name} missing')
-        if band['geometry'] not in (POINT_GEOMETRY, POLYGON_GEOMETRY, LINE_GEOMETRY):
-            raise ValidationError(f'band {name} has unknown geometry encoding {band["geometry"]}')
-        if band['geometry'] != POINT_GEOMETRY and ('scale' not in band or 'offset' not in band):
-            raise ValidationError(f'polygon band {name} lacks scale/offset')
+            raise ValidationError(f'lod {name} declared but column {column}.{name} missing')
+        if child['geometry'] not in (POINT_GEOMETRY, POLYGON_GEOMETRY, LINE_GEOMETRY):
+            raise ValidationError(f'lod {name} has unknown geometry encoding {band["geometry"]}')
+        if child['geometry'] != POINT_GEOMETRY and ('scale' not in child or 'offset' not in child):
+            raise ValidationError(f'shape lod {name} lacks scale/offset')
     prefix = lod.get('prefix')
     if prefix and not (0 <= prefix['row_group_end'] < md.num_row_groups):
         raise ValidationError('prefix row_group_end out of range')
@@ -73,26 +73,26 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
     ):
         pass  # pyarrow does not expose offset indexes; the JS reader checks them on open
 
-    # decode a sample of every band and require exact byte consumption
+    # decode a sample of every LOD and require exact byte consumption
     head = f.read_row_group(0, columns=[column]).slice(0, sample_rows)
     checked = {}
-    for name, band in bands.items():
+    for name, child in lods.items():
         values = head.column(column).combine_chunks().field(name)
         non_null = [v.as_py() for v in values if v.is_valid]
         for buf in non_null[:200]:
             _, pos = decode_attributes(buf, attributes)
-            if band['geometry'] == POINT_GEOMETRY:
+            if child['geometry'] == POINT_GEOMETRY:
                 pos += 8
             else:
                 _, pos = decode_polygon_tree(buf, pos)
             if pos != len(buf):
-                raise ValidationError(f'band {name}: payload has {len(buf) - pos} trailing bytes')
+                raise ValidationError(f'lod {name}: payload has {len(buf) - pos} trailing bytes')
         checked[name] = len(non_null)
     return {
         'rows': md.num_rows,
         'row_groups': md.num_row_groups,
         'footer_bytes': md.serialized_size,
-        'bands': list(bands),
+        'lods': list(lods),
         'prefix': prefix,
         'sampled_non_null': checked,
     }

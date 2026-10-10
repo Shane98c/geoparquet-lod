@@ -92,24 +92,26 @@ def infer_attributes(schema: pa.Schema, carry) -> list[Attribute]:
     return out
 
 
-def bands(
+def lods(
     zooms: list[int],
     polygons_from: int | None,
     geometry_family: str,
-    single_shape_band: bool = False,
+    single_shape_lod: bool = False,
 ) -> list[dict]:
-    """Zoom bands: one point band per zoom below `polygons_from` (the sampled
-    set changes every zoom), then shape bands from `polygons_from` up: pairs of
-    zooms sharing one quantized copy on the finer zoom's grid, or a single band
-    for every zoom when the full-detail payload is small enough that copies
-    would cost more than they save. Point datasets get point bands at every zoom."""
+    """LODs: one stored representation per contiguous zoom range. Zooms may share
+    an LOD only when row selection and carried attributes agree, and an LOD uses
+    its finest zoom's grid. Below `polygons_from` the thinning changes the row
+    set every zoom, so each zoom is its own point LOD; from `polygons_from` up
+    every row is present, so zooms are paired on one quantized copy, or all
+    share one copy when the full-detail payload is small enough that copies
+    would cost more than they save. Point datasets get point LODs at every zoom."""
     point = lambda z: {'name': f'p{z}', 'zooms': [z], 'geometry': POINT_GEOMETRY, 'grid_zoom': None}  # noqa: E731
     if geometry_family == 'point' or polygons_from is None:
         return [point(z) for z in zooms]
     shape, prefix = (LINE_GEOMETRY, 'l') if geometry_family == 'line' else (POLYGON_GEOMETRY, 'f')
     out = [point(z) for z in zooms if z < polygons_from]
     shape_zooms = [z for z in zooms if z >= polygons_from]
-    if single_shape_band:
+    if single_shape_lod:
         out.append(
             {
                 'name': f'{prefix}{shape_zooms[0]}',
@@ -251,7 +253,7 @@ def write(
     carry=(),
     geometry: str = 'geometry',
     prefix_zoom: int | None = 6,
-    single_band_bytes: int = 16 * 1024 * 1024,
+    single_lod_bytes: int = 16 * 1024 * 1024,
     row_group_rows: int = 1_048_576,
     page_bytes: int = 4096,
     batch_rows: int | None = None,
@@ -340,11 +342,11 @@ def write(
             _full_detail_bytes(
                 con, sorted_path, geometry, family, zooms[-1], (xmin, ymin), degrees, n_rows
             )
-            <= single_band_bytes
+            <= single_lod_bytes
         )
         if single:
-            log('  full-detail shapes are small; one shape band serves every zoom')
-    band_plan = bands(zooms, polygons_from, family, single_shape_band=single)
+            log('  full-detail shapes are small; one shape LOD serves every zoom')
+    lod_plan = lods(zooms, polygons_from, family, single_shape_lod=single)
 
     # 2. which rows appear at which zoom: run `thinning` from the finest sampled zoom down
     sample_zooms = zooms[: zooms.index(polygons_from) + 1] if polygons_from in zooms else zooms
@@ -379,7 +381,7 @@ def write(
     origin = (float(xmin), float(ymin))
     grids = {
         b['name']: (resolution(b['grid_zoom'], degrees=degrees), origin)
-        for b in band_plan
+        for b in lod_plan
         if b['grid_zoom']
     }
     prefix_level = None if prefix_zoom is None else zooms.index(prefix_zoom)
@@ -391,7 +393,7 @@ def write(
     prefix_end = -(-prefix_rows // row_group_rows) - 1 if prefix_rows else -1
     lod_field = pa.field(
         'lod',
-        pa.struct([pa.field(b['name'], pa.binary(), nullable=True) for b in band_plan]),
+        pa.struct([pa.field(b['name'], pa.binary(), nullable=True) for b in lod_plan]),
         nullable=False,
     )
     rest = [f for f in source_schema if f.name not in ('bbox', geometry)]
@@ -411,7 +413,7 @@ def write(
         'prefix': None if prefix_end < 0 else {'zoom': prefix_zoom, 'row_group_end': prefix_end},
         'attributes': [{'name': a.name, 'type': a.type} for a in attributes],
         'thinning': describe(thinning),
-        'bands': {
+        'lods': {
             b['name']: {
                 'zooms': b['zooms'],
                 'geometry': b['geometry'],
@@ -421,7 +423,7 @@ def write(
                     else {}
                 ),
             }
-            for b in band_plan
+            for b in lod_plan
         },
     }
     schema = schema.with_metadata(
@@ -435,7 +437,7 @@ def write(
         ).fetch_arrow_table()
         if family != 'point' and polygons_from is not None and sample.num_rows:
             wkb = sample.column(geometry).to_numpy(zero_copy_only=False)
-            finest = band_plan[-1]
+            finest = lod_plan[-1]
             cx0 = np.zeros(len(wkb))
             parts = (render_lines if family == 'line' else render_polygons)(
                 wkb, cx0, cx0, *grids[finest['name']]
@@ -454,13 +456,13 @@ def write(
         data_page_size=page_bytes,
         data_page_version='1.0',
     )
-    log(f'  {len(band_plan)} bands, batch {batch_rows} rows, prefix row groups {prefix_end + 1}')
+    log(f'  {len(lod_plan)} LODs, batch {batch_rows} rows, prefix row groups {prefix_end + 1}')
 
     # 5. write: prefix rows first, then everything else, each in Hilbert order
     writer = pq.ParquetWriter(out, schema, **options)
     pool = ProcessPoolExecutor(max_workers=workers)
     row_groups = 0
-    band_level = {b['name']: zooms.index(max(b['zooms'])) for b in band_plan}
+    lod_level = {b['name']: zooms.index(max(b['zooms'])) for b in lod_plan}
 
     def flush(table: pa.Table, fut):
         nonlocal row_groups
@@ -472,20 +474,20 @@ def write(
         ids = table.column('id').to_numpy()
         arrays = []
         k = 0
-        for b in band_plan:
-            mask = level <= band_level[b['name']]
+        for b in lod_plan:
+            mask = level <= lod_level[b['name']]
             if b['geometry'] == POINT_GEOMETRY:
                 z_index = zooms.index(b['zooms'][0])
-                band_attrs = attrs
+                lod_attrs = attrs
                 if z_index in overrides:
-                    band_attrs = pack_attributes(
+                    lod_attrs = pack_attributes(
                         _with_overrides(table, ids, overrides[z_index]), attributes
                     )
-                arrays.append(interleave(table.num_rows, [band_attrs, points], mask))
+                arrays.append(interleave(table.num_rows, [lod_attrs, points], mask))
             else:
                 arrays.append(interleave(table.num_rows, [attrs, rendered[k]], mask))
                 k += 1
-        lod = pa.StructArray.from_arrays(arrays, [b['name'] for b in band_plan])
+        lod = pa.StructArray.from_arrays(arrays, [b['name'] for b in lod_plan])
         cols = {name: table.column(name) for name in table.column_names}
         out_table = pa.table(
             {
@@ -514,7 +516,7 @@ def write(
                     table.column(geometry).to_numpy(zero_copy_only=False),
                     table.column('cx').to_numpy(),
                     table.column('cy').to_numpy(),
-                    [grids[b['name']] for b in band_plan if b['grid_zoom']],
+                    [grids[b['name']] for b in lod_plan if b['grid_zoom']],
                     family,
                 )
                 fut = pool.submit(_render, job)
