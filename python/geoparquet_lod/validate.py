@@ -16,7 +16,7 @@ from .encoding import (
     decode_attributes,
     decode_polygon_tree,
 )
-from .writer import LOD_KEY
+from .writer import LOD_KEY, LOD_VERSION
 
 
 class ValidationError(Exception):
@@ -31,6 +31,9 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
     lod = geo.get(LOD_KEY)
     if not lod:
         raise ValidationError(f'no geo.{LOD_KEY} metadata')
+    major = str(lod.get('version', '')).split('.')[0]
+    if major != LOD_VERSION.split('.')[0]:
+        raise ValidationError(f'version {lod.get("version")} is not compatible with {LOD_VERSION}')
     column = lod.get('column', 'lod')
     names = f.schema_arrow.names
     if column not in names:

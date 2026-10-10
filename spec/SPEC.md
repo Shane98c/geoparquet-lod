@@ -1,8 +1,7 @@
 # LOD columns
 
 *A layout and metadata contract for GeoParquet files that serve a zoomable
-map directly. Implemented by the writer and reader in this repository. Draft;
-not yet versioned.*
+map directly. Implemented by the writer and reader in this repository. Draft 0.1.0.*
 
 ## Goal
 
@@ -61,6 +60,7 @@ Under the `geo` key, a `lod_columns` object:
 
 | field | type | meaning |
 | --- | --- | --- |
+| `version` | string | `0.1.0`; readers reject a different major version |
 | `column` | string | name of the payload struct column |
 | `order` | string | `hilbert` |
 | `zooms` | int[] | every zoom the file serves, ascending |

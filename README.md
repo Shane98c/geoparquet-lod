@@ -100,5 +100,5 @@ Bytes include page-index reads; they are cached for the session.
 
 ## Status
 
-Draft. The layout is settled; the payload encodings are ours and are the part
+Draft 0.1.0. The layout is settled; the payload encodings are ours and are the part
 a standard would replace. See `spec/SPEC.md`.

@@ -1,6 +1,6 @@
 {
   "name": "geoparquet-lod",
-  "version": "0.2.0",
+  "version": "0.1.0",
   "description": "Read GeoParquet files with per-zoom display payload columns, and serve them as MapLibre vector tiles",
   "type": "module",
   "license": "MIT",
