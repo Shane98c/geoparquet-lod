@@ -271,3 +271,45 @@ def test_cli_auto_thinning():
 
     assert parse_thinning('auto', None).__name__ == 'drop_rate(2.5)'
     assert parse_thinning('auto', 'risk > 0').__name__.startswith('only(')
+
+
+def test_tile_directory_descriptor(buildings, tmp_path):
+    out = write(
+        buildings,
+        tmp_path / 'td.parquet',
+        carry=['risk'],
+        workers=1,
+        tile_directory=True,
+        log=lambda *_: None,
+    )
+    meta = json.loads(pq.read_schema(out).metadata[b'geo'])['lod_columns']
+    descriptor = meta['tile_directory']
+    assert descriptor['path'] == 'td.parquet.tiledir.parquet'
+    assert descriptor['profile'] == 'parquet-table-1'
+    prefix = meta['prefix']['zoom'] if meta['prefix'] else -1
+    assert descriptor['zooms'] == [z for z in meta['zooms'] if z > prefix]
+    assert validate(out)['tile_directory'] == 'bound'
+    sidecar = pq.ParquetFile(tmp_path / descriptor['path'])
+    header = json.loads(sidecar.metadata.metadata[b'lod_tile_directory'])
+    assert header['source']['generation'] == descriptor['generation']
+    assert sorted({d['zoom'] for d in header['directories']}) == descriptor['zooms']
+
+    from geoparquet_lod.validate import ValidationError, check_tile_directory
+
+    good = dict(descriptor)
+    for bad in (
+        {**good, 'path': '/abs.parquet'},
+        {**good, 'path': '../up.parquet'},
+        {**good, 'path': 'https://x/y.parquet'},
+        {**good, 'zooms': [99]},
+        {**good, 'zooms': [descriptor['zooms'][-1], descriptor['zooms'][0]]},
+        {**good, 'generation': ''},
+    ):
+        with pytest.raises(ValidationError):
+            check_tile_directory(out, {**meta, 'tile_directory': bad})
+    with pytest.raises(ValidationError, match='not the tile directory'):
+        check_tile_directory(out, {**meta, 'tile_directory': {**good, 'generation': 'other'}})
+    assert (
+        check_tile_directory(out, {**meta, 'tile_directory': {**good, 'path': 'gone.parquet'}})
+        == 'absent'
+    )

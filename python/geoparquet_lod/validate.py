@@ -9,6 +9,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from .encoding import COORDINATES, ENCODING, LIST_DEPTH, geometry_rows, geometry_type
+from .tiledir import KEY as TILE_DIRECTORY_KEY
 from .writer import LOD_KEY, LOD_VERSION
 
 
@@ -82,6 +83,8 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
     if prefix and not (0 <= prefix['row_group_end'] < md.num_row_groups):
         raise ValidationError('prefix row_group_end out of range')
 
+    directory = check_tile_directory(path, lod)
+
     # statistics on the covering and page indexes on every column, in every row group
     for g in range(md.num_row_groups):
         rg = md.row_group(g)
@@ -126,7 +129,60 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
         'lods': list(lods),
         'prefix': prefix,
         'sampled_non_null': checked,
+        'tile_directory': directory,
     }
+
+
+def check_tile_directory(path: str | Path, lod: dict) -> str | None:
+    """Check the optional `tile_directory` descriptor; when its sidecar sits beside the file,
+    check that it is bound to this file. Returns None, 'absent' or 'bound'."""
+    descriptor = lod.get('tile_directory')
+    if descriptor is None:
+        return None
+    if not isinstance(descriptor, dict):
+        raise ValidationError('tile_directory must be an object')
+    rel = descriptor.get('path')
+    if (
+        not isinstance(rel, str)
+        or not rel
+        or '://' in rel
+        or rel.startswith('/')
+        or '..' in Path(rel).parts
+    ):
+        raise ValidationError('tile_directory.path must be a relative path beside the file')
+    if not isinstance(descriptor.get('profile'), str) or not descriptor['profile']:
+        raise ValidationError('tile_directory.profile must be a string')
+    zooms = descriptor.get('zooms')
+    served = {z for b in (lod.get('lods') or {}).values() for z in b.get('zooms', [])}
+    if (
+        not isinstance(zooms, list)
+        or not all(isinstance(z, int) for z in zooms)
+        or zooms != sorted(set(zooms))
+        or not set(zooms) <= served
+    ):
+        raise ValidationError('tile_directory.zooms must be ascending zooms the file serves')
+    generation = descriptor.get('generation')
+    if not isinstance(generation, str) or not generation:
+        raise ValidationError('tile_directory.generation must be a non-empty string')
+    sidecar = Path(path).parent / rel
+    if not sidecar.exists():
+        return 'absent'
+    meta = pq.ParquetFile(sidecar).metadata.metadata or {}
+    header = json.loads(meta.get(TILE_DIRECTORY_KEY.encode(), b'{}'))
+    source = header.get('source') or {}
+    if header.get('profile') != descriptor['profile'] or source.get('generation') != generation:
+        raise ValidationError(f'{sidecar.name} is not the tile directory this file declares')
+    if source.get('file_size') != Path(path).stat().st_size or source.get(
+        'footer_length'
+    ) != _footer_length(path):
+        raise ValidationError(f'{sidecar.name} is bound to a different write of this file')
+    return 'bound'
+
+
+def _footer_length(path: str | Path) -> int:
+    with Path(path).open('rb') as f:
+        f.seek(-8, 2)
+        return int.from_bytes(f.read(4), 'little')
 
 
 def _check_geometry(name: str, gtype: str, g) -> None:

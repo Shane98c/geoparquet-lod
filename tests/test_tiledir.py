@@ -1,4 +1,4 @@
-"""Experimental directory membership and cross-language page decoding."""
+"""Tile directory membership, sidecar metadata and cross-language page decoding."""
 
 import json
 import subprocess
@@ -9,7 +9,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 from geoparquet_lod.encoding import lod_type
-from geoparquet_lod.tiledir import BUFFER, Compact, build, is_crs84, morton, tile_span
+from geoparquet_lod.tiledir import BUFFER, KEY, PROFILE, Compact, build, is_crs84, morton, tile_span
 
 
 def test_tile_span_boundaries():
@@ -34,8 +34,10 @@ def test_crs84_detection():
     assert not is_crs84({'crs': 'PROJCRS["x"]'})
 
 
-@pytest.mark.parametrize('family', ['Point', 'MultiPolygon'])
-def test_directory_reader(tmp_path, family):
+@pytest.mark.parametrize(
+    ('family', 'generation'), [('Point', None), ('MultiPolygon', None), ('MultiPolygon', 'g1')]
+)
+def test_directory_reader(tmp_path, family, generation):
     attributes = [pa.field('label', pa.string()), pa.field('value', pa.int32())]
     scale = 0.0001
     rows, bounds = [], []
@@ -78,6 +80,10 @@ def test_directory_reader(tmp_path, family):
             lods={'f4': lod},
         ),
     )
+    if generation:
+        geo['lod_columns']['tile_directory'] = dict(
+            path='fixture.dir.parquet', profile=PROFILE, zooms=[4, 5, 6], generation=generation
+        )
     table = pa.table(
         dict(
             bbox=pa.array(bounds, pa.struct([pa.field(k, pa.float32()) for k in bounds[0]])),
@@ -104,12 +110,25 @@ def test_directory_reader(tmp_path, family):
         use_dictionary=True,
     )
     info = build(path)
-    assert info['lods'][0]['entries'] > 1
-    assert info['root_bytes'] > 0
-    assert info['size'] > info['open_bytes']
+    sidecar = tmp_path / (
+        'fixture.dir.parquet' if generation else 'fixture.parquet.tiledir.parquet'
+    )
+    assert info['path'] == str(sidecar)
+    assert [d['zoom'] for d in info['directories']] == [4, 5, 6]
+    assert all(d['entries'] > 1 for d in info['directories'])
+    directory = pq.ParquetFile(sidecar)
+    stored = json.loads(directory.metadata.metadata[KEY.encode()])
+    assert stored['source']['generation'] == generation
+    assert stored['source']['file_size'] == path.stat().st_size
+    assert directory.schema_arrow.names == ['zoom', 'tile', 'pages']
+    rows = directory.read().to_pydict()
+    assert rows['zoom'] == sorted(rows['zoom'])
+    assert all(len(p) % 6 == 0 for p in rows['pages'])
     with pytest.raises(ValueError, match='differ'):
         build(path, path)
     root = Path(__file__).resolve().parents[1]
     subprocess.run(
-        ['node', str(root / 'js/test/tiledir.test.mjs'), str(path)], check=True, cwd=root
+        ['node', str(root / 'js/test/tiledir.test.mjs'), str(path), str(sidecar)],
+        check=True,
+        cwd=root,
     )

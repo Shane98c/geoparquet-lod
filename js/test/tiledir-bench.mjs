@@ -61,16 +61,20 @@ const originalFetch = async (url, options) => {
   const { size } = await stat(path)
   if (options?.method === 'HEAD')
     return new Response(null, { headers: { 'content-length': String(size) } })
+  const suffix = /^bytes=-(\d+)$/.exec(options.headers.Range)
   const match = /^bytes=(\d+)-(\d+)$/.exec(options.headers.Range)
-  const start = Number(match[1]),
-    end = Number(match[2]) + 1
+  const start = suffix ? Math.max(0, size - Number(suffix[1])) : Number(match[1]),
+    end = suffix ? size : Number(match[2]) + 1
   let handle = handles.get(url)
   if (!handle) handles.set(url, (handle = await open(path)))
   const bytes = new Uint8Array(end - start)
   const { bytesRead } = await handle.read(bytes, 0, bytes.length, start)
   return new Response(bytes.subarray(0, bytesRead), {
     status: 206,
-    headers: { 'content-length': String(bytesRead) },
+    headers: {
+      'content-length': String(bytesRead),
+      'content-range': `bytes ${start}-${start + bytesRead - 1}/${size}`,
+    },
   })
 }
 let active
@@ -100,16 +104,29 @@ globalThis.fetch = async (...args) => {
     stats.bytes += Number(response.headers.get('content-length') ?? 0)
   return response
 }
+// the fixtures declare no generation id; the open warns about that on every cold trial
+const warn = console.warn
+console.warn = (...args) => {
+  if (!String(args[0]).includes('no generation id')) warn(...args)
+}
 const results = []
 const sidecars = []
 let mismatches = 0
 for (const dataset of datasets) {
+  const sidecarUrl = `${dataset.url}.tiledir.parquet`
   const metadataReader = await LodReader.open(coalescing(await httpSource([dataset.url])))
-  const directory = await TileDirectory.open(metadataReader, `${dataset.url}.tiledir`)
-  const sizeResponse = await fetch(`${dataset.url}.tiledir`, { method: 'HEAD' })
+  await settle()
+  const openStats = { bytes: 0, requests: 0 }
+  active = openStats
+  const directory = await TileDirectory.open(metadataReader, sidecarUrl)
+  active = undefined
+  const sizeResponse = await fetch(sidecarUrl, { method: 'HEAD' })
   sidecars.push({
     dataset: dataset.name,
     bytes: Number(sizeResponse.headers.get('content-length')),
+    footer: directory.metadata.metadata_length,
+    rowGroups: directory.metadata.row_groups.length,
+    open: openStats,
     header: directory.header,
   })
   const tiles = [2, 6, 10, 12, 13, 14, 15, 16, 17].map((z) => tileAt(dataset.center, z))
@@ -128,7 +145,7 @@ for (const dataset of datasets) {
         let used = false
         let td
         if (mode === 'tiledir' && tile[0] <= reader.finestZoom) {
-          td = await TileDirectory.open(reader, `${dataset.url}.tiledir`)
+          td = await TileDirectory.open(reader, sidecarUrl)
           const read = td.readLodByTile.bind(td)
           td.readLodByTile = async (...args) => {
             const rows = await read(...args)
@@ -140,7 +157,7 @@ for (const dataset of datasets) {
         await settle()
         const ms = performance.now() - start
         active = undefined
-        if (td && td.covers(reader.lodForZoom(tile[0])))
+        if (td && td.covers(reader.lodForZoom(tile[0]), tile[0]))
           assert.ok(used, 'benchmark must not silently fall back')
         outputs[mode] = decode(buffer)
         measurements[mode].push({
@@ -192,20 +209,18 @@ for (const r of results) {
     `| ${r.dataset} | ${r.tile} | ${cell(r.index)} | ${cell(r.tiledir)} | ${r.index.mvt} / ${r.tiledir.mvt} | ${r.index.features} / ${r.tiledir.features} |`,
   )
 }
-console.log('\n| Dataset | Sidecar bytes | Header bytes | Root bytes | Open request bytes |')
+console.log('\n| Dataset | Sidecar bytes | Footer bytes | Row groups | Open bytes / requests |')
 console.log('|---|---:|---:|---:|---:|')
-for (const { dataset, bytes, header } of sidecars) {
+for (const { dataset, bytes, footer, rowGroups, open } of sidecars) {
   console.log(
-    `| ${dataset} | ${bytes} | ${JSON.stringify(header).length} | ${header.root_bytes} | 65536 |`,
+    `| ${dataset} | ${bytes} | ${footer} | ${rowGroups} | ${open.bytes} / ${open.requests} |`,
   )
 }
-console.log('\n| Dataset | LOD | Finest zoom | Entries | Raw B/entry | Gzip B/entry | Blocks |')
-console.log('|---|---|---:|---:|---:|---:|---:|')
+console.log('\n| Dataset | LOD | Zoom | Entries |')
+console.log('|---|---|---:|---:|')
 for (const { dataset, header } of sidecars)
-  for (const lod of header.lods) {
-    console.log(
-      `| ${dataset} | ${lod.name} | ${lod.zoom} | ${lod.entries} | ${(lod.raw_bytes / (lod.entries || 1)).toFixed(1)} | ${(lod.compressed_bytes / (lod.entries || 1)).toFixed(1)} | ${lod.blocks} |`,
-    )
+  for (const d of header.directories) {
+    console.log(`| ${dataset} | ${d.lod} | ${d.zoom} | ${d.entries} |`)
   }
 console.log(
   `\nMismatches: ${mismatches}; ${runs} cold repetitions, medians. Transport: ${local ? 'local-file byte-range adapter' : 'HTTP'}`,

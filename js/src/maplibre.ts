@@ -12,7 +12,7 @@ export interface SourceConfig {
   layer?: string
   pointLayer?: string
   properties?: string[]
-  /** Experimental tile directory sidecar URL; see TileOptions. */
+  /** Tile directory sidecar URL, e.g. `<url>.tiledir.parquet`; see TileOptions. */
   tiledir?: string
 }
 

@@ -13,6 +13,7 @@ import { DEFAULT_PARSERS } from 'hyparquet/src/convert.js'
 import { getSchemaPath } from 'hyparquet/src/schema.js'
 import { compressors } from 'hyparquet-compressors'
 import { LIST_DEPTH, type GeometryType } from './geometry.js'
+import type { TileDirectoryDescriptor } from './tiledir.js'
 
 export type Bbox = [number, number, number, number]
 
@@ -41,6 +42,7 @@ export interface LodMetadata {
   attributes: { name: string; type: string }[]
   thinning: Record<string, unknown>
   lods: Record<string, Omit<Lod, 'name'>>
+  tile_directory?: TileDirectoryDescriptor
 }
 
 /** A hyparquet-style byte source whose slices can be aborted. */
@@ -329,7 +331,7 @@ export class LodReader {
     return out
   }
 
-  /** Experimental sidecars bind page locations to this file size and footer length. */
+  /** Tile directories bind page locations to this file size and footer length. */
   get fileSize(): number {
     return this.file.byteLength
   }

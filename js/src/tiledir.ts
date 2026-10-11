@@ -1,114 +1,97 @@
 import { MVT_BUFFER, MVT_EXTENT } from '@cogp/reader'
-import type { Lod, LodReader, LodRows, PageLocation } from './reader.js'
+import {
+  parquetMetadataAsync,
+  parquetSchema,
+  type AsyncBuffer,
+  type FileMetaData,
+  type SchemaTree,
+} from 'hyparquet'
+import { readColumn } from 'hyparquet/src/column.js'
+import { DEFAULT_PARSERS } from 'hyparquet/src/convert.js'
+import { getSchemaPath } from 'hyparquet/src/schema.js'
+import { compressors } from 'hyparquet-compressors'
+import type { Lod, LodReader, LodRows, PageLocation, RangeSource } from './reader.js'
+import { coalescing } from './range-buffer.js'
 
-const OPEN_BYTES = 65536
+export const TILE_DIRECTORY_PROFILE = 'parquet-table-1'
+export const TILE_DIRECTORY_KEY = 'lod_tile_directory'
+export const TILE_DIRECTORY_SUFFIX = '.tiledir.parquet'
 
-interface DirectoryLod {
-  name: string
+/** The optional `tile_directory` object of a file's `lod_columns` metadata. */
+export interface TileDirectoryDescriptor {
+  path: string
+  profile: string
+  zooms: number[]
+  generation: string
+}
+
+export interface DirectoryEntry {
+  lod: string
   zoom: number
   paths: string[]
   entries: number
-  root_offset: number
-  compressed_bytes: number
-  raw_bytes: number
-  blocks: number
 }
 
+/** The sidecar's footer metadata under `lod_tile_directory`. */
 export interface TileDirectoryHeader {
-  experimental: boolean
-  version: number
-  file_size: number
-  footer_length: number
+  profile: string
   tile_size: number
   buffer: number
   slop_cells: number
-  codec: string
   tile_order: string
-  root_bytes: number
-  lods: DirectoryLod[]
+  source: { file_size: number; footer_length: number; generation: string | null }
+  directories: DirectoryEntry[]
 }
 
-type Root = { first: number; last: number; offset: number; length: number }
-type Entry = { tile: number; groups: Map<number, PageLocation[][]> }
+const COLUMNS = ['zoom', 'tile', 'pages.list.element'] as const
+const OPEN_BYTES = 64 * 1024
 
-class Varints {
-  offset = 0
-  constructor(readonly bytes: Uint8Array) {}
-  uint(): number {
-    let value = 0
-    let multiplier = 1
-    for (let i = 0; i < 8; i++) {
-      if (this.offset >= this.bytes.length) throw new Error('truncated tile directory')
-      const byte = this.bytes[this.offset++]
-      value += (byte & 127) * multiplier
-      if (!Number.isSafeInteger(value)) throw new Error('unsafe tile directory integer')
-      if (byte < 128) return value
-      multiplier *= 128
-    }
-    throw new Error('invalid tile directory varint')
-  }
-}
+type Group = { zooms: number[]; tiles: number[]; pages: number[][] }
 
-/** Morton intervals covering the buffered parent rectangle on the stored zoom's grid. */
-export const tileIntervals = (
-  finest: number,
-  z: number,
-  x: number,
-  y: number,
-): [number, number][] => {
+/** Morton id of tile (x, y) on zoom z's grid. */
+export const tileId = (z: number, x: number, y: number): number => {
   if (
-    ![finest, z, x, y].every(Number.isInteger) ||
+    ![z, x, y].every(Number.isInteger) ||
     z < 0 ||
-    z > finest ||
-    finest > 24 ||
+    z > 24 ||
     x < 0 ||
     y < 0 ||
     x >= 2 ** z ||
     y >= 2 ** z
   )
     throw new Error('unsupported tile coordinates')
-  const n = 2 ** finest
-  const factor = 2 ** (finest - z)
-  const storedPadding = MVT_BUFFER / MVT_EXTENT
-  const padding = storedPadding + (z < finest ? 1 / MVT_EXTENT : 0)
-  const left = Math.max(0, Math.floor((x - padding) * factor + storedPadding))
-  const right = Math.min(n - 1, Math.ceil((x + 1 + padding) * factor - storedPadding) - 1)
-  const top = Math.max(0, Math.floor((y - padding) * factor + storedPadding))
-  const bottom = Math.min(n - 1, Math.ceil((y + 1 + padding) * factor - storedPadding) - 1)
-  const out: [number, number][] = []
-  const visit = (tx: number, ty: number, size: number, id: number) => {
-    if (tx > right || ty > bottom || tx + size <= left || ty + size <= top) return
-    if (tx >= left && ty >= top && tx + size - 1 <= right && ty + size - 1 <= bottom) {
-      const last = out[out.length - 1]
-      if (last && last[1] + 1 === id) last[1] = id + size * size - 1
-      else out.push([id, id + size * size - 1])
-      return
-    }
-    const half = size / 2
-    for (let child = 0; child < 4; child++) {
-      visit(
-        tx + (child % 2) * half,
-        ty + Math.floor(child / 2) * half,
-        half,
-        id + child * half * half,
-      )
-    }
-  }
-  visit(0, 0, n, 0)
-  return out
+  let id = 0
+  for (let i = 0; i < z; i++)
+    id += ((x >> i) & 1) * 2 ** (2 * i) + ((y >> i) & 1) * 2 ** (2 * i + 1)
+  return id
 }
 
-/** Experimental, version-bound sidecar accelerator. Geometry clipping uses the tile encoder. */
+/** Where a file's sidecar lives: its descriptor's path relative to the file, else `<file>.tiledir.parquet`. */
+export const tileDirectoryUrl = (reader: LodReader, fileUrl: string): string => {
+  const path = reader.lod.tile_directory?.path
+  return path
+    ? new URL(path, new URL(fileUrl, globalThis.location?.href)).href
+    : fileUrl + TILE_DIRECTORY_SUFFIX
+}
+
+/**
+ * An optional Parquet-table sidecar mapping (zoom, Morton tile id) to the LOD
+ * pages a buffered tile needs. Rows are sorted by (zoom, tile); a lookup picks
+ * row groups by footer statistics and reads one, so a tile skips the main
+ * file's bbox and page index reads. Geometry clipping uses the tile encoder.
+ */
 export class TileDirectory {
-  private readonly roots = new Map<string, Root[]>()
-  private readonly leaves = new Map<number, Promise<Entry[]>>()
   private readonly groupStarts: number[]
+  private readonly cache = new Map<string, Promise<unknown>>()
+  private readonly elements = new Map<string, SchemaTree['element']>()
+  private readonly chunkIndex: number[]
+  private readonly covered: Map<string, DirectoryEntry>
 
   private constructor(
     readonly reader: LodReader,
-    readonly url: string,
+    private readonly file: RangeSource,
+    readonly metadata: FileMetaData,
     readonly header: TileDirectoryHeader,
-    root: Uint8Array,
   ) {
     let start = 0
     this.groupStarts = reader.metadata.row_groups.map((group) => {
@@ -116,142 +99,75 @@ export class TileDirectory {
       start += Number(group.num_rows)
       return result
     })
-    for (const lod of header.lods) {
-      const input = new Varints(root)
-      input.offset = lod.root_offset
-      const count = input.uint()
-      const blocks: Root[] = []
-      let tile = 0
-      let offset = 0
-      for (let i = 0; i < count; i++) {
-        tile += input.uint()
-        const last = tile + input.uint()
-        offset += input.uint()
-        blocks.push({ first: tile, last, offset, length: input.uint() })
-      }
-      this.roots.set(`${lod.name}/${lod.zoom}`, blocks)
+    const visit = (node: SchemaTree) => {
+      if (node.children.length) node.children.forEach(visit)
+      else this.elements.set(node.path.join('.'), node.element)
     }
+    visit(parquetSchema(metadata))
+    const paths = metadata.row_groups[0]?.columns.map((c) => c.meta_data!.path_in_schema.join('.'))
+    this.chunkIndex = COLUMNS.map((c) => paths?.indexOf(c) ?? 0)
+    if (paths && this.chunkIndex.includes(-1)) throw new Error('tile directory schema mismatch')
+    this.covered = new Map(header.directories.map((d) => [`${d.lod}/${d.zoom}`, d]))
   }
 
-  static async open(reader: LodReader, url: string, signal?: AbortSignal): Promise<TileDirectory> {
-    const buffer = await fetchRange(url, 0, OPEN_BYTES, signal)
-    const view = new DataView(buffer)
-    const bytes = new Uint8Array(buffer)
-    if (new TextDecoder().decode(bytes.subarray(0, 8)) !== 'LODTDIR1')
-      throw new Error('invalid tile directory magic')
-    const headerLength = view.getUint32(8, true)
-    const rootLength = view.getUint32(12, true)
-    if (16 + headerLength + rootLength > OPEN_BYTES)
-      throw new Error('tile directory root exceeds open block')
-    const header = JSON.parse(
-      new TextDecoder().decode(bytes.subarray(16, 16 + headerLength)),
-    ) as TileDirectoryHeader
+  /** Open a sidecar by URL or byte source and check that it belongs to `reader`'s file. */
+  static async open(
+    reader: LodReader,
+    source: string | RangeSource,
+    signal?: AbortSignal,
+  ): Promise<TileDirectory> {
+    const file = coalescing(typeof source === 'string' ? await tailSource(source, signal) : source)
+    const metadata = await parquetMetadataAsync(file as unknown as AsyncBuffer, {
+      initialFetchSize: OPEN_BYTES,
+    })
+    const raw = metadata.key_value_metadata?.find((kv) => kv.key === TILE_DIRECTORY_KEY)?.value
+    if (!raw) throw new Error(`tile directory has no ${TILE_DIRECTORY_KEY} metadata`)
+    const header = JSON.parse(raw) as TileDirectoryHeader
     if (
-      header.version !== 1 ||
-      !header.experimental ||
-      header.codec !== 'gzip' ||
+      header.profile !== TILE_DIRECTORY_PROFILE ||
       header.tile_order !== 'morton' ||
       header.tile_size !== 512 ||
       header.buffer !== MVT_BUFFER / MVT_EXTENT ||
-      header.slop_cells !== 1 ||
-      header.root_bytes !== rootLength
+      header.slop_cells !== 1
     )
-      throw new Error('unsupported experimental tile directory')
+      throw new Error(`unsupported tile directory profile ${header.profile}`)
     if (
-      header.file_size !== reader.fileSize ||
-      header.footer_length !== reader.metadata.metadata_length
-    ) {
+      header.source.file_size !== reader.fileSize ||
+      header.source.footer_length !== reader.metadata.metadata_length
+    )
       throw new Error('tile directory file binding mismatch')
+    const descriptor = reader.lod.tile_directory
+    if (descriptor) {
+      if (descriptor.profile !== TILE_DIRECTORY_PROFILE)
+        throw new Error(`unsupported tile directory profile ${descriptor.profile}`)
+      if (!header.source.generation || header.source.generation !== descriptor.generation)
+        throw new Error('tile directory generation mismatch')
+      const zooms = [...new Set(header.directories.map((d) => d.zoom))].sort((a, b) => a - b)
+      if (JSON.stringify(zooms) !== JSON.stringify([...descriptor.zooms].sort((a, b) => a - b)))
+        throw new Error('tile directory zooms differ from its descriptor')
+    } else {
+      console.warn(
+        'tile directory bound by file size and footer length only; the file declares no generation id',
+      )
     }
-    const prefix = reader.lod.prefix
-    for (const lod of Object.values(reader.lods)) {
+    for (const entry of header.directories) {
+      const lod = reader.lods[entry.lod]
+      if (!lod || !lod.zooms.includes(entry.zoom) || entry.zoom > 24)
+        throw new Error('tile directory LOD mismatch')
       const paths = [
         reader.geometryLeaf(lod),
         ...reader.lod.attributes.map((a) => `${reader.lod.column}.${lod.name}.${a.name}`),
       ]
-      const zooms = lod.zooms.filter((z) => !prefix || z > prefix.zoom)
-      for (const zoom of zooms) {
-        const directory = header.lods.find(
-          (entry) => entry.name === lod.name && entry.zoom === zoom,
-        )
-        if (
-          !directory ||
-          directory.zoom > 24 ||
-          JSON.stringify(directory.paths) !== JSON.stringify(paths)
-        )
-          throw new Error('tile directory LOD mismatch')
-      }
+      if (JSON.stringify(entry.paths) !== JSON.stringify(paths))
+        throw new Error('tile directory leaf paths mismatch')
     }
-    return new TileDirectory(
-      reader,
-      url,
-      header,
-      bytes.subarray(16 + headerLength, 16 + headerLength + rootLength),
-    )
+    return new TileDirectory(reader, file, metadata, header)
   }
 
-  private leaf(block: Root, lod: DirectoryLod, signal?: AbortSignal): Promise<Entry[]> {
-    let result = this.leaves.get(block.offset)
-    if (!result) {
-      result = (async () => {
-        const buffer = await fetchRange(
-          this.url,
-          OPEN_BYTES + block.offset,
-          OPEN_BYTES + block.offset + block.length,
-          signal,
-        )
-        const stream = new Blob([buffer]).stream().pipeThrough(new DecompressionStream('gzip'))
-        const input = new Varints(new Uint8Array(await new Response(stream).arrayBuffer()))
-        const count = input.uint()
-        const entries: Entry[] = []
-        let tile = 0
-        for (let i = 0; i < count; i++) {
-          tile += input.uint()
-          const groups = new Map<number, PageLocation[][]>()
-          const groupCount = input.uint()
-          for (let j = 0; j < groupCount; j++) {
-            const g = input.uint()
-            if (g >= this.reader.metadata.row_groups.length)
-              throw new Error('invalid tile directory row group')
-            const leaves = lod.paths.map(() => {
-              const pages: PageLocation[] = []
-              const pageCount = input.uint()
-              let row = 0
-              let offset = 0
-              for (let p = 0; p < pageCount; p++) {
-                row += input.uint()
-                const rowEnd = row + input.uint()
-                offset += input.uint()
-                const byteEnd = offset + input.uint()
-                if (
-                  rowEnd <= row ||
-                  rowEnd > Number(this.reader.metadata.row_groups[g].num_rows) ||
-                  offset < 4 ||
-                  byteEnd <= offset ||
-                  byteEnd > this.header.file_size - this.header.footer_length - 8
-                ) {
-                  throw new Error('invalid tile directory page location')
-                }
-                pages.push({ rowStart: row, rowEnd, byteStart: offset, byteEnd })
-              }
-              return pages
-            })
-            groups.set(g, leaves)
-          }
-          entries.push({ tile, groups })
-        }
-        if (input.offset !== input.bytes.length) throw new Error('trailing tile directory bytes')
-        return entries
-      })()
-      this.leaves.set(block.offset, result)
-      result.catch(() => this.leaves.delete(block.offset))
-    }
-    return result
-  }
-
-  /** Whether the directory has entries for `lod`; coarse LODs served by the prefix have none. */
-  covers(lod: Lod): boolean {
-    return this.header.lods.some((entry) => entry.name === lod.name)
+  /** Whether the directory serves `lod` at zoom `z`, or at any zoom when `z` is omitted. */
+  covers(lod: Lod, z?: number): boolean {
+    if (z !== undefined) return this.covered.has(`${lod.name}/${z}`)
+    return this.header.directories.some((entry) => entry.lod === lod.name)
   }
 
   async readLodByTile(
@@ -262,17 +178,9 @@ export class TileDirectory {
     attributes: string[] = [],
     signal?: AbortSignal,
   ): Promise<LodRows> {
-    const directory = this.header.lods.find((entry) => entry.name === lod.name && entry.zoom === z)
-    if (!directory) throw new Error('tile zoom has no directory entries')
-    const intervals = tileIntervals(directory.zoom, z, x, y)
-    const overlaps = (first: number, last: number) =>
-      intervals.some(([a, b]) => first <= b && last >= a)
-    const blocks = this.roots
-      .get(`${lod.name}/${directory.zoom}`)!
-      .filter((block) => overlaps(block.first, block.last))
-    const entries = (
-      await Promise.all(blocks.map((block) => this.leaf(block, directory, signal)))
-    ).flat()
+    const directory = this.covered.get(`${lod.name}/${z}`)
+    if (!directory) throw new Error('tile zoom has no tile directory')
+    const flat = await this.lookup(z, tileId(z, x, y))
     signal?.throwIfAborted()
     const selected = [
       0,
@@ -282,15 +190,32 @@ export class TileDirectory {
     ]
     if (selected.includes(-1)) throw new Error('attribute not carried by tile directory')
     const groups = new Map<number, Map<number, PageLocation>[]>()
-    for (const entry of entries) {
-      if (!overlaps(entry.tile, entry.tile)) continue
-      for (const [g, leaves] of entry.groups) {
-        let group = groups.get(g)
-        if (!group) groups.set(g, (group = selected.map(() => new Map())))
-        selected.forEach((leaf, i) =>
-          leaves[leaf].forEach((page) => group![i].set(page.byteStart, page)),
-        )
+    if (flat.length % 6) throw new Error('invalid tile directory page list')
+    const dataEnd = this.reader.fileSize - this.reader.metadata.metadata_length - 8
+    for (let i = 0; i < flat.length; i += 6) {
+      const [g, leaf, rowStart, rowCount, byteStart, byteLength] = flat.slice(i, i + 6)
+      if (
+        g >= this.reader.metadata.row_groups.length ||
+        leaf >= directory.paths.length ||
+        rowCount <= 0 ||
+        rowStart + rowCount > Number(this.reader.metadata.row_groups[g].num_rows) ||
+        byteStart < 4 ||
+        byteLength <= 0 ||
+        byteStart + byteLength > dataEnd
+      )
+        throw new Error('invalid tile directory page location')
+      if (!selected.includes(leaf)) continue
+      let group = groups.get(g)
+      if (!group) groups.set(g, (group = selected.map(() => new Map())))
+      const page = {
+        rowStart,
+        rowEnd: rowStart + rowCount,
+        byteStart,
+        byteEnd: byteStart + byteLength,
       }
+      selected.forEach((s, j) => {
+        if (s === leaf) group![j].set(byteStart, page)
+      })
     }
     const output: LodRows = {
       rows: [],
@@ -327,6 +252,102 @@ export class TileDirectory {
     }
     return output
   }
+
+  /** The flat page sextuples of tile `t` at zoom `z`; empty when the tile has no row. */
+  private async lookup(z: number, t: number): Promise<number[]> {
+    const stat = (g: number, c: number) => {
+      const s = this.metadata.row_groups[g].columns[this.chunkIndex[c]].meta_data!.statistics
+      return s ? [Number(s.min_value), Number(s.max_value)] : [-Infinity, Infinity]
+    }
+    const candidates = this.metadata.row_groups
+      .map((_, g) => g)
+      .filter((g) => {
+        const [z0, z1] = stat(g, 0)
+        const [t0, t1] = stat(g, 1)
+        return z0 <= z && z <= z1 && t0 <= t && t <= t1
+      })
+    const found = await Promise.all(
+      candidates.map((g) => this.wholeGroup(g).then((group) => findRow(group, z, t))),
+    )
+    return found.find((pages) => pages !== null) ?? []
+  }
+
+  private groupRange(g: number): [number, number] {
+    const chunks = this.metadata.row_groups[g].columns.map((c) => c.meta_data!)
+    const start = Math.min(
+      ...chunks.map((m) => Number(m.dictionary_page_offset ?? m.data_page_offset)),
+    )
+    const end = Math.max(
+      ...chunks.map(
+        (m) =>
+          Number(m.dictionary_page_offset ?? m.data_page_offset) + Number(m.total_compressed_size),
+      ),
+    )
+    return [start, end]
+  }
+
+  /** A whole row group in one range, decoded once. */
+  private wholeGroup(g: number): Promise<Group> {
+    return this.cached(`g:${g}`, async () => {
+      const [start, end] = this.groupRange(g)
+      const buffer = await this.file.slice(start, end)
+      const rows = Number(this.metadata.row_groups[g].num_rows)
+      const [zooms, tiles, pages] = COLUMNS.map((leaf, c) => {
+        const m = this.metadata.row_groups[g].columns[this.chunkIndex[c]].meta_data!
+        const offset = Number(m.dictionary_page_offset ?? m.data_page_offset) - start
+        const view = new DataView(buffer, offset, Number(m.total_compressed_size))
+        return this.decode(g, leaf, view, rows)
+      })
+      return {
+        zooms: zooms.map(Number),
+        tiles: tiles.map(Number),
+        pages: pages.map((p) => Array.from(p as ArrayLike<bigint>, Number)),
+      }
+    })
+  }
+
+  private decode(g: number, leaf: string, view: DataView, rows: number): unknown[] {
+    const meta =
+      this.metadata.row_groups[g].columns[this.chunkIndex[COLUMNS.indexOf(leaf as never)]]
+        .meta_data!
+    const { data } = readColumn(
+      { view, offset: 0 },
+      { groupStart: 0, groupRows: rows, selectStart: 0, selectEnd: rows } as never,
+      {
+        ...meta,
+        pathInSchema: leaf.split('.'),
+        element: this.elements.get(leaf)!,
+        schemaPath: getSchemaPath(this.metadata.schema, leaf.split('.')),
+        compressors,
+        parsers: DEFAULT_PARSERS,
+      } as never,
+    )
+    return (data as ArrayLike<unknown>[]).flatMap((chunk) => Array.from(chunk))
+  }
+
+  private cached<T>(key: string, load: () => Promise<T>): Promise<T> {
+    let p = this.cache.get(key) as Promise<T> | undefined
+    if (!p) {
+      p = load()
+      this.cache.set(key, p)
+      p.catch(() => this.cache.delete(key))
+    }
+    return p
+  }
+}
+
+const findRow = (group: Group, z: number, t: number): number[] | null => {
+  let lo = 0
+  let hi = group.tiles.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    const before = group.zooms[mid] < z || (group.zooms[mid] === z && group.tiles[mid] < t)
+    if (before) lo = mid + 1
+    else hi = mid
+  }
+  return lo < group.tiles.length && group.zooms[lo] === z && group.tiles[lo] === t
+    ? group.pages[lo]
+    : null
 }
 
 /** Bounds of decoded display coordinates avoid a separate bbox-column read. */
@@ -364,21 +385,44 @@ function geometryIntersects(value: unknown, lod: Lod, z: number, x: number, y: n
   return projectY(ymin) >= -MVT_BUFFER && projectY(ymax) <= MVT_EXTENT + MVT_BUFFER
 }
 
-async function fetchRange(
-  url: string,
-  start: number,
-  end: number,
-  signal?: AbortSignal,
-): Promise<ArrayBuffer> {
+/**
+ * A range source whose first request is a suffix range for the footer, so
+ * opening needs no HEAD. The size comes from Content-Range, or from a HEAD
+ * when the server hides that header or refuses suffix ranges.
+ */
+async function tailSource(url: string, signal?: AbortSignal): Promise<RangeSource> {
   const response = await fetch(url, {
-    headers: { Range: `bytes=${start}-${end - 1}` },
+    headers: { Range: `bytes=-${OPEN_BYTES}` },
     cache: 'no-store',
     signal,
   })
-  if (response.status !== 206) throw new Error(`tile directory range failed: ${response.status}`)
-  const buffer = await response.arrayBuffer()
-  if (buffer.byteLength !== end - start) throw new Error('truncated tile directory range')
-  return buffer
+  let size = NaN
+  let tail = new ArrayBuffer(0)
+  if (response.status === 206) {
+    size = Number(/\/(\d+)\s*$/.exec(response.headers.get('Content-Range') ?? '')?.[1])
+    tail = await response.arrayBuffer()
+  } else await response.body?.cancel()
+  if (!Number.isSafeInteger(size)) {
+    const head = await fetch(url, { method: 'HEAD', cache: 'no-store', signal })
+    size = Number(head.headers.get('Content-Length'))
+    if (!head.ok || !Number.isSafeInteger(size)) throw new Error('cannot size tile directory')
+  }
+  const tailStart = size - tail.byteLength
+  return {
+    byteLength: size,
+    async slice(start, end = size, signal) {
+      if (start >= tailStart) return tail.slice(start - tailStart, end - tailStart)
+      const r = await fetch(url, {
+        headers: { Range: `bytes=${start}-${end - 1}` },
+        cache: 'no-store',
+        signal,
+      })
+      if (r.status !== 206) throw new Error(`tile directory range failed: ${r.status}`)
+      const buffer = await r.arrayBuffer()
+      if (buffer.byteLength !== end - start) throw new Error('truncated tile directory range')
+      return buffer
+    },
+  }
 }
 
 const directories = new WeakMap<LodReader, Map<string, Promise<TileDirectory>>>()

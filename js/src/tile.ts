@@ -6,7 +6,7 @@ import { openTileDirectory, TileDirectory } from './tiledir.js'
 const VECTOR_TILE_SIZE = 512
 
 export interface TileOptions {
-  /** Experimental sidecar URL; unavailable or incompatible sidecars fall back to page indexes. */
+  /** Tile directory sidecar URL or instance; a missing or mismatched one falls back to page indexes. */
   tiledir?: string | TileDirectory
   /** MVT layer name for shape LODs (default `features`). */
   layer?: string
@@ -69,11 +69,11 @@ export const renderTile = async (
           ? await openTileDirectory(reader, options.tiledir)
           : options.tiledir
       if (directory.reader !== reader) throw new Error('tile directory belongs to another reader')
-      if (directory.covers(lod))
+      if (directory.covers(lod, z))
         located = await directory.readLodByTile(lod, z, x, y, names, signal)
     } catch (error) {
       signal?.throwIfAborted()
-      console.warn('Experimental tile directory unavailable; using page indexes:', error)
+      console.warn('Tile directory unavailable; using page indexes:', error)
     }
   }
   const { rows, coords, columns } =

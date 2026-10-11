@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -32,6 +33,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from . import tiledir
 from .encoding import (
     COORDINATES,
     ENCODING,
@@ -275,11 +277,13 @@ def write(
     workers: int | None = None,
     memory_limit: str | None = None,
     temp_dir: str | None = None,
+    tile_directory: bool = False,
     log=print,
 ) -> Path:
     """Write `src` (any GeoParquet with a WKB geometry column) to `out` in the
     LOD columns layout. `complete_from` is the zoom from which every feature is
-    present; below it `thinning` chooses the rows. Returns the output path."""
+    present; below it `thinning` chooses the rows. `tile_directory` also builds the
+    optional tile directory sidecar and declares it in the metadata. Returns the output path."""
     src = str(src)
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -470,6 +474,14 @@ def write(
             for b in lod_plan
         },
     }
+    if tile_directory:
+        prefix = geo[LOD_KEY]['prefix']
+        geo[LOD_KEY]['tile_directory'] = {
+            'path': out.name + tiledir.SUFFIX,
+            'profile': tiledir.PROFILE,
+            'zooms': [z for z in zooms if not prefix or z > prefix['zoom']],
+            'generation': uuid.uuid4().hex,
+        }
     schema = schema.with_metadata(
         {**(source_schema.metadata or {}), b'geo': json.dumps(geo).encode()}
     )
@@ -596,6 +608,9 @@ def write(
     writer.close()
     pool.shutdown()
     sorted_path.unlink()
+    if tile_directory:
+        info = tiledir.build(out)
+        log(f'  tile directory {info["path"]}, {info["size"] / 1e6:.1f} MB')
     log(
         f'{n_rows:,} rows, {row_groups} row groups, {out.stat().st_size / 1e9:.2f} GB, {time.time() - t0:.0f}s -> {out}'
     )

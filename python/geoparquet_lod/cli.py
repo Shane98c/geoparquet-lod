@@ -87,6 +87,11 @@ def cli():
 @click.option('--workers', default=None, type=int)
 @click.option('--memory-limit', default=None)
 @click.option('--temp-dir', default=None)
+@click.option(
+    '--tile-directory',
+    is_flag=True,
+    help='also build OUT.tiledir.parquet, an optional tile directory, and declare it in OUT',
+)
 def write_cmd(
     src,
     out,
@@ -104,6 +109,7 @@ def write_cmd(
     workers,
     memory_limit,
     temp_dir,
+    tile_directory,
 ):
     """Write SRC (GeoParquet with WKB geometry) to OUT in the LOD columns layout."""
     if zooms != 'auto':
@@ -128,6 +134,7 @@ def write_cmd(
         workers=workers,
         memory_limit=memory_limit,
         temp_dir=temp_dir,
+        tile_directory=tile_directory,
         log=click.echo,
     )
 
@@ -161,7 +168,8 @@ def inspect_cmd(path):
 @click.argument('path', type=click.Path(exists=True, dir_okay=False))
 @click.option('--out', type=click.Path(dir_okay=False), default=None)
 def tiledir_cmd(path, out):
-    """Build an experimental version-bound PATH.tiledir sidecar."""
+    """Build the tile directory sidecar of PATH: the path its metadata declares, else
+    PATH.tiledir.parquet, bound to PATH by size and footer length (and generation if declared)."""
     from .tiledir import build
 
     click.echo(json.dumps(build(path, out), indent=2))

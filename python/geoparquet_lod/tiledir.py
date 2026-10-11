@@ -1,19 +1,31 @@
-"""Experimental v1 tile directory sidecars; not part of the LOD specification."""
+"""Tile directory sidecar: an optional Parquet table mapping each tile to the pages it needs."""
 
 from __future__ import annotations
 
-import gzip
 import json
 import struct
 from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
+import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
-MAGIC = b'LODTDIR1'
-OPEN_BYTES = 65536
+PROFILE = 'parquet-table-1'
+KEY = 'lod_tile_directory'
+SUFFIX = '.tiledir.parquet'
 BUFFER = 64 / 4096
+SCHEMA = pa.schema(
+    [
+        pa.field('zoom', pa.int8(), nullable=False),
+        pa.field('tile', pa.int64(), nullable=False),
+        pa.field(
+            'pages', pa.list_(pa.field('element', pa.int64(), nullable=False)), nullable=False
+        ),
+    ]
+)
+ROW_GROUP_BYTES = 64 * 1024
 
 
 class Compact:
@@ -72,17 +84,6 @@ class Compact:
         raise ValueError(f'unsupported Thrift compact type {kind}')
 
 
-def varint(value):
-    if value < 0:
-        raise ValueError('negative unsigned varint')
-    out = bytearray()
-    while value >= 128:
-        out.append((value & 127) | 128)
-        value >>= 7
-    out.append(value)
-    return out
-
-
 def is_crs84(column):
     """GeoParquet: an omitted `crs` is OGC:CRS84, an explicit null is unknown."""
     if 'crs' not in column:
@@ -129,50 +130,95 @@ def tile_span(bbox, zoom, scale):
     return tuple(int(v) for v in tile_spans([bbox], zoom, scale)[0])
 
 
-def encode_entries(entries, leaf_count):
-    out = bytearray(varint(len(entries)))
-    previous = 0
-    for tile, groups in entries:
-        out += varint(tile - previous)
-        previous = tile
-        out += varint(len(groups))
+def flatten(entries):
+    """(tile, {group: [set of pages per leaf]}) items as tile ids and flat page sextuples."""
+    tiles = np.fromiter((tile for tile, _ in entries), np.int64, len(entries))
+    pages = []
+    for _, groups in entries:
+        flat = []
         for group, leaves in sorted(groups.items()):
-            out += varint(group)
-            for leaf in range(leaf_count):
-                pages = sorted(leaves[leaf])
-                out += varint(len(pages))
-                row = offset = 0
-                for start, end, byte_start, byte_end in pages:
-                    out += varint(start - row) + varint(end - start)
-                    out += varint(byte_start - offset) + varint(byte_end - byte_start)
-                    row, offset = start, byte_start
-    return bytes(out)
+            for leaf, located in enumerate(leaves):
+                for start, end, byte_start, byte_end in sorted(located):
+                    flat += (group, leaf, start, end - start, byte_start, byte_end - byte_start)
+        pages.append(flat)
+    return tiles, pages
 
 
-def append_blocks(items, leaf_count, payload, blocks):
-    encoded = encode_entries(items, leaf_count)
-    compressed = gzip.compress(encoded, mtime=0)
-    if len(compressed) > 20 * 1024 and len(items) > 1:
-        middle = len(items) // 2
-        append_blocks(items[:middle], leaf_count, payload, blocks)
-        append_blocks(items[middle:], leaf_count, payload, blocks)
-        return
-    blocks.append((items[0][0], items[-1][0], len(payload), len(compressed), len(encoded)))
-    payload.extend(compressed)
+def write_directory(out, chunks, metadata, row_group_bytes=ROW_GROUP_BYTES):
+    """Write (zoom, tiles, pages) chunks in (zoom, tile) order, in row groups of about
+    `row_group_bytes` that never span zooms: footer statistics on zoom and tile pick the
+    group, and a lookup reads it whole in one range."""
+    options = dict(
+        compression='zstd',
+        use_dictionary=False,
+        # interleaved sextuples defeat delta coding; plain values compress about a third smaller
+        column_encoding={
+            'zoom': 'DELTA_BINARY_PACKED',
+            'tile': 'DELTA_BINARY_PACKED',
+            'pages.list.element': 'PLAIN',
+        },
+        write_statistics=['zoom', 'tile'],
+        write_page_index=False,
+        data_page_size=16384,
+        data_page_version='1.0',
+    )
+    with pq.ParquetWriter(out, SCHEMA, **options) as writer:
+        for zoom, tiles, pages in chunks:
+            if not len(tiles):
+                continue
+            if np.any(np.diff(tiles) <= 0):
+                raise ValueError('tile ids must increase within a zoom')
+            table = pa.table(
+                [
+                    pa.array(np.full(len(tiles), zoom), pa.int8()),
+                    pa.array(tiles),
+                    pa.array(pages, SCHEMA.field('pages').type),
+                ],
+                schema=SCHEMA,
+            )
+            for a, b in _byte_groups(table, row_group_bytes, options):
+                writer.write_table(table.slice(a, b - a), row_group_size=b - a)
+        # serialized after the chunks are consumed, so a builder can fill it while writing
+        writer.add_key_value_metadata({KEY: json.dumps(metadata, separators=(',', ':'))})
+    return out
 
 
-def build(path, out=None):
-    """Build from Arrow bbox/null masks and Thrift footer/offset-index page locations."""
+def _byte_groups(table, target, options):
+    """Row slices of about `target` compressed bytes, from the compressed size of a sample."""
+    values = pc.list_value_length(table['pages']).to_numpy() + 2
+    # contiguous runs spread over the zoom keep the locality the real groups have
+    starts = np.unique(np.linspace(0, max(0, table.num_rows - 1000), 20).astype(int))
+    picked = np.unique(
+        np.concatenate([np.arange(a, min(a + 1000, table.num_rows)) for a in starts])
+    )
+    sink = pa.BufferOutputStream()
+    pq.write_table(table.take(picked), sink, **options)
+    per_value = sink.getvalue().size / max(1, values[picked].sum())
+    bounds = [0]
+    total = 0.0
+    for i, v in enumerate(values):
+        total += v * per_value
+        if total >= target and i + 1 < len(values):
+            bounds.append(i + 1)
+            total = 0.0
+    bounds.append(len(values))
+    return list(zip(bounds[:-1], bounds[1:], strict=True))
+
+
+def descriptor(path):
+    """The `tile_directory` object of a file's lod_columns metadata, or None."""
+    geo = json.loads(pq.ParquetFile(path).metadata.metadata[b'geo'])
+    return geo['lod_columns'].get('tile_directory')
+
+
+def sidecar_path(path):
     path = Path(path)
-    out = Path(out) if out else Path(str(path) + '.tiledir')
-    if out.resolve() == path.resolve():
-        raise ValueError('sidecar output must differ from the Parquet input')
-    parquet = pq.ParquetFile(path)
-    geo = json.loads(parquet.metadata.metadata[b'geo'])
-    metadata = geo['lod_columns']
-    if metadata['tile_size'] != 512 or not is_crs84(geo['columns'][geo['primary_column']]):
-        raise ValueError('experimental directory requires 512px tiles and OGC:CRS84')
-    with path.open('rb') as file:
+    found = descriptor(path)
+    return path.parent / found['path'] if found else Path(str(path) + SUFFIX)
+
+
+def _page_locations(path):
+    with Path(path).open('rb') as file:
         file.seek(-8, 2)
         footer_length, magic = struct.unpack('<I4s', file.read(8))
         if magic != b'PAR1':
@@ -201,107 +247,103 @@ def build(path, out=None):
                     raise ValueError('pages splitting a repeated row are unsupported')
                 leaves[name] = pages
             indexes.append(leaves)
+    return footer_length, indexes
 
-    lods = []
-    payload = bytearray()
-    root = bytearray()
+
+def build(path, out=None, row_group_bytes=ROW_GROUP_BYTES):
+    """Build the sidecar from Arrow bbox/null masks and Thrift footer/offset-index page locations."""
+    path = Path(path)
+    found = descriptor(path)
+    out = Path(out) if out else sidecar_path(path)
+    if out.resolve() == path.resolve():
+        raise ValueError('sidecar output must differ from the Parquet input')
+    if found and found.get('profile') != PROFILE:
+        raise ValueError(f'tile_directory profile {found.get("profile")!r} is not {PROFILE}')
+    parquet = pq.ParquetFile(path)
+    geo = json.loads(parquet.metadata.metadata[b'geo'])
+    metadata = geo['lod_columns']
+    if metadata['tile_size'] != 512 or not is_crs84(geo['columns'][geo['primary_column']]):
+        raise ValueError('a tile directory requires 512px tiles and OGC:CRS84')
+    footer_length, indexes = _page_locations(path)
+
     all_paths = [parquet.schema.column(i).path for i in range(len(parquet.schema))]
     prefix = metadata.get('prefix')
-    for name, lod in metadata['lods'].items():
-        column = f'{metadata["column"]}.{name}.'
-        geometry = [p for p in all_paths if p.startswith(column + 'geometry.')]
-        paths = geometry + [column + a['name'] for a in metadata['attributes']]
-        if len(geometry) != 1:
-            raise ValueError('expected one interleaved geometry leaf')
-        # the prefix row groups already serve the coarse zooms in one or two reads
-        zooms = [z for z in lod['zooms'] if not prefix or z > prefix['zoom']]
-        if not zooms:
-            continue
-        if max(zooms) > 24:
-            raise ValueError('experimental directory supports finest zoom <= 24')
-        entries = {z: defaultdict(dict) for z in zooms}
-        for g in range(parquet.num_row_groups):
-            table = parquet.read_row_group(g, columns=['bbox', f'{metadata["column"]}.{name}'])
-            bbox = table['bbox'].combine_chunks()
-            bounds = np.column_stack(
-                [
-                    bbox.field(k).to_numpy(zero_copy_only=False)
-                    for k in ('xmin', 'ymin', 'xmax', 'ymax')
-                ]
-            )
-            shown = (
-                table[metadata['column']]
-                .combine_chunks()
-                .field(name)
-                .is_valid()
-                .to_numpy(zero_copy_only=False)
-            )
-            rows = np.flatnonzero(shown & np.isfinite(bounds).all(axis=1))
-            pages = [indexes[g][p] for p in paths]
-            page_ids = [np.searchsorted([p[1] for p in ps], rows, side='right') for ps in pages]
-            spans = {z: tile_spans(bounds[rows], z, lod['scale']) for z in zooms}
-            for i in range(len(rows)):
-                selected = [ps[ids[i]] for ps, ids in zip(pages, page_ids, strict=True)]
-                for z in zooms:
-                    x0, y0, x1, y1 = spans[z][i]
-                    for x in range(x0, x1 + 1):
-                        for y in range(y0, y1 + 1):
-                            group = entries[z][morton(x, y, z)].setdefault(
-                                g, [set() for _ in paths]
-                            )
-                            for leaf, page in zip(group, selected, strict=True):
-                                leaf.add(page)
-        for zoom in zooms:
-            ordered = sorted(entries[zoom].items())
-            blocks = []
-            if ordered:
-                append_blocks(ordered, len(paths), payload, blocks)
-            root_start = len(root)
-            root += varint(len(blocks))
-            tile = offset = 0
-            for first, last, start, size, _ in blocks:
-                root += varint(first - tile) + varint(last - first)
-                root += varint(start - offset) + varint(size)
-                tile, offset = first, start
-            lods.append(
-                dict(
-                    name=name,
-                    zoom=zoom,
-                    paths=paths,
-                    entries=len(ordered),
-                    root_offset=root_start,
-                    compressed_bytes=sum(b[3] for b in blocks),
-                    raw_bytes=sum(b[4] for b in blocks),
-                    blocks=len(blocks),
+    directories = []
+
+    def chunks():
+        for name, lod in metadata['lods'].items():
+            column = f'{metadata["column"]}.{name}.'
+            geometry = [p for p in all_paths if p.startswith(column + 'geometry.')]
+            paths = geometry + [column + a['name'] for a in metadata['attributes']]
+            if len(geometry) != 1:
+                raise ValueError('expected one interleaved geometry leaf')
+            # the prefix row groups already serve the coarse zooms in one or two reads
+            zooms = [z for z in lod['zooms'] if not prefix or z > prefix['zoom']]
+            if not zooms:
+                continue
+            if max(zooms) > 24:
+                raise ValueError('a tile directory supports zooms <= 24')
+            entries = {z: defaultdict(dict) for z in zooms}
+            for g in range(parquet.num_row_groups):
+                table = parquet.read_row_group(g, columns=['bbox', f'{metadata["column"]}.{name}'])
+                bbox = table['bbox'].combine_chunks()
+                bounds = np.column_stack(
+                    [
+                        bbox.field(k).to_numpy(zero_copy_only=False)
+                        for k in ('xmin', 'ymin', 'xmax', 'ymax')
+                    ]
                 )
-            )
-    header = dict(
-        experimental=True,
-        version=1,
-        file_size=path.stat().st_size,
-        footer_length=footer_length,
+                shown = (
+                    table[metadata['column']]
+                    .combine_chunks()
+                    .field(name)
+                    .is_valid()
+                    .to_numpy(zero_copy_only=False)
+                )
+                rows = np.flatnonzero(shown & np.isfinite(bounds).all(axis=1))
+                pages = [indexes[g][p] for p in paths]
+                page_ids = [np.searchsorted([p[1] for p in ps], rows, side='right') for ps in pages]
+                spans = {z: tile_spans(bounds[rows], z, lod['scale']) for z in zooms}
+                for i in range(len(rows)):
+                    selected = [ps[ids[i]] for ps, ids in zip(pages, page_ids, strict=True)]
+                    for z in zooms:
+                        x0, y0, x1, y1 = spans[z][i]
+                        for x in range(x0, x1 + 1):
+                            for y in range(y0, y1 + 1):
+                                group = entries[z][morton(x, y, z)].setdefault(
+                                    g, [set() for _ in paths]
+                                )
+                                for leaf, page in zip(group, selected, strict=True):
+                                    leaf.add(page)
+            for zoom in zooms:
+                tiles, flat = flatten(sorted(entries.pop(zoom).items()))
+                directories.append(dict(lod=name, zoom=zoom, paths=paths, entries=len(tiles)))
+                yield zoom, tiles, flat
+
+    covered = [
+        z
+        for lod in metadata['lods'].values()
+        for z in lod['zooms']
+        if not prefix or z > prefix['zoom']
+    ]
+    if found and sorted(found.get('zooms', [])) != sorted(covered):
+        raise ValueError('tile_directory zooms differ from the zooms above the prefix')
+    header = directory_metadata(path, footer_length, found, directories)
+    write_directory(out, chunks(), header, row_group_bytes)
+    return dict(path=str(out), size=out.stat().st_size, **header)
+
+
+def directory_metadata(path, footer_length, found, directories):
+    return dict(
+        profile=PROFILE,
         tile_size=512,
         buffer=BUFFER,
         slop_cells=1,
-        codec='gzip',
         tile_order='morton',
-        lods=lods,
-        root_bytes=len(root),
-    )
-    encoded_header = json.dumps(header, separators=(',', ':')).encode()
-    used = 16 + len(encoded_header) + len(root)
-    if used > OPEN_BYTES:
-        raise ValueError(f'header + root needs {used} bytes; experimental limit is {OPEN_BYTES}')
-    with out.open('wb') as file:
-        file.write(MAGIC + struct.pack('<II', len(encoded_header), len(root)))
-        file.write(encoded_header)
-        file.write(root)
-        file.write(bytes(OPEN_BYTES - used))
-        file.write(payload)
-    return dict(
-        path=str(out),
-        size=out.stat().st_size,
-        open_bytes=OPEN_BYTES,
-        header_bytes=len(encoded_header),
-        **header,
+        source=dict(
+            file_size=Path(path).stat().st_size,
+            footer_length=footer_length,
+            generation=found.get('generation') if found else None,
+        ),
+        directories=directories,
     )

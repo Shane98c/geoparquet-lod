@@ -123,8 +123,13 @@ const countFeatures = (buf, child) => {
 }
 
 const ONLY = process.env.IMPLS?.split(',')
+// a file written without a tile_directory descriptor warns on every cold directory open
+const warn = console.warn
+console.warn = (...args) => {
+  if (!String(args[0]).includes('no generation id')) warn(...args)
+}
 // TILEDIR_URL adds a `lod_tiledir` implementation: the same file read through its tile directory
-// sidecar, opened cold per tile like the others (its header and root count toward the tile)
+// sidecar (`<file>.tiledir.parquet`), opened cold per tile like the others (its footer counts toward the tile)
 const TILEDIR = process.env.TILEDIR_URL
 const impls = {
   lod: {
@@ -159,7 +164,7 @@ const impls = {
               properties: ATTRS,
               tiledir: td,
             })
-            if (z <= r.finestZoom && td.covers(r.lodForZoom(z)) && !td.used)
+            if (z <= r.finestZoom && td.covers(r.lodForZoom(z), z) && !td.used)
               throw new Error('tile directory silently fell back to page indexes')
             return {
               mvt,
