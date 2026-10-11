@@ -353,20 +353,26 @@ touches. The directory replaces both with one read of about 40 to 140 KB.
 
 ### Tile directory
 
-The optional tile directory (see [below](#tile-directory-sidecar)) is a
-Parquet sidecar, `buildings.parquet.tiledir.parquet`, that maps each tile at
-every zoom above the prefix straight to the page byte ranges it needs, so a
-tile skips the bbox and page index reads. For this file it is 219.6 MB in
-3,535 row groups of about 64 KB, with a 913 KB footer. It was converted from
-the earlier binary sidecar, whose 40-minute build produced the same entries;
-`geoparquet-lod tiledir buildings.parquet` builds it directly. Zooms the
-prefix row group serves (z6 and below here) have no entries and read through
-the page indexes as before.
+The tile directory is an optional accelerator, defined in `spec/SPEC.md` as
+a rendering profile and described [below](#tile-directory-sidecar): a
+Parquet sidecar, `buildings.parquet.tiledir.parquet`, mapping each tile at
+every zoom above the prefix to the page byte ranges it needs, so a tile
+skips the bbox statistics, page indexes and refinement reads. Nothing
+depends on it: a reader without it, or with a stale or missing one, reads
+through the page indexes and draws the same features. For this file it is
+219.6 MB in 3,535 row groups of about 64 KB, with a 913 KB footer, and
+covers z7 to z16; zooms the prefix row group serves (z6 and below) and z17,
+past the finest LOD, read as before. It was converted from an earlier
+binary sidecar of the same entries, whose build from the 30 GB file took
+40 minutes; `geoparquet-lod tiledir buildings.parquet` builds it directly.
+The file was written before the `tile_directory` declaration existed and
+was not rewritten to add it, so the sidecar is bound by file size and
+footer length only and the reader warns about that.
 
 Two row-group shapes of the same table were measured with the reader on the
-13 tiles from z8 to z16 below, over local HTTP. "Lookup" is the sidecar bytes
-a cold tile reads after the sidecar is open; round trips count requests that
-had to wait for an earlier one.
+13 tiles from z8 to z16 above, over local HTTP. "Lookup" is the sidecar
+bytes a cold tile reads after the sidecar is open; round trips count
+requests that had to wait for an earlier one.
 
 | shape                                                   | file     | footer (open) | lookup per cold tile                          | round trips per cold tile, with data | next tile east         |
 | ------------------------------------------------------- | -------- | ------------- | --------------------------------------------- | ------------------------------------ | ---------------------- |
@@ -384,8 +390,22 @@ large, and plain values compress about a third smaller under zstd. Page
 indexes and statistics on `pages` are left out, since a lookup never reads
 them; that is a quarter of the footer.
 
-The national tables above give the directory's cost per tile, warm and
-over pans, with its open counted once.
+Known limits:
+
+- The builder holds every entry of an LOD in memory as sets of pages per
+  tile and loops over rows and tiles in Python. A row is added to every
+  tile its padded bbox touches at every covered zoom, so large polygons and
+  long lines cost memory and time in proportion to their extent in tiles at
+  the finest zoom. The national build took 40 minutes; regional files take
+  seconds.
+- Antimeridian-crossing data, wrapped world tiles and tiles near the poles
+  are untested; bboxes are clamped to the Web Mercator latitude limit.
+- The directory is bound to one write of the file; any rewrite needs a new
+  sidecar, and without a declared generation id a same-size rewrite with
+  the same footer length would not be detected.
+- The open is 0.91 MB, as large as the file's own; the PMTiles comparison
+  above is a product comparison (different thinning, seven attributes to
+  our two), not a controlled test of the encoding.
 
 Reproduce with both files served locally with range support:
 
@@ -397,29 +417,30 @@ TILEDIR_URL=http://localhost:8097/buildings.parquet.tiledir.parquet \
   IMPLS=lod,lod_tiledir node test/compare.mjs
 ```
 
-**Where this leaves the comparison.** On Parquet's own indexes a tile costs
-a median 6 times PMTiles' bytes and 10 times its requests from z8 up. Through
-the directory it costs 1.1 to 5.4 times the bytes, 2 to 3 times at street
-zooms, in 5 to 10 requests against 2. The floor is a data read per leaf per
-row group a tile touches, so request parity with a format that stores each
-tile as one blob is out of reach while tiles are assembled from column
-chunks. If the map is the product and the data is secondary, build PMTiles.
-This layout is for the case where the file is also the dataset: one upload
-that DuckDB, GeoPandas and a map read alike, attributes that stay queryable
-and can be appended without retiling, thinning that can see the attributes
-(show the highest-risk buildings first, not a random sample), and exact
-geometry past the finest zoom.
+**Where this leaves the comparison.** On Parquet's own indexes a cold tile
+costs a median 6 times PMTiles' bytes and 5.5 to 15.5 times its requests from
+z8 up. Through the directory it costs a median 2.7 times the bytes, 1.2 to
+2.8 times at street zooms, in 4 to 9 requests against 2, and a pan of four
+street tiles 1.5 times PMTiles' bytes in 17 requests against 5. That is after
+an open of 1.84 MB against 16 KB. The floor is a data read per leaf per row
+group a tile touches, so request parity with a format that stores each tile
+as one blob is out of reach while tiles are assembled from column chunks. If
+the map is the product and the data is secondary, build PMTiles. This layout
+is for the case where the file is also the dataset: one upload that DuckDB,
+GeoPandas and a map read alike, attributes that stay queryable and can be
+appended without retiling, thinning that can see the attributes (show the
+highest-risk buildings first, not a random sample), and exact geometry past
+the finest zoom.
 
 **Next steps, by effect.**
 
-1. Shrink the directory's open block. The root is 61 KB for 15 directories
-   because leaf blocks split at 20 KB compressed; larger blocks or a second
-   level would bring it under 16 KB. Over a session it is read once.
-2. Shrink the Parquet open: 0.93 MB in five requests against PMTiles' 16 KB
-   in one. Fewer, larger row groups shrink the footer; the column indexes in
-   it are the bulk.
-3. Decide whether the directory belongs in the layout, as a trailer in the
-   file or a sidecar, and write the spec text.
+1. Shrink the opens: 0.93 MB for the file, most of it the prefix bbox page
+   indexes warmed at open and the column indexes in the footer, and 0.91 MB
+   for the directory footer. Fewer, larger row groups shrink the file's
+   footer; larger directory groups trade lookup bytes for footer bytes.
+2. Build the directory in vectorized or compiled code, with bounded memory.
+3. Rewrite the national file with `--tile-directory` so the sidecar is
+   declared and bound by generation id.
 
 The `lod` file is public; the demo above reads it directly with `?url=`:
 
@@ -454,30 +475,33 @@ Parquet's own or COGP's `quantized_geoarrow`. See `spec/SPEC.md`.
 ## Tile directory sidecar
 
 The optional tile directory is a Parquet table beside the file, an
-accelerator a renderer may use and nothing else needs. `spec/SPEC.md`
-defines it. Build it for an existing file, or with the file:
+accelerator a renderer may use and nothing else needs; `spec/SPEC.md`
+defines it as the `parquet-table-1` rendering profile. Build it with the
+file, or for an existing file:
 
 ```sh
-uv run geoparquet-lod tiledir overture_denver.lod.parquet   # writes overture_denver.lod.parquet.tiledir.parquet
 uv run geoparquet-lod write src.parquet out.parquet --tile-directory
+uv run geoparquet-lod tiledir overture_denver.lod.parquet   # writes overture_denver.lod.parquet.tiledir.parquet
 cd js && npm run build && node test/tiledir-bench.mjs
 ```
 
 ```js
 const tile = await renderTile(reader, z, x, y, {
-  tiledir: 'http://localhost:8091/overture_denver.lod.parquet.tiledir.parquet',
+  tiledir: tileDirectoryUrl(reader, fileUrl), // the declared path, else `${fileUrl}.tiledir.parquet`
 })
 ```
 
 `write(..., tile_directory=True)` declares the sidecar in the file's
 `lod_columns.tile_directory` with a random generation id that the sidecar
-repeats; `tileDirectoryUrl(reader, fileUrl)` resolves its path. For a file
-written without it (rewriting a 30 GB file to add metadata is not worth it),
-`geoparquet-lod tiledir` still builds the sidecar, bound to the file by size
-and footer length only, and the reader warns that no generation id is
-present. A missing, mismatched or unreadable directory emits a warning and
-the tile is read through the page indexes; tiles past the finest LOD read
-the primary geometry. `TileDirectory.open(reader, url)` and
+repeats, and `validate` checks the declaration and, when the sidecar is
+beside the file, its binding. For a file written without it (rewriting a
+30 GB file to add metadata is not worth it), `geoparquet-lod tiledir` still
+builds the sidecar, bound to the file by size and footer length only, and
+the reader warns that no generation id is present. A missing, mismatched or
+unreadable directory emits a warning and the tile is read through the page
+indexes; a zoom the directory does not cover reads through the page indexes
+without one, and tiles past the finest LOD read the primary geometry.
+`TileDirectory.open(reader, url)`, `covers(lod, z)` and
 `readLodByTile(lod, z, x, y, attributes)` are also exported.
 
 The table has one row per tile with entries, sorted by `(zoom, tile)`:
