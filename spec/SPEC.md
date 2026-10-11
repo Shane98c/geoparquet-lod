@@ -159,7 +159,11 @@ pages and keep only rows whose bbox intersects before fetching LOD pages. A
 bbox page holds thousands of rows and a fine tile wants a few hundred, so
 this roughly halves the bytes at street zooms for a few more requests. The
 tile bounds are padded by one grid cell first, since a placeholder square is
-centred on the feature and can reach one cell past its bbox.
+centred on the feature and can reach one cell past its bbox. Row groups
+overlap at their edges, so most candidate row groups hold no row for a
+tile; the reference reader fetches an LOD leaf's offset index only once the
+bbox pages admit a row in that group, and keeps decoded pages for the
+neighbouring tiles that share them.
 
 A reader may precompute from the page indexes which pages each tile needs
 at each zoom and keep that beside the file as its own cache. This

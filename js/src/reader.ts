@@ -77,8 +77,8 @@ const REFINE_MARGIN = 1.5
 /** Below this many bytes across an LOD's leaves, a row group's chunks are read whole rather than through page indexes. */
 const WHOLE_CHUNK_BYTES = 256 * 1024
 
-/** Decoded pages kept for later tiles; the oldest are dropped past this many. */
-const PAGE_CACHE = 1024
+/** Compressed bytes of decoded bbox pages kept for later tiles; the oldest go first. */
+const PAGE_CACHE_BYTES = 4 * 1024 * 1024
 const BBOX_LEAVES = ['bbox.xmin', 'bbox.ymin', 'bbox.xmax', 'bbox.ymax'] as const
 
 /**
@@ -98,7 +98,11 @@ export class LodReader {
   private readonly file: RangeSource
   private readonly rowGroupStarts: number[]
   private readonly cache = new Map<string, Promise<unknown>>()
-  private readonly pages = new Map<string, Promise<Map<number, unknown>>>()
+  private readonly pages = new Map<
+    string,
+    { bytes: number; values: Promise<Map<number, unknown>> }
+  >()
+  private pageBytes = 0
   private readonly elements = new Map<string, SchemaTree['element']>()
   private readonly footer: ArrayBuffer | undefined
   private digest: Promise<string> | undefined
@@ -384,9 +388,9 @@ export class LodReader {
   }
 
   /**
-   * Every row of each page, decoded once and kept, so the pages a tile shares
-   * with its neighbours are not fetched again. Pages missing from the cache
-   * that are adjacent in the file are fetched as one range.
+   * Every row of each page, as decoded. Pages adjacent in the file are
+   * fetched as one range. Decoded bbox pages are kept, since neighbouring
+   * tiles refine against the same ones; LOD pages decode too large to keep.
    */
   private pageValues(
     g: number,
@@ -395,20 +399,26 @@ export class LodReader {
     signal?: AbortSignal,
   ): Promise<Map<number, unknown>[]> {
     const key = (page: PageLocation) => `p:${g}:${leaf}:${page.byteStart}`
+    const keep = (BBOX_LEAVES as readonly string[]).includes(leaf)
     const ordered = [...pages].sort((a, b) => a.byteStart - b.byteStart)
     const wanted = new Map<string, Promise<Map<number, unknown>>>()
     const runs: PageLocation[][] = []
     for (const page of ordered) {
       const cached = this.pages.get(key(page))
       if (cached) {
-        wanted.set(key(page), cached)
+        wanted.set(key(page), cached.values)
         continue
       }
       const last = runs[runs.length - 1]
       if (last && last[last.length - 1].byteEnd === page.byteStart) last.push(page)
       else runs.push([page])
     }
-    while (this.pages.size > PAGE_CACHE) this.pages.delete(this.pages.keys().next().value!)
+    const forget = (k: string) => {
+      const entry = this.pages.get(k)
+      if (!entry) return
+      this.pages.delete(k)
+      this.pageBytes -= entry.bytes
+    }
     for (const run of runs) {
       const dictionary = this.dictionaryPage(g, leaf)
       const buffer = this.file.slice(run[0].byteStart, run[run.length - 1].byteEnd, signal)
@@ -426,8 +436,13 @@ export class LodReader {
           return values
         })
         wanted.set(key(page), decoded)
-        this.pages.set(key(page), decoded)
-        decoded.catch(() => this.pages.delete(key(page)))
+        if (!keep) continue
+        const bytes = page.byteEnd - page.byteStart
+        while (this.pages.size && this.pageBytes + bytes > PAGE_CACHE_BYTES)
+          forget(this.pages.keys().next().value!)
+        this.pages.set(key(page), { bytes, values: decoded })
+        this.pageBytes += bytes
+        decoded.catch(() => forget(key(page)))
       }
     }
     return Promise.all(pages.map((page) => wanted.get(key(page))!))

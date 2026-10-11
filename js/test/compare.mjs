@@ -337,7 +337,7 @@ for (let run = 0; run < RUNS; run++) {
       const key = `${z}|${label}|${name}`
       try {
         const open = await measure(() => impl.open())
-        opens[name].push(open)
+        opens[name].push({ bytes: open.bytes, reqs: open.reqs, ms: open.ms })
         const state = open.value
         const cold = await measure(() => impl.tile(state, z, x, y))
         const r = cold.value
