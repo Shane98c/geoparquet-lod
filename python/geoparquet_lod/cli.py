@@ -78,6 +78,7 @@ def cli():
 @click.option('--prefix-zoom', default=6, type=int, show_default=True)
 @click.option('--row-group-rows', default=1_048_576, type=int, show_default=True)
 @click.option('--page-bytes', default=16384, type=int, show_default=True)
+@click.option('--compression-level', default=9, type=int, show_default=True, help='zstd level')
 @click.option(
     '--batch-rows',
     default=None,
@@ -105,6 +106,7 @@ def write_cmd(
     prefix_zoom,
     row_group_rows,
     page_bytes,
+    compression_level,
     batch_rows,
     workers,
     memory_limit,
@@ -130,6 +132,7 @@ def write_cmd(
         prefix_zoom=prefix_zoom,
         row_group_rows=row_group_rows,
         page_bytes=page_bytes,
+        compression_level=compression_level,
         batch_rows=batch_rows,
         workers=workers,
         memory_limit=memory_limit,

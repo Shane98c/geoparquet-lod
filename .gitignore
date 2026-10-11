@@ -7,3 +7,4 @@ js/dist/
 *.parquet
 .DS_Store
 *.tiledir
+*.tiledir.v1

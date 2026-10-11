@@ -272,6 +272,7 @@ def write(
     single_lod_bytes: int = 16 * 1024 * 1024,
     row_group_rows: int = 1_048_576,
     page_bytes: int = 16384,
+    compression_level: int = 9,
     batch_rows: int | None = None,
     workers: int | None = None,
     memory_limit: str | None = None,
@@ -281,7 +282,8 @@ def write(
 ) -> Path:
     """Write `src` (any GeoParquet with a WKB geometry column) to `out` in the
     LOD columns layout. `complete_from` is the zoom from which every feature is
-    present; below it `thinning` chooses the rows. `tile_directory` also builds the
+    present; below it `thinning` chooses the rows. `compression_level` is zstd's;
+    decoding speed does not depend on it. `tile_directory` also builds the
     tile directory `out.tiledir.parquet` beside the file. Returns the output path."""
     src = str(src)
     out = Path(out)
@@ -499,6 +501,7 @@ def write(
     # interleaved x, y defeats delta coding; splitting byte streams lets zstd see the shared high bytes
     options = dict(
         compression='zstd',
+        compression_level=compression_level,
         use_dictionary=False,
         column_encoding={leaf: 'BYTE_STREAM_SPLIT' for leaf in coordinate_leaves},
         write_statistics=['bbox.xmin', 'bbox.ymin', 'bbox.xmax', 'bbox.ymax'],

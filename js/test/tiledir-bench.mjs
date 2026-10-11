@@ -9,9 +9,7 @@ const denver = process.env.DENVER_URL ?? 'http://localhost:8091/overture_denver.
 const nyc = process.env.NYC_URL ?? 'http://localhost:8098/p16384.parquet'
 const runs = Number(process.env.RUNS ?? 3)
 const local = process.env.FILE_TRANSPORT === '1'
-const scratch =
-  process.env.SCRATCHPAD ??
-  '/private/tmp/claude-501/-Users-shaneloeffler-dev-carbonplan-geoparquet-lod/d381515f-9625-4789-8845-832ecdedf85f/scratchpad'
+const scratch = process.env.SCRATCHPAD ?? '..'
 const datasets = [
   {
     name: 'Denver',
