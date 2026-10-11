@@ -152,7 +152,9 @@ type, into that LOD's field.
 Refinement, on by default in the reference reader: read the candidate bbox
 pages and keep only rows whose bbox intersects before fetching LOD pages. A
 bbox page holds thousands of rows and a fine tile wants a few hundred, so
-this roughly halves the bytes at street zooms for a few more requests.
+this roughly halves the bytes at street zooms for a few more requests. The
+tile bounds are padded by one grid cell first, since a placeholder square is
+centred on the feature and can reach one cell past its bbox.
 
 ## Choosing zooms
 

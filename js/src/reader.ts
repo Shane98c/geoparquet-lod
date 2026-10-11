@@ -210,6 +210,13 @@ export class LodReader {
       this.geometryLeaf(lod),
       ...attributes.map((a) => `${this.lod.column}.${lod.name}.${a}`),
     ]
+    // a placeholder square reaches one grid cell past its feature's bbox
+    const padded: Bbox = [
+      bbox[0] - Math.abs(lod.scale[0]),
+      bbox[1] - Math.abs(lod.scale[1]),
+      bbox[2] + Math.abs(lod.scale[0]),
+      bbox[3] + Math.abs(lod.scale[1]),
+    ]
     const perGroup = await Promise.all(
       groups.map(async (g) => {
         let ranges: [number, number][] | null = null
@@ -222,7 +229,7 @@ export class LodReader {
             void this.offsetIndex(g, leaf).catch(() => undefined)
             refined ??= this.candidateRows(g, bbox, signal).then(({ ranges, hit }) =>
               ranges.length && options.refine && this.refinePays(g, leaves, hit)
-                ? this.refineRows(g, ranges, bbox, signal)
+                ? this.refineRows(g, ranges, padded, signal)
                 : ranges,
             )
             ranges = await refined

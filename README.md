@@ -295,53 +295,52 @@ column and offset indexes of every row group it touches.
 ### Experimental: tile directory
 
 The `.tiledir` sidecar (see [below](#experimental-tile-directory-sidecar)) is
-a prototype, not part of the layout or the spec. It maps each tile at an
-LOD's finest zoom straight to the page byte ranges it needs, so a tile skips
-the page index and bbox reads. For this file it is 59.2 MB, with a 38 KB root
-in a 64 KB open block, built by `uv run geoparquet-lod tiledir buildings.parquet`
-in about 26 minutes. It indexes only each LOD's finest zoom; a tile at a
-coarser zoom of a paired LOD (z13 for `f13`, z15 for `f15`) merges its four
-children's entries, so it reads every page any child touches.
+a prototype, not part of the layout or the spec. It maps each tile at every
+zoom above the prefix straight to the page byte ranges it needs, so a tile
+skips the page index and bbox reads. For this file it is 95.2 MB, with a
+61 KB root in a 64 KB open block, built by
+`uv run geoparquet-lod tiledir buildings.parquet` in about 40 minutes. Zooms
+the prefix row group serves (z6 and below here) have no entries and read
+through the page indexes as before.
 
 The table compares the page-index path with the directory on the same 17
 tiles, read from the same file over local HTTP, so bytes and requests are
 comparable to the S3 run but times are not and are left out. PMTiles is from
 the S3 run. The directory's 64 KB open block is read inside each tile here,
-since each tile uses a fresh reader. The z17 tile is past the finest LOD and
-reads primary geometry, which the directory does not index.
+since each tile uses a fresh reader; a map session reads it once. The z17
+tile is past the finest LOD and reads primary geometry, which the directory
+does not index. Both paths returned identical features on every tile.
 
 | tile                                 | page index      | directory       | PMTiles                 |
 | ------------------------------------ | --------------- | --------------- | ----------------------- |
-| z3 national                          | 0.24 MB, 1 req  | 0.25 MB, 4 req  | no tile below z6        |
-| z5 regional, Bay Area                | 0.24 MB, 4 req  | 0.22 MB, 5 req  | no tile below z6        |
-| z6 regional, Southern California     | 0.08 MB, 4 req  | 0.13 MB, 5 req  | 0.11 MB, 2 req          |
+| z3 national                          | 0.24 MB, 1 req  | 0.30 MB, 2 req  | no tile below z6        |
+| z5 regional, Bay Area                | 0.24 MB, 4 req  | 0.31 MB, 5 req  | no tile below z6        |
+| z6 regional, Southern California     | 0.08 MB, 4 req  | 0.14 MB, 5 req  | 0.11 MB, 2 req          |
 | z8 metro, Denver                     | 0.59 MB, 11 req | 0.36 MB, 10 req | 0.17 MB, 2 req          |
 | z9 metro, Atlanta                    | 1.32 MB, 31 req | 0.81 MB, 21 req | 0.15 MB, 2 req          |
 | z11 city, Denver                     | 0.52 MB, 20 req | 0.32 MB, 9 req  | 0.17 MB, 2 req          |
 | z12 suburbs, Atlanta                 | 0.52 MB, 16 req | 0.34 MB, 9 req  | 0.13 MB, 2 req          |
 | z12 desert, Tonopah NV               | 0.27 MB, 13 req | 0.16 MB, 8 req  | 0.01 MB, 2 req          |
-| z13 downtown, San Francisco          | 1.62 MB, 25 req | 1.99 MB, 12 req | 0.22 MB, 2 req          |
-| z13 downtown, Los Angeles            | 1.33 MB, 27 req | 2.01 MB, 22 req | 0.15 MB, 2 req          |
-| z13 rural, Broken Bow NE             | 0.48 MB, 18 req | 0.27 MB, 8 req  | 0.06 MB, 2 req          |
-| z13 empty, Nebraska Sandhills        | 0.24 MB, 12 req | 0.12 MB, 5 req  | 0.01 MB, 1 req, no tile |
+| z13 downtown, San Francisco          | 1.62 MB, 25 req | 0.71 MB, 9 req  | 0.22 MB, 2 req          |
+| z13 downtown, Los Angeles            | 1.33 MB, 27 req | 0.52 MB, 10 req | 0.15 MB, 2 req          |
+| z13 rural, Broken Bow NE             | 0.48 MB, 18 req | 0.23 MB, 8 req  | 0.06 MB, 2 req          |
+| z13 empty, Nebraska Sandhills        | 0.24 MB, 12 req | 0.09 MB, 2 req  | 0.01 MB, 1 req, no tile |
 | z14 row-group edge, Chicago          | 0.85 MB, 24 req | 0.30 MB, 10 req | 0.18 MB, 2 req          |
-| z15 street, Manhattan                | 0.73 MB, 21 req | 0.27 MB, 5 req  | 0.10 MB, 2 req          |
-| z15 street, Denver suburbs           | 0.46 MB, 20 req | 0.28 MB, 10 req | 0.06 MB, 2 req          |
+| z15 street, Manhattan                | 0.73 MB, 21 req | 0.20 MB, 5 req  | 0.10 MB, 2 req          |
+| z15 street, Denver suburbs           | 0.46 MB, 20 req | 0.14 MB, 6 req  | 0.06 MB, 2 req          |
 | z16 street, San Francisco            | 0.44 MB, 17 req | 0.14 MB, 5 req  | 0.13 MB, 2 req          |
 | z17 beyond finest LOD, San Francisco | 0.42 MB, 16 req | 0.42 MB, 16 req | 0.13 MB, 2 req          |
 
-Through the directory, z14 to z16 drop 39 to 68% (z16 San Francisco 0.44 MB
-in 17 requests to 0.14 MB in 5, against PMTiles' 0.13 MB in 2), z8 to z12
-drop 35 to 41%, and the empty Sandhills tile halves, 0.24 MB in 12 requests
-to 0.12 MB in 5. The z13 city tiles get worse, 1.62 to 1.99 MB in San
-Francisco and 1.33 to 2.01 MB in Los Angeles, because the merged children
-pull in pages the tile does not need. At z6 and below the open block costs
-more than the directory saves (z6 0.08 to 0.13 MB, z3 one request to four).
-Street tiles land at PMTiles' bytes (z16 San Francisco) to 4.7 times them
-(z15 Denver suburbs) in 5 to 10 requests; the remaining gap is the z13 city
-tiles and the 64 KB open block each cold tile pays. Both paths returned the
-same features on 15 of the 17 tiles; at z8 Denver and z9 Atlanta the
-directory returned one and two more (5,014 to 5,013, 10,651 to 10,649).
+Through the directory every tile from z8 up reads fewer bytes in fewer
+requests. Street tiles (z14 to z16) drop 65 to 73%, to 1.1 (z16 San
+Francisco) to 2.3 (z15 Denver suburbs) times PMTiles' bytes in 5 to 10
+requests. The z13 city tiles drop 56 to 61%, to 3.2 to 3.5 times PMTiles.
+Metro tiles (z8, z9) drop 39% and stay the furthest off, at 2.1 and 5.4
+times, since a metro tile wants a few thousand rows spread over many pages.
+The 64 KB open block is most of the empty tile's 0.09 MB and all of the
+difference at z6 and below, where the directory is not used. Warm reads
+(the next tile east, same reader) are smaller again: 0.04 MB in 3 requests
+at z13 San Francisco.
 
 Reproduce with both files served locally with range support:
 
@@ -353,24 +352,29 @@ TILEDIR_URL=http://localhost:8097/buildings.parquet.tiledir \
   IMPLS=lod,lod_tiledir node test/compare.mjs
 ```
 
+**Where this leaves the comparison.** On Parquet's own indexes a tile costs
+a median 6 times PMTiles' bytes and 10 times its requests from z8 up. Through
+the directory it costs 1.1 to 5.4 times the bytes, 2 to 3 times at street
+zooms, in 5 to 10 requests against 2. The floor is a data read per leaf per
+row group a tile touches, so request parity with a format that stores each
+tile as one blob is out of reach while tiles are assembled from column
+chunks. If the map is the product and the data is secondary, build PMTiles.
+This layout is for the case where the file is also the dataset: one upload
+that DuckDB, GeoPandas and a map read alike, attributes that stay queryable
+and can be appended without retiling, thinning that can see the attributes
+(show the highest-risk buildings first, not a random sample), and exact
+geometry past the finest zoom.
+
 **Next steps, by effect.**
 
-1. Directory entries for the zoom below each paired LOD's finest (z13 and
-   z15 here), written from the features themselves and not merged from
-   children. That removes the z13 regression, the largest place the
-   directory is worse, and trims z15. At z6 and below the reader can skip the
-   directory, since the prefix row group already serves those tiles.
-2. Shrink the directory's open block. The reader opens it once and keeps
-   it, so over a session it is read once, but cold it is 64 KB and a request
-   on top of every tile above, for a 38 KB root.
-3. Shrink the Parquet open: 0.93 MB in five requests against PMTiles' 16 KB
-   in one.
-4. Decide whether the directory belongs in the layout. Through it street
-   tiles are within a few times PMTiles' bytes in 5 to 10 requests; without
-   it, the page-index path stays at 3 to 9 times the bytes and about 10 times
-   the requests. The floor either way is a data read per leaf per row group a
-   tile touches, so request parity with a format that stores each tile as one
-   blob is out of reach while tiles are assembled from column chunks.
+1. Shrink the directory's open block. The root is 61 KB for 15 directories
+   because leaf blocks split at 20 KB compressed; larger blocks or a second
+   level would bring it under 16 KB. Over a session it is read once.
+2. Shrink the Parquet open: 0.93 MB in five requests against PMTiles' 16 KB
+   in one. Fewer, larger row groups shrink the footer; the column indexes in
+   it are the bulk.
+3. Decide whether the directory belongs in the layout, as a trailer in the
+   file or a sidecar, and write the spec text.
 
 The `lod` file is public; the demo above reads it directly with `?url=`:
 
@@ -428,8 +432,9 @@ page-index reader. `TileDirectory.open(reader, url)` and
 The Python builder reads bbox values and LOD struct null masks with PyArrow.
 It parses the Parquet footer and offset indexes directly using Thrift compact
 field IDs, with no Node build dependency. For each shown row it pads the bbox
-by one LOD grid cell, projects it to the finest zoom, and adds its geometry and
-carried-attribute pages to every intersecting buffered tile. Tile padding is
+by one LOD grid cell, projects it to each of the LOD's zooms above the prefix,
+and adds its geometry and carried-attribute pages to every intersecting
+buffered tile. Tile padding is
 64/4096 of a tile, matching the renderer's eight-pixel buffer on 512px tiles.
 
 The experimental v1 binary layout is:
@@ -438,8 +443,8 @@ The experimental v1 binary layout is:
   root-directory lengths. JSON and root follow, padded to a fixed 65,536-byte
   open block. Opening the sidecar takes one range request, without a HEAD.
 - The JSON header records the format version, Parquet size and footer length,
-  tile size, buffer, slop, codec, and each LOD's finest zoom, ordered leaf paths,
-  entry count, directory sizes, and root offset. Size plus footer length is a
+  tile size, buffer, slop, codec, and one directory per LOD and zoom above the
+  prefix: its ordered leaf paths, entry count, sizes, and root offset. Size plus footer length is a
   stale-file guard, not a content hash: rebuild the sidecar after every rewrite.
 - Each LOD's root starts with a block count. Each block holds four unsigned
   LEB128 values: first Morton tile ID delta, last-minus-first tile ID, leaf
@@ -453,16 +458,16 @@ The experimental v1 binary layout is:
   per leaf; tile deltas reset per directory. Ranges exclude dictionary pages.
   Directories split toward 10–20 KiB compressed; small LODs use smaller blocks.
 
-Parent queries cover the parent's buffer on the stored child grid, including
-one MVT unit of rounding allowance, and merge duplicate page locations. The
-reader joins leaves by row number, fetches dictionaries through the existing
+Each zoom has its own directory, so a tile reads only the pages its own
+features touch; a query for a zoom without one is answered by the page-index
+reader. The reader joins leaves by row number, fetches dictionaries through the existing
 cache, and coalesces adjacent data pages. It filters rows using bounds computed
 from decoded display coordinates, without reading bbox columns. The existing
 MVT encoder performs the final clipping. Equality means decoded feature IDs,
 geometries, and properties; feature ordering can change serialized MVT size.
 
 The prototype assumes row-aligned data pages, supports finest zooms through 24,
-and limits header plus root to 16 KiB. It rejects nonincreasing page row starts.
+and limits header plus root to 64 KiB. It rejects nonincreasing page row starts.
 Antimeridian-spanning data and wrapped world queries are outside its tested
 regional scope. The binding is not protection against same-size replacements.
 

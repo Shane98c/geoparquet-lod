@@ -69,7 +69,8 @@ export const renderTile = async (
           ? await openTileDirectory(reader, options.tiledir)
           : options.tiledir
       if (directory.reader !== reader) throw new Error('tile directory belongs to another reader')
-      located = await directory.readLodByTile(lod, z, x, y, names, signal)
+      if (directory.covers(lod))
+        located = await directory.readLodByTile(lod, z, x, y, names, signal)
     } catch (error) {
       signal?.throwIfAborted()
       console.warn('Experimental tile directory unavailable; using page indexes:', error)

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import gzip
 import json
-import math
 import struct
 from collections import defaultdict
 from pathlib import Path
@@ -88,21 +87,34 @@ def morton(x, y, z):
     return sum(((x >> i) & 1) << (2 * i) | ((y >> i) & 1) << (2 * i + 1) for i in range(z))
 
 
-def tile_span(bbox, zoom, scale):
+def tile_spans(bounds, zoom, scale):
+    """Inclusive tile rectangles covering each bbox row, padded by the buffer and one cell."""
     n = 2**zoom
-    xmin, ymin, xmax, ymax = map(float, bbox)
+    bounds = np.asarray(bounds, dtype=np.float64)
     sx, sy = map(abs, scale)
+    limit = 85.0511287798066
 
     def ty(lat):
-        lat = math.radians(max(-85.0511287798066, min(85.0511287798066, lat)))
-        return (1 - math.asinh(math.tan(lat)) / math.pi) / 2 * n
+        lat = np.radians(np.clip(lat, -limit, limit))
+        return (1 - np.arcsinh(np.tan(lat)) / np.pi) / 2 * n
 
     # ceil(left - 1) retains exact boundary contacts on both sides.
-    left = math.ceil((xmin - sx + 180) / 360 * n - BUFFER - 1)
-    right = math.floor((xmax + sx + 180) / 360 * n + BUFFER)
-    top = math.ceil(ty(ymax + sy) - BUFFER - 1)
-    bottom = math.floor(ty(ymin - sy) + BUFFER)
-    return max(0, left), max(0, top), min(n - 1, right), min(n - 1, bottom)
+    left = np.ceil((bounds[:, 0] - sx + 180) / 360 * n - BUFFER - 1)
+    right = np.floor((bounds[:, 2] + sx + 180) / 360 * n + BUFFER)
+    top = np.ceil(ty(bounds[:, 3] + sy) - BUFFER - 1)
+    bottom = np.floor(ty(bounds[:, 1] - sy) + BUFFER)
+    return np.column_stack(
+        [
+            np.maximum(0, left),
+            np.maximum(0, top),
+            np.minimum(n - 1, right),
+            np.minimum(n - 1, bottom),
+        ]
+    ).astype(np.int64)
+
+
+def tile_span(bbox, zoom, scale):
+    return tuple(int(v) for v in tile_spans([bbox], zoom, scale)[0])
 
 
 def encode_entries(entries, leaf_count):
@@ -184,16 +196,20 @@ def build(path, out=None):
     payload = bytearray()
     root = bytearray()
     all_paths = [parquet.schema.column(i).path for i in range(len(parquet.schema))]
+    prefix = metadata.get('prefix')
     for name, lod in metadata['lods'].items():
-        prefix = f'{metadata["column"]}.{name}.'
-        geometry = [p for p in all_paths if p.startswith(prefix + 'geometry.')]
-        paths = geometry + [prefix + a['name'] for a in metadata['attributes']]
+        column = f'{metadata["column"]}.{name}.'
+        geometry = [p for p in all_paths if p.startswith(column + 'geometry.')]
+        paths = geometry + [column + a['name'] for a in metadata['attributes']]
         if len(geometry) != 1:
             raise ValueError('expected one interleaved geometry leaf')
-        zoom = max(lod['zooms'])
-        if zoom > 24:
+        # the prefix row groups already serve the coarse zooms in one or two reads
+        zooms = [z for z in lod['zooms'] if not prefix or z > prefix['zoom']]
+        if not zooms:
+            continue
+        if max(zooms) > 24:
             raise ValueError('experimental directory supports finest zoom <= 24')
-        entries = defaultdict(dict)
+        entries = {z: defaultdict(dict) for z in zooms}
         for g in range(parquet.num_row_groups):
             table = parquet.read_row_group(g, columns=['bbox', f'{metadata["column"]}.{name}'])
             bbox = table['bbox'].combine_chunks()
@@ -213,38 +229,42 @@ def build(path, out=None):
             rows = np.flatnonzero(shown & np.isfinite(bounds).all(axis=1))
             pages = [indexes[g][p] for p in paths]
             page_ids = [np.searchsorted([p[1] for p in ps], rows, side='right') for ps in pages]
-            for i, row in enumerate(rows):
-                x0, y0, x1, y1 = tile_span(bounds[row], zoom, lod['scale'])
+            spans = {z: tile_spans(bounds[rows], z, lod['scale']) for z in zooms}
+            for i in range(len(rows)):
                 selected = [ps[ids[i]] for ps, ids in zip(pages, page_ids, strict=True)]
-                for x in range(x0, x1 + 1):
-                    for y in range(y0, y1 + 1):
-                        group = entries[morton(x, y, zoom)].setdefault(g, [set() for _ in paths])
-                        for leaf, page in zip(group, selected, strict=True):
-                            leaf.add(page)
-        ordered = sorted(entries.items())
-        blocks = []
-
-        if ordered:
-            append_blocks(ordered, len(paths), payload, blocks)
-        root_start = len(root)
-        root += varint(len(blocks))
-        tile = offset = 0
-        for first, last, start, size, _ in blocks:
-            root += varint(first - tile) + varint(last - first)
-            root += varint(start - offset) + varint(size)
-            tile, offset = first, start
-        lods.append(
-            dict(
-                name=name,
-                zoom=zoom,
-                paths=paths,
-                entries=len(entries),
-                root_offset=root_start,
-                compressed_bytes=sum(b[3] for b in blocks),
-                raw_bytes=sum(b[4] for b in blocks),
-                blocks=len(blocks),
+                for z in zooms:
+                    x0, y0, x1, y1 = spans[z][i]
+                    for x in range(x0, x1 + 1):
+                        for y in range(y0, y1 + 1):
+                            group = entries[z][morton(x, y, z)].setdefault(
+                                g, [set() for _ in paths]
+                            )
+                            for leaf, page in zip(group, selected, strict=True):
+                                leaf.add(page)
+        for zoom in zooms:
+            ordered = sorted(entries[zoom].items())
+            blocks = []
+            if ordered:
+                append_blocks(ordered, len(paths), payload, blocks)
+            root_start = len(root)
+            root += varint(len(blocks))
+            tile = offset = 0
+            for first, last, start, size, _ in blocks:
+                root += varint(first - tile) + varint(last - first)
+                root += varint(start - offset) + varint(size)
+                tile, offset = first, start
+            lods.append(
+                dict(
+                    name=name,
+                    zoom=zoom,
+                    paths=paths,
+                    entries=len(ordered),
+                    root_offset=root_start,
+                    compressed_bytes=sum(b[3] for b in blocks),
+                    raw_bytes=sum(b[4] for b in blocks),
+                    blocks=len(blocks),
+                )
             )
-        )
     header = dict(
         experimental=True,
         version=1,

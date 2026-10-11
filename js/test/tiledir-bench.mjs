@@ -140,7 +140,8 @@ for (const dataset of datasets) {
         await settle()
         const ms = performance.now() - start
         active = undefined
-        if (td) assert.ok(used, 'benchmark must not silently fall back')
+        if (td && td.covers(reader.lodForZoom(tile[0])))
+          assert.ok(used, 'benchmark must not silently fall back')
         outputs[mode] = decode(buffer)
         measurements[mode].push({
           ...stats,
@@ -195,7 +196,7 @@ console.log('\n| Dataset | Sidecar bytes | Header bytes | Root bytes | Open requ
 console.log('|---|---:|---:|---:|---:|')
 for (const { dataset, bytes, header } of sidecars) {
   console.log(
-    `| ${dataset} | ${bytes} | ${JSON.stringify(header).length} | ${header.root_bytes} | 16384 |`,
+    `| ${dataset} | ${bytes} | ${JSON.stringify(header).length} | ${header.root_bytes} | 65536 |`,
   )
 }
 console.log('\n| Dataset | LOD | Finest zoom | Entries | Raw B/entry | Gzip B/entry | Blocks |')

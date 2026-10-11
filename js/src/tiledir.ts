@@ -129,7 +129,7 @@ export class TileDirectory {
         offset += input.uint()
         blocks.push({ first: tile, last, offset, length: input.uint() })
       }
-      this.roots.set(lod.name, blocks)
+      this.roots.set(`${lod.name}/${lod.zoom}`, blocks)
     }
   }
 
@@ -163,19 +163,24 @@ export class TileDirectory {
     ) {
       throw new Error('tile directory file binding mismatch')
     }
+    const prefix = reader.lod.prefix
     for (const lod of Object.values(reader.lods)) {
-      const directory = header.lods.find((entry) => entry.name === lod.name)
       const paths = [
         reader.geometryLeaf(lod),
         ...reader.lod.attributes.map((a) => `${reader.lod.column}.${lod.name}.${a.name}`),
       ]
-      if (
-        !directory ||
-        directory.zoom !== Math.max(...lod.zooms) ||
-        directory.zoom > 24 ||
-        JSON.stringify(directory.paths) !== JSON.stringify(paths)
-      )
-        throw new Error('tile directory LOD mismatch')
+      const zooms = lod.zooms.filter((z) => !prefix || z > prefix.zoom)
+      for (const zoom of zooms) {
+        const directory = header.lods.find(
+          (entry) => entry.name === lod.name && entry.zoom === zoom,
+        )
+        if (
+          !directory ||
+          directory.zoom > 24 ||
+          JSON.stringify(directory.paths) !== JSON.stringify(paths)
+        )
+          throw new Error('tile directory LOD mismatch')
+      }
     }
     return new TileDirectory(
       reader,
@@ -244,6 +249,11 @@ export class TileDirectory {
     return result
   }
 
+  /** Whether the directory has entries for `lod`; coarse LODs served by the prefix have none. */
+  covers(lod: Lod): boolean {
+    return this.header.lods.some((entry) => entry.name === lod.name)
+  }
+
   async readLodByTile(
     lod: Lod,
     z: number,
@@ -252,12 +262,14 @@ export class TileDirectory {
     attributes: string[] = [],
     signal?: AbortSignal,
   ): Promise<LodRows> {
-    const directory = this.header.lods.find((entry) => entry.name === lod.name)
-    if (!directory || z > directory.zoom) throw new Error('tile zoom exceeds directory LOD')
+    const directory = this.header.lods.find((entry) => entry.name === lod.name && entry.zoom === z)
+    if (!directory) throw new Error('tile zoom has no directory entries')
     const intervals = tileIntervals(directory.zoom, z, x, y)
     const overlaps = (first: number, last: number) =>
       intervals.some(([a, b]) => first <= b && last >= a)
-    const blocks = this.roots.get(lod.name)!.filter((block) => overlaps(block.first, block.last))
+    const blocks = this.roots
+      .get(`${lod.name}/${directory.zoom}`)!
+      .filter((block) => overlaps(block.first, block.last))
     const entries = (
       await Promise.all(blocks.map((block) => this.leaf(block, directory, signal)))
     ).flat()
