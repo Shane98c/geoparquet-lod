@@ -16,7 +16,8 @@
       }
       #panes {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        grid-auto-flow: column;
+        grid-auto-columns: 1fr;
         height: 100%;
       }
       .pane {
@@ -41,6 +42,10 @@
       .hud b {
         display: block;
       }
+      .hud small {
+        display: block;
+        color: #666;
+      }
       #bar {
         position: absolute;
         bottom: 8px;
@@ -62,30 +67,42 @@
     <script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
     <script src="https://unpkg.com/pmtiles@4.5.0/dist/pmtiles.js"></script>
     <script type="module">
+      // One pane per file given in the query string, all on the same view, each with a
+      // tally of the bytes and requests its reader has made:
+      //   ?url=        this layout, read through its page indexes (required)
+      //   ?tiledir=    the same file through a tile directory sidecar
+      //   ?pmtiles=    a PMTiles archive; ?pmtiles_layer= names its layer (default: buildings)
+      //   ?cogp=       a COGP file, read with @cogp/maplibre
+      //   ?esri=       a Spatially Optimized Parquet file, read with Esri's MapLibre reference reader
+      //   ?center=lon,lat ?zoom=  the starting view
       import { registerProtocol, tileUrl, readStats } from './dist/maplibre.js'
 
       const params = new URLSearchParams(location.search)
       const url = params.get('url')
       if (!url) {
         document.body.innerHTML =
-          '<p style="padding:1em">Pass a file: <code>?url=http://localhost:8097/buildings_quarter.parquet</code>. ' +
-          'Its <code>.tiledir.parquet</code> sidecar is read from the same place, and PMTiles from <code>?pmtiles=</code> ' +
-          '(default: the Open Climate Risk buildings archive).</p>'
+          '<p style="padding:1em">Pass <code>?url=</code> for a file in this layout, and any of ' +
+          '<code>tiledir=</code>, <code>pmtiles=</code>, <code>cogp=</code>, <code>esri=</code> for the panes beside it.</p>'
         throw new Error('no ?url=')
       }
-      const fileUrl = new URL(url, location.href).href
-      const tiledir = params.get('tiledir') ?? fileUrl + '.tiledir.parquet'
-      const pmtilesBase =
-        'https://s3.us-west-2.amazonaws.com/us-west-2.opendata.source.coop/carbonplan/carbonplan-ocr/output/fire-risk/vector/production/v1.1.0/pmtiles/'
-      const pmtilesUrl = params.get('pmtiles') ?? pmtilesBase + 'buildings.pmtiles'
-      const pmtilesPoints =
-        params.get('pmtiles_points') ?? pmtilesBase + 'building_centroids.pmtiles'
+      const abs = (u) => (u ? new URL(u, location.href).href : null)
+      const fileUrl = abs(url)
+      const tiledir = abs(params.get('tiledir'))
+      const pmtilesUrl = abs(params.get('pmtiles'))
+      const pmtilesLayer = params.get('pmtiles_layer') ?? 'buildings'
+      const cogpUrl = abs(params.get('cogp'))
+      const esriUrl = abs(params.get('esri'))
       const start = {
-        center: (params.get('center') ?? '-104.99,39.74').split(',').map(Number),
+        center: (params.get('center') ?? '139.76,35.68').split(',').map(Number),
         zoom: Number(params.get('zoom') ?? 12),
       }
+      const paint = {
+        'fill-color': '#d0421b',
+        'fill-opacity': 0.5,
+        'fill-outline-color': '#7a1f08',
+      }
 
-      // main-thread fetches (PMTiles) tallied the same way as the worker's
+      // main-thread fetches (PMTiles, Esri) tallied the same way as the workers'
       const mainStats = {}
       const fetched = window.fetch.bind(window)
       window.fetch = async (input, init) => {
@@ -102,69 +119,109 @@
       const protocol = new pmtiles.Protocol()
       maplibregl.addProtocol('pmtiles', protocol.tile)
 
-      // the two LOD panes read the same file; a query string on one keeps their tallies apart
+      const fill = (source, layer) => ({
+        id: `${source}-fill`,
+        type: 'fill',
+        source,
+        'source-layer': layer,
+        paint,
+      })
+      const dots = (source, layer) => ({
+        id: `${source}-dots`,
+        type: 'circle',
+        source,
+        'source-layer': layer,
+        paint: {
+          'circle-color': '#d0421b',
+          'circle-opacity': 0.8,
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 2, 1.5, 14, 3],
+        },
+      })
+      const lodSource = (u, options) => ({
+        type: 'vector',
+        tiles: [tileUrl({ url: u, layer: 'shapes', pointLayer: 'points', ...options })],
+        maxzoom: 22,
+      })
+
+      // a query string on the second LOD pane's URL keeps its tally apart from the first
       const panes = [
         {
-          title: 'page indexes',
+          title: 'LOD columns, page indexes',
           keys: [fileUrl],
-          sources: {
-            lod: {
-              type: 'vector',
-              tiles: [tileUrl({ url: fileUrl, layer: 'shapes', pointLayer: 'points' })],
-              maxzoom: 22,
-            },
-          },
-          layers: lodLayers('lod'),
-        },
-        {
-          title: 'tile directory',
-          keys: [fileUrl + '?dir', tiledir],
-          sources: {
-            lod: {
-              type: 'vector',
-              tiles: [
-                tileUrl({ url: fileUrl + '?dir', layer: 'shapes', pointLayer: 'points', tiledir }),
-              ],
-              maxzoom: 22,
-            },
-          },
-          layers: lodLayers('lod'),
-        },
-        {
-          title: 'PMTiles',
-          keys: [pmtilesUrl, pmtilesPoints],
-          sources: {
-            shapes: { type: 'vector', url: 'pmtiles://' + pmtilesUrl },
-            points: { type: 'vector', url: 'pmtiles://' + pmtilesPoints },
-          },
-          layers: [fill('shapes', 'risk'), { ...dots('points', 'risk'), maxzoom: 6 }],
+          sources: { lod: lodSource(fileUrl) },
+          layers: [fill('lod', 'shapes'), dots('lod', 'points')],
         },
       ]
-
-      function fill(source, layer) {
-        return {
-          id: `${source}-fill`,
-          type: 'fill',
-          source,
-          'source-layer': layer,
-          paint: { 'fill-color': '#d0421b', 'fill-opacity': 0.5, 'fill-outline-color': '#7a1f08' },
-        }
-      }
-      function dots(source, layer) {
-        return {
-          id: `${source}-dots`,
-          type: 'circle',
-          source,
-          'source-layer': layer,
-          paint: {
-            'circle-color': '#d0421b',
-            'circle-opacity': 0.8,
-            'circle-radius': ['interpolate', ['linear'], ['zoom'], 2, 1.5, 14, 3],
+      if (tiledir)
+        panes.push({
+          title: 'LOD columns, tile directory',
+          keys: [fileUrl + '?dir', tiledir],
+          sources: { lod: lodSource(fileUrl + '?dir', { tiledir }) },
+          layers: [fill('lod', 'shapes'), dots('lod', 'points')],
+        })
+      if (cogpUrl) {
+        const {
+          cogpUrl: cogpTiles,
+          registerCogpProtocol,
+          getCogpStats,
+        } = await import('./dist/cogp/index.js')
+        registerCogpProtocol(maplibregl)
+        panes.push({
+          title: 'COGP, @cogp/maplibre',
+          keys: [cogpUrl],
+          sources: {
+            cogp: {
+              type: 'vector',
+              tiles: [cogpTiles({ shapes: { url: cogpUrl, properties: {} } })],
+              maxzoom: 22,
+            },
           },
-        }
+          layers: [fill('cogp', 'shapes')],
+          stats: async () => ({ [cogpUrl]: await getCogpStats(cogpUrl) }),
+        })
       }
-      function lodLayers(source) {
-        return [fill(source, 'shapes'), dots(source, 'points')]
+      if (pmtilesUrl)
+        panes.push({
+          title: 'PMTiles',
+          keys: [pmtilesUrl],
+          sources: { shapes: { type: 'vector', url: 'pmtiles://' + pmtilesUrl } },
+          layers: [fill('shapes', pmtilesLayer)],
+        })
+      if (esriUrl) {
+        const { MapLibreParquetLayer } = await import('./dist/esri.js')
+        const head = await fetch(esriUrl, { method: 'HEAD' })
+        const byteSize = Number(head.headers.get('content-length'))
+        panes.push({
+          title: 'SOP, Esri reference reader',
+          keys: [esriUrl],
+          sources: {},
+          layers: [],
+          attach: (map, hud) => {
+            // the reader converts each view to GeoJSON on moveend and owns its layers
+            const layer = new MapLibreParquetLayer(
+              map,
+              { parquet: { url: esriUrl }, byteSize },
+              {
+                onStatusChange: (status) => {
+                  hud.dataset.status =
+                    status.type === 'ready'
+                      ? `level ${status.lod}, ${status.featureCount.toLocaleString()} features${status.featureLimitReached ? ' (limit)' : ''}`
+                      : status.type === 'failed'
+                        ? status.message
+                        : status.type
+                  if (status.type === 'ready' && map.getLayer('maplibre-parquet-fill')) {
+                    for (const [k, v] of Object.entries(paint))
+                      map.setPaintProperty('maplibre-parquet-fill', k, v)
+                    for (const id of ['maplibre-parquet-outline', 'maplibre-parquet-line-casing'])
+                      if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none')
+                  }
+                },
+              },
+            )
+            layer.initialize()
+            map.on('load', () => layer.refresh())
+          },
+        })
       }
 
       const container = document.getElementById('panes')
@@ -184,17 +241,19 @@
           ...start,
           attributionControl: false,
         })
-        map.on('load', () => {
+        // on style.load rather than load, so the data panes do not wait for the basemap tiles
+        map.once('style.load', () => {
           for (const [id, source] of Object.entries(pane.sources)) map.addSource(id, source)
           for (const layer of pane.layers) map.addLayer(layer)
         })
+        pane.attach?.(map, hud)
         map.on('error', (e) => console.error(pane.title, e.error ?? e))
         maps.push({ map, hud, pane })
       }
 
       window.maps = maps.map((m) => m.map)
 
-      // keep the three views together
+      // keep the views together
       let syncing = false
       for (const { map } of maps) {
         map.on('move', () => {
@@ -219,24 +278,33 @@
         let bytes = 0
         for (const key of keys) {
           const name = key.slice(key.lastIndexOf('/') + 1)
-          for (const [url, entry] of Object.entries(stats)) {
-            if (!url.endsWith('/' + name)) continue
-            const base = baseline[url] ?? { requests: 0, bytes: 0 }
+          for (const [u, entry] of Object.entries(stats)) {
+            if (!u.endsWith('/' + name) && u !== key) continue
+            const base = baseline[u] ?? { requests: 0, bytes: 0 }
             requests += entry.requests - base.requests
             bytes += entry.bytes - base.bytes
           }
         }
         return { requests, bytes }
       }
-      const current = async () => ({ ...(await readStats()), ...mainStats })
+      const current = async () => {
+        const stats = { ...(await readStats()), ...mainStats }
+        for (const { pane } of maps) if (pane.stats) Object.assign(stats, await pane.stats())
+        return stats
+      }
       const show = async () => {
         const stats = await current()
-        for (const { hud, pane, map } of maps) {
+        for (const { hud, pane } of maps) {
           const { requests, bytes } = tally(stats, pane.keys)
-          hud.replaceChildren(
+          const children = [
             Object.assign(document.createElement('b'), { textContent: pane.title }),
             document.createTextNode(`${format(bytes)} in ${requests} requests`),
-          )
+          ]
+          if (hud.dataset.status)
+            children.push(
+              Object.assign(document.createElement('small'), { textContent: hud.dataset.status }),
+            )
+          hud.replaceChildren(...children)
         }
         document.getElementById('zoom').textContent = ` zoom ${maps[0].map.getZoom().toFixed(1)}`
       }

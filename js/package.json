@@ -26,7 +26,8 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "measure": "node test/measure.mjs",
     "test": "node test/decode.test.mjs && node test/tiledir.test.mjs",
-    "demo": "esbuild src/index.ts src/maplibre.ts src/worker.ts --bundle --format=esm --outdir=../demo/dist && cd .. && npx -y http-server -p 8091 --cors -c-1 -o '/demo/?url=/buildings.lod.parquet' ."
+    "demo": "npm run demo:bundle && cd .. && npx -y http-server -p 8091 --cors -c-1 -o '/demo/?url=/buildings.lod.parquet' .",
+    "demo:bundle": "esbuild src/index.ts src/maplibre.ts src/worker.ts --bundle --format=esm --outdir=../demo/dist && esbuild node_modules/@cogp/maplibre/dist/index.js node_modules/@cogp/maplibre/dist/worker.js --bundle --format=esm --outdir=../demo/dist/cogp && esbuild vendor/esri-sop/index.ts --bundle --format=esm --outfile=../demo/dist/esri.js"
   },
   "dependencies": {
     "@cogp/reader": "^2.1.4",
@@ -34,6 +35,7 @@
     "hyparquet-compressors": "^1.1.1"
   },
   "devDependencies": {
+    "@cogp/maplibre": "^2.1.4",
     "@mapbox/vector-tile": "3.0.0",
     "esbuild": "^0.25.0",
     "pbf": "5.1.2",
