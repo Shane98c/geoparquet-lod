@@ -347,11 +347,12 @@ def write(
     )
     n_rows = con.execute(f"SELECT count(*) FROM '{sorted_path}'").fetchone()[0]
     log(f'  {n_rows:,} rows sorted, {time.time() - t0:.0f}s')
-    crs = geo.get('columns', {}).get(geometry, {}).get('crs')
-    degrees = crs is None or 'degree' in json.dumps(crs).lower()
+    from .tiledir import is_crs84
+
+    degrees = is_crs84(geo.get('columns', {}).get(geometry, {}))
     if not degrees:
         raise NotImplementedError(
-            'only geographic coordinates (EPSG:4326) are supported for now; reproject first'
+            'the primary geometry must be OGC:CRS84 or EPSG:4326 (crs omitted or declared); reproject first'
         )
     zooms, complete_from = guess_zooms(
         con,

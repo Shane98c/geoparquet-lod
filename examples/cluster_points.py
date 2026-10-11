@@ -1,9 +1,9 @@
 """Dense points that should merge rather than thin: one dot per 8 px cell
 carrying how many it stands for.
 
-`count` is a carried attribute the cluster overrides at each coarser zoom,
-so a renderer can size or label dots by it. At the finest zoom every point
-is its own dot with count 1.
+`count` must exist in the source as an integer column, 1 for every row; the
+cluster overrides the carried copy at each coarser zoom with the number of
+points a dot stands for, so a renderer can size or label dots by it.
 
     uv run python examples/cluster_points.py points.parquet out.parquet
 """

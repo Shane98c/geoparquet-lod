@@ -46,7 +46,7 @@
     </script>
     <script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
     <script type="module">
-      import { registerProtocol, tileUrl, readRow } from './dist/maplibre.js'
+      import { prefetch, registerProtocol, tileUrl, readRow } from './dist/maplibre.js'
       import { LodReader, httpSource, coalescing } from './dist/index.js'
 
       const hud = document.getElementById('hud')
@@ -78,6 +78,7 @@
         [180, 90, -180, -90],
       )
 
+      prefetch(fileUrl)
       registerProtocol(maplibregl)
       const map = new maplibregl.Map({
         container: 'map',

@@ -3,6 +3,10 @@
 _A layout and metadata contract for GeoParquet files that serve a zoomable
 map directly. Implemented by the writer and reader in this repository. Draft 0.1.0._
 
+The key words MUST, SHOULD and MAY are to be interpreted as in RFC 2119.
+'Layout', 'Metadata' and 'Geometry' are the contract; 'Reader algorithm'
+describes the reference reader and binds no one.
+
 ## Goal
 
 One GeoParquet file is both the dataset and the map source. Every feature is
@@ -93,16 +97,65 @@ Under the `geo` key, a `lod_columns` object:
 | `thinning`    | object         | description of the rule used; informational                                                                                               |
 | `lods`        | object         | LOD name to `{zooms, geometry_type, scale, offset}`; `scale` and `offset` are `[x, y]` pairs in degrees                                   |
 
-Every zoom in `zooms` MUST appear in exactly one LOD. An LOD's zooms are
-contiguous and ascending. Which zooms share an LOD is writer policy: the
+All fields are required. Every zoom in `zooms` MUST appear in exactly one
+LOD, `zooms` MUST be contiguous, and `scale` and `offset` MUST be finite. The
+prefix's `zoom` MUST be in `zooms` and `row_group_end` MUST be less than the
+row group count. Membership MUST nest: a row shown at an LOD is shown at
+every finer LOD, and every row with a non-null, non-empty primary geometry
+is shown at the finest LOD. An LOD's zooms are contiguous and ascending. Which zooms share an LOD is writer policy: the
 reference writer gives each zoom below the complete zoom its own LOD, pairs
 zooms above it, and uses one LOD for all complete zooms when the full-detail
 geometry is small.
 
+### Example
+
+For a building file with two carried attributes, under the `geo` key beside
+the usual GeoParquet fields:
+
+```json
+"lod_columns": {
+  "version": "0.1.0",
+  "column": "lod",
+  "order": "hilbert",
+  "zooms": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+  "tile_size": 512,
+  "prefix": { "zoom": 6, "row_group_end": 0 },
+  "encoding": "quantized_geoarrow",
+  "coordinates": "interleaved",
+  "attributes": [{ "name": "height", "type": "float" }, { "name": "class", "type": "string" }],
+  "thinning": { "rule": "combine(size_threshold(4), drop_rate(2.5))" },
+  "lods": {
+    "f8": { "zooms": [8], "geometry_type": "MultiPolygon", "scale": [6.8665e-4, 6.8665e-4], "offset": [-105.1, 39.6] },
+    "f13": { "zooms": [13, 14], "geometry_type": "MultiPolygon", "scale": [1.0729e-5, 1.0729e-5], "offset": [-105.1, 39.6] }
+  }
+}
+```
+
+and the physical schema, with `geometry` and the source attributes as the
+source had them:
+
+```
+geometry: binary (WKB)
+height: float
+class: string
+bbox: struct<xmin: float, ymin: float, xmax: float, ymax: float> not null
+lod: struct<
+  f8: struct<
+    geometry: list<list<list<list<int32 not null> not null> not null> not null> not null,
+    height: float,
+    class: string
+  >,
+  f13: struct<...same shape...>
+> not null
+```
+
 ## Geometry
 
-The `geometry` field of every LOD child is COGP's `quantized_geoarrow`
-encoding in GeoArrow's interleaved coordinate layout: nested Parquet lists
+The `geometry` field of every LOD child uses the transform and integer grid
+of COGP's `quantized_geoarrow` encoding, in GeoArrow's interleaved coordinate
+layout. It is a profile derived from that encoding, not the encoding itself:
+a COGP overview reader cannot decode these columns, and the value lives
+under `lod_columns`, not under COGP's `lod.overviews`. Physically: nested Parquet lists
 whose innermost element is a required list of exactly two int32, x then y;
 `MultiPolygon` three lists deep above that (polygons, rings, vertices) and
 `MultiLineString` two (lines, vertices), with every nested list non-null and
@@ -134,8 +187,10 @@ type, into that LOD's field.
 
 ## Reader algorithm
 
-1. Read the footer. Validate `lod_columns`. Start fetching the page indexes
-   of the prefix row groups' bbox leaves.
+1. Read the footer; the reference HTTP source asks for the file's last 1 MB
+   and its size together, so a footer that fits costs one round trip.
+   Validate `lod_columns`. Start fetching the prefix row groups' bbox page
+   indexes and the offset indexes of the LODs served from them.
 2. For a tile at zoom z choose the LOD containing z, clamping to the
    coarsest LOD below `zooms`. Finer than the finest zoom, read the primary
    geometry instead: every row is shown at the finest LOD, so the bbox pages
@@ -146,10 +201,11 @@ type, into that LOD's field.
 4. Candidate pages: for each bbox leaf, the pages whose statistics admit
    the tile; intersect the four row ranges.
 5. The leaves to read are the LOD's coordinate leaf and one leaf per wanted
-   attribute. If their chunks together are smaller than
-   their page indexes would be, read them whole and cache them. Otherwise
-   read only the pages overlapping the candidate rows, merging adjacent
-   pages into one range per leaf.
+   attribute. If their chunks in the row group total under 256 KB, the
+   reference reader reads them whole and keeps the decoded values for the
+   reader's life. Otherwise it reads only the pages overlapping the
+   candidate rows, merging adjacent pages into one range per leaf, and keeps
+   nothing but decoded bbox pages.
 6. Rows present in the coordinate leaf are the shown rows. Points are
    clipped to the tile; polygons are clipped by the tile encoder. The MVT
    feature id is the file row index.
@@ -162,13 +218,14 @@ tile bounds are padded by one grid cell first, since a placeholder square is
 centred on the feature and can reach one cell past its bbox. Row groups
 overlap at their edges, so most candidate row groups hold no row for a
 tile; the reference reader fetches an LOD leaf's offset index only once the
-bbox pages admit a row in that group, and keeps decoded pages for the
+bbox page statistics admit candidate rows in that group, in parallel with
+the bbox page reads that refine them, and keeps decoded bbox pages for the
 neighbouring tiles that share them.
 
-A reader may precompute from the page indexes which pages each tile needs
-at each zoom and keep that beside the file as its own cache. This
-repository's tooling writes such a table as `<file>.tiledir.parquet`, and its
-reader uses one when pointed at it. Nothing in the file refers to it, and the
+A reader may precompute which pages each tile needs at each zoom and keep
+that beside the file as its own cache. This repository's tooling writes such
+a table as `<file>.tiledir.parquet` by reading every row group's bbox values
+and LOD structs, and its reader uses one when pointed at it. Nothing in the file refers to it, and the
 file is complete without it.
 
 ## Choosing zooms

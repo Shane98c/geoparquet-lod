@@ -22,6 +22,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build",
     "check": "tsc -p tsconfig.json --noEmit",
     "measure": "node test/measure.mjs",
     "test": "node test/decode.test.mjs && node test/tiledir.test.mjs",

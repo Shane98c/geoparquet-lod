@@ -26,8 +26,9 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
     lod = geo.get(LOD_KEY)
     if not lod:
         raise ValidationError(f'no geo.{LOD_KEY} metadata')
-    major = str(lod.get('version', '')).split('.')[0]
-    if major != LOD_VERSION.split('.')[0]:
+    major, minor = (str(lod.get('version', '')).split('.') + [''])[:2]
+    ours = LOD_VERSION.split('.')
+    if major != ours[0] or (major == '0' and minor != ours[1]):
         raise ValidationError(f'version {lod.get("version")} is not compatible with {LOD_VERSION}')
     if lod.get('encoding') != ENCODING:
         raise ValidationError(f'geometry encoding {lod.get("encoding")!r} is not {ENCODING}')
