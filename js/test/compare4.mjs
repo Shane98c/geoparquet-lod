@@ -1,0 +1,146 @@
+// Bytes and requests per tile for four readers of the same buildings, served from one place:
+// this layout, COGP (@cogp/reader), PMTiles and Esri's SOP reference reader. Expects
+// japan_buildings.{lod2.parquet,cogp.parquet,pmtiles,sop.parquet} under BASE (default
+// http://localhost:8099/), and the Esri reader bundled for Node first:
+//   npx esbuild vendor/esri-sop/index.ts --bundle --platform=node --format=esm --outfile=test/esri-node.mjs
+//   node test/compare4.mjs
+import { LodReader, httpSource, coalescing, renderTile, tileBounds } from '../dist/index.js'
+import { CogpReader, toMvt } from '@cogp/reader'
+import { PMTiles } from 'pmtiles'
+import { Query } from './esri-node.mjs'
+
+const base = process.env.BASE ?? 'http://localhost:8099/'
+const stats = {}
+const real = globalThis.fetch
+globalThis.fetch = async (input, init) => {
+  const r = await real(input, init)
+  const key = String(input instanceof Request ? input.url : input).split('?')[0]
+  const e = (stats[key] ??= { requests: 0, bytes: 0 })
+  e.requests++
+  if ((init?.method ?? 'GET') !== 'HEAD') e.bytes += Number(r.headers.get('content-length') ?? 0)
+  return r
+}
+const snap = (key) => ({ ...(stats[base + key] ?? { requests: 0, bytes: 0 }) })
+const delta = (a, b) => ({ requests: b.requests - a.requests, bytes: b.bytes - a.bytes })
+const fmt = (d, extra = '') => `${(d.bytes / 1e6).toFixed(2)} MB, ${d.requests} req${extra}`
+
+const tiles = [
+  [8, 139.76, 35.68, 'metro, Tokyo'],
+  [11, 139.76, 35.68, 'city, Tokyo'],
+  [13, 139.7, 35.66, 'downtown, Shibuya'],
+  [13, 139.95, 35.45, 'suburbs, Chiba'],
+  [15, 139.76, 35.68, 'street, Tokyo station'],
+  [15, 135.5, 34.69, 'street, Osaka'],
+]
+const xy = (z, lon, lat) => [
+  Math.floor(((lon + 180) / 360) * 2 ** z),
+  Math.floor(((1 - Math.asinh(Math.tan((lat * Math.PI) / 180)) / Math.PI) / 2) * 2 ** z),
+]
+
+// open each reader once; per-tile cost is then the cold read on a fresh reader
+const open = async (name, fn) => {
+  const a = snap(name)
+  const r = await fn()
+  return { r, open: delta(a, snap(name)) }
+}
+const lodOpen = async () =>
+  LodReader.open(coalescing(await httpSource([base + 'japan_buildings.lod2.parquet'])))
+const cogpOpen = () => CogpReader.open(base + 'japan_buildings.cogp.parquet')
+const pmOpen = async () => {
+  const p = new PMTiles(base + 'japan_buildings.pmtiles')
+  await p.getHeader()
+  return p
+}
+const esriOpen = async () => {
+  const h = await fetch(base + 'japan_buildings.sop.parquet', { method: 'HEAD' })
+  const q = new Query(base + 'japan_buildings.sop.parquet', Number(h.headers.get('content-length')))
+  await q.loadMetadata(new AbortController().signal)
+  return q
+}
+const opens = {}
+for (const [name, fn] of [
+  ['lod', lodOpen],
+  ['cogp', cogpOpen],
+  ['pmtiles', pmOpen],
+  ['esri', esriOpen],
+])
+  opens[name] = (
+    await open(
+      name.startsWith('lod')
+        ? 'japan_buildings.lod2.parquet'
+        : name === 'cogp'
+          ? 'japan_buildings.cogp.parquet'
+          : name === 'pmtiles'
+            ? 'japan_buildings.pmtiles'
+            : 'japan_buildings.sop.parquet',
+      fn,
+    )
+  ).open
+console.log('| reader | open |\n|---|---|')
+for (const [k, v] of Object.entries(opens)) console.log(`| ${k} | ${fmt(v)} |`)
+
+console.log('\n| tile | lod | cogp | pmtiles | esri |\n|---|---|---|---|---|')
+for (const [z, lon, lat, label] of tiles) {
+  const [x, y] = xy(z, lon, lat)
+  const bbox = tileBounds(z, x, y)
+  const row = []
+  // ours: fresh reader, geometry only
+  {
+    const key = 'japan_buildings.lod2.parquet'
+    const r = await lodOpen()
+    const a = snap(key)
+    const mvt = await renderTile(r, z, x, y, { properties: [] })
+    row.push(fmt(delta(a, snap(key)), `, ${(mvt.byteLength / 1e3).toFixed(0)} KB mvt`))
+  }
+  // cogp: fresh reader, the adapter's read for a tile
+  {
+    const key = 'japan_buildings.cogp.parquet'
+    const r = await cogpOpen()
+    const a = snap(key)
+    const res = 360 / (512 * 2 ** z)
+    const level = r.selectLevel(res)
+    const batch = await r.read({
+      bbox,
+      maxLevel: level,
+      columns: [r.primaryGeometryColumn],
+      useOverview: true,
+    })
+    const mvt = toMvt(batch, { z, x, y })
+    row.push(
+      fmt(
+        delta(a, snap(key)),
+        `, ${(mvt.byteLength / 1e3).toFixed(0)} KB mvt, ${batch.length} rows`,
+      ),
+    )
+  }
+  // pmtiles: fresh archive handle; parent tile beyond maxzoom
+  {
+    const key = 'japan_buildings.pmtiles'
+    const p = await pmOpen()
+    const a = snap(key)
+    const zz = Math.min(z, 14)
+    const [px, py] = xy(zz, lon, lat)
+    const t = await p.getZxy(zz, px, py)
+    row.push(
+      fmt(delta(a, snap(key)), t ? `, ${(t.data.byteLength / 1e3).toFixed(0)} KB tile` : ', empty'),
+    )
+  }
+  // esri: fresh query, the reference reader's view query for the tile extent
+  {
+    const key = 'japan_buildings.sop.parquet'
+    const q = await esriOpen()
+    const a = snap(key)
+    const res = await q.execute({
+      queryExtents: [{ xmin: bbox[0], ymin: bbox[1], xmax: bbox[2], ymax: bbox[3] }],
+      sourceResolution: 360 / (512 * 2 ** z),
+      signal: new AbortController().signal,
+    })
+    row.push(
+      fmt(
+        delta(a, snap(key)),
+        `, level ${res.lod}, ${res.featureCollection.features.length} features${res.featureLimitReached ? ' (limit)' : ''}`,
+      ),
+    )
+  }
+  console.log(`| z${z} ${label} | ${row.join(' | ')} |`)
+}

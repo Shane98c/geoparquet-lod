@@ -8,3 +8,4 @@ js/dist/
 .DS_Store
 *.tiledir
 *.tiledir.v1
+js/test/esri-node.mjs

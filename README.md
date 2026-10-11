@@ -234,6 +234,11 @@ GeoParquet. From a cold reader on the 24.2 GB national file:
 - Opening costs 0.94 MB, nearly all footer, against 16 KB for PMTiles.
 - A plain sorted GeoParquet would read 8 MB to 5 GB per tile.
 
+A second comparison in the same document puts this layout, COGP, PMTiles and
+Esri's Spatially Optimized Parquet side by side on Esri's own 53.7 million
+Japan buildings, and `demo/compare.html` draws any of the four from URLs with
+a byte and request tally per pane.
+
 The floor is one data read per leaf per row group a tile touches, so request
 parity with a format that stores each tile as one blob is out of reach. If
 the map is the product and the data is secondary, build PMTiles. This layout

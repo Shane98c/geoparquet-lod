@@ -6,6 +6,65 @@ national file written that day by the current writer, with
 `pmtiles` and `sorted` numbers were measured the day before against files
 that have not changed.
 
+## Four readers on Esri's Japan buildings
+
+Esri hosts a Spatially Optimized Parquet file of 53.7 million Overture
+building footprints for Japan, which is also a valid GeoParquet file with a
+WKB primary column. The same source, with Esri's multiscale and key columns
+dropped, was written three more ways, so every panel below draws the same
+features:
+
+| file                           | writer, time                                                                                   | size    |
+| ------------------------------ | ---------------------------------------------------------------------------------------------- | ------- |
+| `japan_buildings.parquet`      | the cleaned source, DuckDB                                                                     | 4.84 GB |
+| `japan_buildings.lod2.parquet` | this layout, `combine(size_threshold(4), density_budget(40_000))`, 7 min                       | 6.59 GB |
+| `japan_buildings.cogp.parquet` | `cogp convert` 2.2.1 with overviews on every level, 9.5 min                                    | 9.76 GB |
+| `japan_buildings.pmtiles`      | tippecanoe 2.82, `-zg -Z 6 --drop-smallest-as-needed --extend-zooms-if-still-dropping`, 23 min | 1.51 GB |
+| `japan_buildings.sop.parquet`  | Esri's hosted file, `sop write`, 9 levels                                                      | 6.18 GB |
+
+Each reader opens once, then each tile is read on a fresh reader, geometry
+only, all four files served from one local range server. COGP is read with
+`@cogp/reader` the way its MapLibre adapter does; Esri's file with the
+reference reader from its repository's `viewer/src/maplibre`, which queries
+the tile's extent at the tile's resolution and returns GeoJSON. Rows and
+features are what each reader returned.
+
+| tile                      | LOD columns    | COGP                    | PMTiles    | Esri SOP                          |
+| ------------------------- | -------------- | ----------------------- | ---------- | --------------------------------- |
+| open                      | 0.47 MB, 4 req | 2.09 MB, 3              | 0.02 MB, 1 | 2.62 MB, 3                        |
+| z8 metro, Tokyo           | 1.03 MB, 22    | 0.06 MB, 9 (1,152 rows) | 0.48 MB, 2 | 26.65 MB, 1,048 (28,000 features) |
+| z11 city, Tokyo           | 0.79 MB, 16    | 0.12 MB, 9 (72 rows)    | 0.30 MB, 2 | 5.39 MB, 143 (177,679)            |
+| z13 downtown, Shibuya     | 1.68 MB, 28    | 0.31 MB, 26 (460 rows)  | 0.37 MB, 2 | 2.61 MB, 92 (51,996)              |
+| z13 suburbs, Chiba        | 0.72 MB, 32    | 0.24 MB, 26 (94 rows)   | 0.07 MB, 2 | 1.30 MB, 55 (6,841)               |
+| z15 street, Tokyo station | 0.42 MB, 29    | 0.80 MB, 67 (155 rows)  | 0.04 MB, 2 | 1.30 MB, 62 (229)                 |
+| z15 street, Osaka         | 0.64 MB, 25    | 0.59 MB, 51 (796 rows)  | 0.13 MB, 2 | 1.01 MB, 57 (1,362)               |
+
+The four thin differently, which the feature counts show. COGP assigns a
+building to a level by its size, so its coarse levels hold almost nothing:
+72 buildings in a z11 city tile. Esri's layout never drops a row, so a view
+reads every building in it at the chosen level, and its reference reader
+fetches by XZ key ranges rather than pages, which is where the request
+counts come from; its README says a real implementation would tile.
+tippecanoe drops the smallest buildings until a tile fits its limit. Ours
+keeps the busiest tile at each zoom under 40,000 buildings plus everything
+over four pixels, so the z8 Tokyo tile is 974 KB decoded to PMTiles' 1,374.
+Street tiles are, as on the national file, mostly index reads.
+
+Reproduce with the four files served with range support:
+
+```bash
+cd js && npm run build
+npx esbuild vendor/esri-sop/index.ts --bundle --platform=node --format=esm --outfile=test/esri-node.mjs
+BASE=http://localhost:8099/ node test/compare4.mjs
+```
+
+The same four files side by side in a browser, each pane with its own byte
+and request tally:
+
+```
+demo/compare.html?url=…/japan_buildings.lod2.parquet&cogp=…/japan_buildings.cogp.parquet&pmtiles=…/japan_buildings.pmtiles&esri=…/japan_buildings.sop.parquet&center=139.76,35.68&zoom=12
+```
+
 ## Measured
 
 The same 155.6 million US building footprints served four ways:
