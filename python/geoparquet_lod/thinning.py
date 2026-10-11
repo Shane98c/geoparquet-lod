@@ -149,7 +149,10 @@ def density_budget(budget: int = 60_000) -> Thin:
         _, counts = np.unique(tiles, return_counts=True)
         busiest = int(counts.max()) if len(counts) else 1
         fraction = min(1.0, budget / max(busiest, 1))
-        keep = rows.column('u').to_numpy() < fraction
+        # the rows handed in already passed finer zooms' cuts on u, so the
+        # fraction is taken of their u distribution, not of [0, 1)
+        u = rows.column('u').to_numpy()
+        keep = u < np.quantile(u, fraction) if len(u) and fraction < 1.0 else np.ones(len(u), bool)
         return _mask(rows, keep)
 
     thin.__name__ = f'density_budget({budget})'
