@@ -39,6 +39,21 @@ scope.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
     scope.postMessage({ id: request.id, ok: true, stats } satisfies WorkerResponse)
     return
   }
+  if (request.type === 'open') {
+    getReader(request.url)
+      .then(() =>
+        scope.postMessage({ id: request.id, ok: true, opened: true } satisfies WorkerResponse),
+      )
+      .catch((error: Error) =>
+        scope.postMessage({
+          id: request.id,
+          ok: false,
+          error: error?.message ?? String(error),
+          name: error?.name ?? 'Error',
+        } satisfies WorkerResponse),
+      )
+    return
+  }
   const controller = new AbortController()
   controllers.set(request.id, controller)
   const work =

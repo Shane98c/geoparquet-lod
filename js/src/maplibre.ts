@@ -1,7 +1,8 @@
 /**
  * MapLibre integration: `registerProtocol(maplibregl)` once, then use
- * `tileUrl(fileUrl, options)` as a vector source's tile template. Tiles are
- * rendered in a worker so page scrolling stays smooth.
+ * `tileUrl(config)` as a vector source's tile template. Tiles are rendered in
+ * a worker so page scrolling stays smooth; `prefetch(url)` opens the file
+ * before the map exists.
  */
 import type { TileOptions } from './tile.js'
 
@@ -52,11 +53,13 @@ export type WorkerRequest =
   | { id: number; type: 'tile'; config: SourceConfig; z: number; x: number; y: number }
   | { id: number; type: 'row'; url: string; rowIndex: number; columns: string[] }
   | { id: number; type: 'stats' }
+  | { id: number; type: 'open'; url: string }
   | { id: number; type: 'cancel' }
 export type WorkerResponse =
   | { id: number; ok: true; data: ArrayBuffer }
   | { id: number; ok: true; row: Record<string, unknown> }
   | { id: number; ok: true; stats: Record<string, Transfer> }
+  | { id: number; ok: true; opened: true }
   | { id: number; ok: false; error: string; name: string }
 
 let worker: Worker | undefined
@@ -108,6 +111,15 @@ export const readRow = async (url: string, rowIndex: number, columns: string[]) 
 export const readStats = async (): Promise<Record<string, Transfer>> => {
   const response = await call({ type: 'stats' })
   return 'stats' in response ? response.stats : {}
+}
+
+/**
+ * Start the worker and open `url` now, so its footer and prefix indexes are in
+ * hand by the time the map asks for a tile. Call it as early as the page can,
+ * before the map is constructed.
+ */
+export const prefetch = (url: string): void => {
+  void call({ type: 'open', url }).catch(() => undefined)
 }
 
 /** Register the `lod://` tile scheme once per MapLibre module instance. */

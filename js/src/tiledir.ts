@@ -11,7 +11,7 @@ import { DEFAULT_PARSERS } from 'hyparquet/src/convert.js'
 import { getSchemaPath } from 'hyparquet/src/schema.js'
 import { compressors } from 'hyparquet-compressors'
 import type { Lod, LodReader, LodRows, PageLocation, RangeSource } from './reader.js'
-import { coalescing } from './range-buffer.js'
+import { coalescing, httpSource } from './range-buffer.js'
 
 export const TILE_DIRECTORY_PROFILE = 'parquet-table-1'
 export const TILE_DIRECTORY_KEY = 'lod_tile_directory'
@@ -100,7 +100,11 @@ export class TileDirectory {
     source: string | RangeSource,
     signal?: AbortSignal,
   ): Promise<TileDirectory> {
-    const file = coalescing(typeof source === 'string' ? await tailSource(source, signal) : source)
+    const file = coalescing(
+      typeof source === 'string'
+        ? await httpSource([source], { tail: OPEN_BYTES, signal })
+        : source,
+    )
     const metadata = await parquetMetadataAsync(file as unknown as AsyncBuffer, {
       initialFetchSize: OPEN_BYTES,
     })
@@ -354,46 +358,6 @@ function geometryIntersects(value: unknown, lod: Lod, z: number, x: number, y: n
     )
   }
   return projectY(ymin) >= -MVT_BUFFER && projectY(ymax) <= MVT_EXTENT + MVT_BUFFER
-}
-
-/**
- * A range source whose first request is a suffix range for the footer, so
- * opening needs no HEAD. The size comes from Content-Range, or from a HEAD
- * when the server hides that header or refuses suffix ranges.
- */
-async function tailSource(url: string, signal?: AbortSignal): Promise<RangeSource> {
-  const response = await fetch(url, {
-    headers: { Range: `bytes=-${OPEN_BYTES}` },
-    cache: 'no-store',
-    signal,
-  })
-  let size = NaN
-  let tail = new ArrayBuffer(0)
-  if (response.status === 206) {
-    size = Number(/\/(\d+)\s*$/.exec(response.headers.get('Content-Range') ?? '')?.[1])
-    tail = await response.arrayBuffer()
-  } else await response.body?.cancel()
-  if (!Number.isSafeInteger(size)) {
-    const head = await fetch(url, { method: 'HEAD', cache: 'no-store', signal })
-    size = Number(head.headers.get('Content-Length'))
-    if (!head.ok || !Number.isSafeInteger(size)) throw new Error('cannot size tile directory')
-  }
-  const tailStart = size - tail.byteLength
-  return {
-    byteLength: size,
-    async slice(start, end = size, signal) {
-      if (start >= tailStart) return tail.slice(start - tailStart, end - tailStart)
-      const r = await fetch(url, {
-        headers: { Range: `bytes=${start}-${end - 1}` },
-        cache: 'no-store',
-        signal,
-      })
-      if (r.status !== 206) throw new Error(`tile directory range failed: ${r.status}`)
-      const buffer = await r.arrayBuffer()
-      if (buffer.byteLength !== end - start) throw new Error('truncated tile directory range')
-      return buffer
-    },
-  }
 }
 
 const directories = new WeakMap<LodReader, Map<string, Promise<TileDirectory>>>()

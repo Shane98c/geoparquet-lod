@@ -4,17 +4,42 @@ import type { RangeSource } from './reader.js'
  * Range requests round-robin over `urls`, alternate hostnames for one file.
  * Browsers allow six HTTP/1.1 connections per host, so spreading a tile's
  * requests over several hosts lets them run in fewer waves.
+ *
+ * Opening asks for the file's last `tail` bytes and, alongside, its size, so a
+ * footer that fits the tail costs one round trip. The size comes from the tail
+ * response's Content-Range when CORS exposes it, and from the HEAD otherwise
+ * or when the server refuses suffix ranges.
  */
-export const httpSource = async (urls: string[]): Promise<RangeSource> => {
-  const head = await fetch(urls[0], { method: 'HEAD', cache: 'no-store' })
-  const byteLength = Number(head.headers.get('Content-Length'))
-  if (!head.ok || !Number.isSafeInteger(byteLength)) {
-    throw new Error(`cannot size ${urls[0]}: ${head.status}`)
+export const httpSource = async (
+  urls: string[],
+  { tail = 1024 * 1024, signal }: { tail?: number; signal?: AbortSignal } = {},
+): Promise<RangeSource> => {
+  const head = fetch(urls[0], { method: 'HEAD', cache: 'no-store', signal })
+  head.catch(() => undefined)
+  const response = await fetch(urls[0], {
+    headers: { Range: `bytes=-${tail}` },
+    cache: 'no-store',
+    signal,
+  })
+  let byteLength = NaN
+  let tailBuffer = new ArrayBuffer(0)
+  if (response.status === 206) {
+    byteLength = Number(/\/(\d+)\s*$/.exec(response.headers.get('Content-Range') ?? '')?.[1])
+    tailBuffer = await response.arrayBuffer()
+  } else await response.body?.cancel()
+  if (!Number.isSafeInteger(byteLength)) {
+    const h = await head
+    byteLength = Number(h.headers.get('Content-Length'))
+    if (!h.ok || !Number.isSafeInteger(byteLength))
+      throw new Error(`cannot size ${urls[0]}: ${h.status}`)
   }
+  const tailStart = byteLength - tailBuffer.byteLength
   let next = 0
   return {
     byteLength,
     async slice(start, end = byteLength, signal) {
+      if (start >= tailStart && end <= byteLength)
+        return tailBuffer.slice(start - tailStart, end - tailStart)
       const url = urls[next++ % urls.length]
       const response = await fetch(url, {
         headers: { Range: `bytes=${start}-${end - 1}` },
@@ -22,7 +47,9 @@ export const httpSource = async (urls: string[]): Promise<RangeSource> => {
         signal,
       })
       if (response.status !== 206) throw new Error(`range request failed: ${response.status}`)
-      return response.arrayBuffer()
+      const buffer = await response.arrayBuffer()
+      if (buffer.byteLength !== end - start) throw new Error(`truncated range from ${url}`)
+      return buffer
     },
   }
 }
@@ -32,7 +59,11 @@ export const s3Mirrors = (url: string): string[] => {
   const match = /^https:\/\/([^./]+)\.s3\.([a-z0-9-]+)\.amazonaws\.com\/(.+)$/.exec(url)
   if (!match) return [url]
   const [, bucket, region, key] = match
-  return [url, `https://s3.${region}.amazonaws.com/${bucket}/${key}`, `https://${bucket}.s3-${region}.amazonaws.com/${key}`]
+  return [
+    url,
+    `https://s3.${region}.amazonaws.com/${bucket}/${key}`,
+    `https://${bucket}.s3-${region}.amazonaws.com/${key}`,
+  ]
 }
 
 interface Pending {
@@ -89,7 +120,10 @@ export const coalescing = (
       run = []
     }
     for (const p of batch) {
-      if (run.length && (p.start - runEnd > maxGap || Math.max(runEnd, p.end) - runStart > maxRun)) {
+      if (
+        run.length &&
+        (p.start - runEnd > maxGap || Math.max(runEnd, p.end) - runStart > maxRun)
+      ) {
         send()
       }
       if (!run.length) runStart = p.start
@@ -103,7 +137,8 @@ export const coalescing = (
     byteLength: source.byteLength,
     slice(start, end = source.byteLength, signal) {
       if (start === end) return Promise.resolve(new ArrayBuffer(0))
-      if (signal?.aborted) return Promise.reject(signal.reason ?? new DOMException('Aborted', 'AbortError'))
+      if (signal?.aborted)
+        return Promise.reject(signal.reason ?? new DOMException('Aborted', 'AbortError'))
       return new Promise<ArrayBuffer>((resolve, reject) => {
         pending.push({ start, end, signal, resolve, reject })
         if (!scheduled) {

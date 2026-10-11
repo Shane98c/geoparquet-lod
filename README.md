@@ -152,14 +152,15 @@ local http-server (port 8097) with range support; `cogp`, `pmtiles` and
 across all of them; times are not, since the local reads skip the 50 to
 100 ms of a round trip to S3. Compare times only between `lod` and
 `lod_tiledir`, or between `cogp` and `pmtiles`. This http-server refuses
-suffix range requests, so the directory open spends a refused request and a
-HEAD where S3 would answer the first request.
+suffix range requests, so each open spends a refused request and a HEAD where
+S3 would answer the first request.
 
 **Method.** Open is counted once per reader, separately, as the median of 51
 cold opens: footers, the PMTiles header and root directory, and every read a
-reader starts at open. `LodReader.open` warms the prefix row groups' bbox page
-indexes unconditionally, which is most of its 0.93 MB; `lod_tiledir`'s open
-adds the directory's 0.91 MB footer. Each tile is then rendered on a fresh
+reader starts at open. `LodReader.open` reads the file's last 1 MB in one request,
+which holds the 924 KB footer, then warms the prefix row groups' bbox page
+indexes and the coarse LODs' offset indexes; `lod_tiledir`'s open adds the
+directory's 0.91 MB footer. Each tile is then rendered on a fresh
 reader (cold), and again on that same reader (warm, same tile): what a
 revisit costs once indexes, directory groups and, for `lod`, decoded bbox
 pages are cached; no reader keeps LOD data pages. The pans render four tiles

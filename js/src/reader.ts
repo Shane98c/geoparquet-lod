@@ -448,13 +448,26 @@ export class LodReader {
     return Promise.all(pages.map((page) => wanted.get(key(page))!))
   }
 
+  /**
+   * The prefix row groups' bbox indexes, and the offset indexes of the LODs
+   * served from them: a map opening at a coarse zoom wants all of these, and
+   * they sit together in the file.
+   */
   private warmPrefix(): void {
     const prefix = this.lod.prefix
     if (!prefix) return
+    const coarse = Object.values(this.lods).filter((lod) => Math.max(...lod.zooms) <= prefix.zoom)
     for (let g = 0; g <= prefix.row_group_end; g++) {
       for (const leaf of BBOX_LEAVES) {
         void this.offsetIndex(g, leaf).catch(() => undefined)
         void this.columnIndex(g, leaf).catch(() => undefined)
+      }
+      for (const lod of coarse) {
+        void this.offsetIndex(g, this.geometryLeaf(lod)).catch(() => undefined)
+        for (const a of this.lod.attributes)
+          void this.offsetIndex(g, `${this.lod.column}.${lod.name}.${a.name}`).catch(
+            () => undefined,
+          )
       }
     }
   }
