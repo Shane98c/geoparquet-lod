@@ -2,18 +2,19 @@
 
     def thin(rows: pa.Table, zoom: int, ctx: Context) -> pa.Table
 
-The writer starts with every row at the shape zoom (every feature is present
-at every shape zoom) and calls `thin` once per coarser point zoom, passing the
+The writer starts with every row at the complete zoom (every feature is
+present from there up) and calls `thin` once per coarser zoom, passing the
 rows kept at the zoom just finer. The
 function returns the subset to keep at this zoom. Nesting (shown at z means
 shown at every finer zoom) is therefore guaranteed by construction, and a
 rule only ever answers "of these, which survive one step coarser?".
 
 `rows` always has: `id`, `cx`, `cy` (centroid), `diag` (bbox diagonal in CRS
-units), `u` (a uniform in [0, 1) hashed from the geometry, so stable across rebuilds),
+units), `area` (in CRS units squared), `u` (a uniform in [0, 1) hashed from the
+geometry, so stable across rebuilds),
 and every carried attribute and extra column the writer was told to load.
 A returned table must keep `id`; any carried attribute column it includes
-overrides that attribute in this zoom's payload, which is how accumulated
+overrides that attribute in this zoom's LOD, which is how accumulated
 values such as cluster counts reach the renderer.
 
 The built-ins below are small enough to read and copy. Write your own when
@@ -33,6 +34,7 @@ from .quantize import resolution
 
 Thin = Callable[[pa.Table, int, 'Context'], pa.Table]
 RESERVED = ('id', 'cx', 'cy', 'diag', 'u')
+# `area` is also provided but a thinning may update it, as `tiny_polygons` does
 
 
 @dataclass(frozen=True)
@@ -86,14 +88,54 @@ def drop_rate(rate: float = 2.5) -> Thin:
 
 
 def size_threshold(pixels: float = 4.0) -> Thin:
-    """Keep a feature at a point zoom while its bbox would still span `pixels`
-    pixels there: large features earn a dot before small ones do."""
+    """Keep a feature while its bbox would still span `pixels` pixels at the
+    zoom: large features survive zooming out before small ones do."""
 
     def thin(rows, zoom, ctx):
         keep = rows.column('diag').to_numpy() >= pixels * ctx.resolution(zoom)
         return _mask(rows, keep)
 
     thin.__name__ = f'size_threshold({pixels})'
+    return thin
+
+
+def tiny_polygons(pixels: float = 0.5) -> Thin:
+    """Tippecanoe's tiny-polygon reduction: a polygon smaller than a `pixels`
+    square is drawn only as a share of its neighbours' area. Within a tile, in
+    row (Hilbert) order, small areas accumulate and one row is kept each time
+    the sum crosses a square's worth; the kept row carries that sum as its
+    `area` so the next zoom coarser sees it. Dense blocks become a few squares
+    with the right total area and sparse ones vanish. Area-true, so a country
+    of buildings is nearly empty zoomed out; `drop_rate` keeps the settlement
+    pattern visible instead, which is why it stays the default."""
+
+    def thin(rows, zoom, ctx):
+        square = (pixels * ctx.resolution(zoom)) ** 2
+        area = rows.column('area').to_numpy(zero_copy_only=False).astype(np.float64)
+        area = np.where(np.isnan(area), 0.0, area)
+        small = area < square
+        keep = ~small
+        carried = area.copy()
+        idx = np.flatnonzero(small)
+        if len(idx):
+            tiles = ctx.tile_of(rows, zoom)[idx]
+            order = np.argsort(tiles, kind='stable')
+            idx, tiles = idx[order], tiles[order]
+            a = area[idx]
+            cum = np.cumsum(a)
+            starts = np.r_[0, np.flatnonzero(np.diff(tiles)) + 1]
+            sizes = np.diff(np.r_[starts, len(a)])
+            local = cum - np.repeat(cum[starts] - a[starts], sizes)
+            k = np.floor(local / square)
+            before = np.floor((local - a) / square)
+            crossed = k > before
+            keep[idx[crossed]] = True
+            carried[idx[crossed]] = (k - before)[crossed] * square
+        kept = _mask(rows, keep)
+        return kept.set_column(kept.schema.get_field_index('area'), 'area', pa.array(carried[keep]))
+
+    thin.__name__ = f'tiny_polygons({pixels})'
+    thin.placeholder_pixels = pixels  # collapsed shapes are drawn this many pixels wide
     return thin
 
 
@@ -183,6 +225,8 @@ def only(predicate: Callable[[pa.Table], np.ndarray] | str, inner: Thin) -> Thin
         return inner(_mask(rows, keep), zoom, ctx)
 
     thin.__name__ = f'only({predicate!r}, {getattr(inner, "__name__", "thin")})'
+    if hasattr(inner, 'placeholder_pixels'):
+        thin.placeholder_pixels = inner.placeholder_pixels
     return thin
 
 
@@ -198,17 +242,27 @@ def combine(*parts: Thin) -> Thin:
             if not extra:
                 continue
             idx = pc.index_in(base.column('id'), value_set=k.column('id').combine_chunks())
+            matched = pc.is_valid(idx)
             for c in extra:
                 values = pc.take(k.column(c).combine_chunks(), idx)
                 if c in base.column_names:
-                    merged = pc.if_else(pc.is_valid(values), values, base.column(c))
+                    merged = pc.if_else(matched, values, base.column(c))
                     base = base.set_column(base.schema.get_field_index(c), c, merged)
                 else:
                     base = base.append_column(c, values)
         return base
 
     thin.__name__ = 'combine(' + ', '.join(getattr(p, '__name__', 'thin') for p in parts) + ')'
+    sizes = [p.placeholder_pixels for p in parts if hasattr(p, 'placeholder_pixels')]
+    if sizes:
+        thin.placeholder_pixels = max(sizes)
     return thin
+
+
+def default_thinning(family: str) -> Thin:
+    """What the writer uses when given none: tippecanoe's `-r`, so relative
+    density survives zooming out for every family."""
+    return drop_rate()
 
 
 def describe(thin: Thin) -> dict:

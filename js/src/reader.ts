@@ -12,19 +12,21 @@ import { readColumn } from 'hyparquet/src/column.js'
 import { DEFAULT_PARSERS } from 'hyparquet/src/convert.js'
 import { getSchemaPath } from 'hyparquet/src/schema.js'
 import { compressors } from 'hyparquet-compressors'
-import type { AttributeSpec } from './payload.js'
+import { LIST_DEPTH, type GeometryType } from './geometry.js'
 
 export type Bbox = [number, number, number, number]
 
 export const LOD_KEY = 'lod_columns'
 export const LOD_VERSION = '0.1.0'
+export const ENCODING = 'quantized_geoarrow'
+export const COORDINATES = 'interleaved'
 
 export interface Lod {
   name: string
   zooms: number[]
-  geometry: 'point_f32' | 'polygon_varint' | 'line_varint'
-  scale?: [number, number]
-  offset?: [number, number]
+  geometry_type: GeometryType
+  scale: [number, number]
+  offset: [number, number]
 }
 
 export interface LodMetadata {
@@ -34,7 +36,9 @@ export interface LodMetadata {
   zooms: number[]
   tile_size: number
   prefix: { zoom: number; row_group_end: number } | null
-  attributes: AttributeSpec[]
+  encoding: string
+  coordinates: string
+  attributes: { name: string; type: string }[]
   thinning: Record<string, unknown>
   lods: Record<string, Omit<Lod, 'name'>>
 }
@@ -45,33 +49,49 @@ export interface RangeSource {
   slice(start: number, end?: number, signal?: AbortSignal): Promise<ArrayBuffer>
 }
 
-interface PageLocation {
+export interface PageLocation {
   rowStart: number
   rowEnd: number
   byteStart: number
   byteEnd: number
 }
 
-export interface Payloads {
+/** Rows shown at one LOD inside a bbox: the coordinate leaf as hyparquet nests it, attributes by name. */
+export interface LodRows {
   /** Global row index of each value, so a feature can be addressed later. */
   rows: number[]
-  values: Uint8Array[]
+  coords: unknown[]
+  columns: Record<string, unknown[]>
 }
 
-/** Below this, a column chunk is read whole rather than through its page index. */
+/** Rows for a tile finer than any LOD: exact WKB plus attributes from the finest LOD. */
+export interface PrimaryRows {
+  rows: number[]
+  wkb: Uint8Array[]
+  columns: Record<string, unknown[]>
+}
+
+/** Refine candidate rows by their bbox values only when the LOD bytes it should save exceed the bbox bytes by this factor. */
+const REFINE_MARGIN = 1.5
+
+/** Below this many bytes across an LOD's leaves, a row group's chunks are read whole rather than through page indexes. */
 const WHOLE_CHUNK_BYTES = 256 * 1024
 const BBOX_LEAVES = ['bbox.xmin', 'bbox.ymin', 'bbox.xmax', 'bbox.ymax'] as const
 
 /**
  * Reads the LOD columns layout: rows in one Hilbert order with a coarse prefix,
- * a covering bbox with page statistics, and one binary column per LOD.
- * A tile read is: row groups by bbox statistics, pages by the bbox page index,
- * then only the overlapping pages of the one LOD column.
+ * a covering bbox with page statistics, and one nullable struct per LOD. A
+ * tile read is: row groups by bbox statistics, pages by the bbox page index,
+ * then only the overlapping pages of the LOD's geometry and attribute leaves.
  */
 export class LodReader {
   readonly metadata: FileMetaData
   readonly lod: LodMetadata
   readonly lods: Record<string, Lod>
+  /** Name of the primary (exact, WKB) geometry column. */
+  readonly primary: string
+  /** The finest zoom any LOD serves; beyond it a tile reads the primary geometry. */
+  readonly finestZoom: number
   private readonly file: RangeSource
   private readonly rowGroupStarts: number[]
   private readonly cache = new Map<string, Promise<unknown>>()
@@ -85,18 +105,27 @@ export class LodReader {
     )
     const lod = geo[LOD_KEY] as LodMetadata | undefined
     if (!lod) throw new Error(`file has no geo.${LOD_KEY} metadata`)
-    if (String(lod.version).split('.')[0] !== LOD_VERSION.split('.')[0]) {
+    const [major, minor] = String(lod.version).split('.')
+    const [ourMajor, ourMinor] = LOD_VERSION.split('.')
+    if (major !== ourMajor || (major === '0' && minor !== ourMinor)) {
       throw new Error(`${LOD_KEY} version ${lod.version} is not compatible with ${LOD_VERSION}`)
     }
+    if (lod.encoding !== ENCODING || lod.coordinates !== COORDINATES) {
+      throw new Error(
+        `${LOD_KEY} geometry encoding ${lod.encoding}/${lod.coordinates} is not ${ENCODING}/${COORDINATES}`,
+      )
+    }
     for (const [name, child] of Object.entries(lod.lods)) {
-      if (!['point_f32', 'polygon_varint', 'line_varint'].includes(child.geometry)) {
-        throw new Error(`lod ${name} uses unknown geometry encoding ${child.geometry}`)
+      if (!(child.geometry_type in LIST_DEPTH)) {
+        throw new Error(`lod ${name} has unknown geometry_type ${child.geometry_type}`)
       }
     }
     this.lod = lod
     this.lods = Object.fromEntries(
       Object.entries(lod.lods).map(([name, child]) => [name, { ...child, name }]),
     )
+    this.primary = geo.primary_column ?? 'geometry'
+    this.finestZoom = Math.max(...lod.zooms)
     let acc = 0
     this.rowGroupStarts = metadata.row_groups.map((rg) => {
       const start = acc
@@ -108,6 +137,29 @@ export class LodReader {
       else this.elements.set(node.path.join('.'), node.element)
     }
     visit(parquetSchema(metadata))
+    this.checkAttributes()
+  }
+
+  private checkAttributes(): void {
+    for (const name of Object.keys(this.lods)) {
+      for (const a of this.lod.attributes) {
+        if (!this.elements.has(`${this.lod.column}.${name}.${a.name}`)) {
+          throw new Error(
+            `attribute ${a.name} of lod ${name} is not a scalar column; nested attributes are not supported`,
+          )
+        }
+      }
+    }
+  }
+
+  /** Top-level scalar columns of the file other than the covering, the LODs and the primary geometry. */
+  scalarColumns(): string[] {
+    const top = new Set<string>()
+    for (const path of this.elements.keys()) {
+      const [first, ...rest] = path.split('.')
+      if (!rest.length && first !== this.primary) top.add(first)
+    }
+    return [...top]
   }
 
   static async open(file: RangeSource): Promise<LodReader> {
@@ -129,14 +181,24 @@ export class LodReader {
     return all.find((b) => b.zooms.includes(target))!
   }
 
-  /** Non-null payloads of every row whose covering bbox may intersect `bbox`. */
-  async readPayloads(
+  /** Parquet leaf path of an LOD's interleaved coordinates: the geometry lists, then the pair list. */
+  geometryLeaf(lod: Lod): string {
+    return `${this.lod.column}.${lod.name}.geometry${'.list.element'.repeat(LIST_DEPTH[lod.geometry_type] + 1)}`
+  }
+
+  /** Every row shown at `lod` whose covering bbox may intersect `bbox`, with the named attributes. */
+  async readLod(
     lod: Lod,
     bbox: Bbox,
+    attributes: string[] = [],
     signal?: AbortSignal,
     options: { refine?: boolean } = {},
-  ): Promise<Payloads> {
-    const out: Payloads = { rows: [], values: [] }
+  ): Promise<LodRows> {
+    const out: LodRows = {
+      rows: [],
+      coords: [],
+      columns: Object.fromEntries(attributes.map((a) => [a, []])),
+    }
     const prefix = this.lod.prefix
     const coarse = prefix && Math.max(...lod.zooms) <= prefix.zoom
     const groups = this.metadata.row_groups
@@ -144,28 +206,96 @@ export class LodReader {
       .filter(
         (g) => (!coarse || g <= prefix!.row_group_end) && intersects(this.rowGroupBbox(g), bbox),
       )
-    const leaf = `${this.lod.column}.${lod.name}`
-    await Promise.all(
+    const leaves = [
+      this.geometryLeaf(lod),
+      ...attributes.map((a) => `${this.lod.column}.${lod.name}.${a}`),
+    ]
+    const perGroup = await Promise.all(
       groups.map(async (g) => {
-        const start = this.rowGroupStarts[g]
-        if (this.chunkBytes(g, leaf) <= WHOLE_CHUNK_BYTES) {
-          for (const { row, value } of await this.readWholeLeaf(g, leaf)) {
-            out.rows.push(start + row)
-            out.values.push(value)
-          }
-          return
-        }
-        void this.offsetIndex(g, leaf).catch(() => undefined)
-        let ranges = await this.candidateRows(g, bbox, signal)
-        if (!ranges.length) return
-        if (options.refine) ranges = await this.refineRows(g, ranges, bbox, signal)
-        if (!ranges.length) return
-        for (const { row, value } of await this.readLeafRows(g, leaf, ranges, signal)) {
-          out.rows.push(start + row)
-          out.values.push(value)
-        }
+        let ranges: [number, number][] | null = null
+        const whole =
+          leaves.reduce((n, leaf) => n + this.chunkBytes(g, leaf), 0) <= WHOLE_CHUNK_BYTES
+        let refined: Promise<[number, number][]> | null = null
+        const values = await Promise.all(
+          leaves.map(async (leaf) => {
+            if (whole) return this.readWholeLeaf(g, leaf)
+            void this.offsetIndex(g, leaf).catch(() => undefined)
+            refined ??= this.candidateRows(g, bbox, signal).then(({ ranges, hit }) =>
+              ranges.length && options.refine && this.refinePays(g, leaves, hit)
+                ? this.refineRows(g, ranges, bbox, signal)
+                : ranges,
+            )
+            ranges = await refined
+            if (!ranges.length) return new Map<number, unknown>()
+            return this.readLeafRows(g, leaf, ranges, signal)
+          }),
+        )
+        return { g, values }
       }),
     )
+    for (const { g, values } of perGroup) {
+      const start = this.rowGroupStarts[g]
+      const [coords, ...attrs] = values
+      for (const [row, c] of coords) {
+        out.rows.push(start + row)
+        out.coords.push(c)
+        attributes.forEach((a, i) => out.columns[a].push(attrs[i].get(row) ?? null))
+      }
+    }
+    return out
+  }
+
+  /**
+   * Rows whose covering bbox intersects `bbox`, with their exact primary
+   * geometry as WKB and the named attributes from the finest LOD, for tiles
+   * finer than any LOD. Every row is shown at the finest LOD, so the bbox
+   * pages alone choose the rows.
+   */
+  async readPrimary(
+    bbox: Bbox,
+    attributes: string[] = [],
+    signal?: AbortSignal,
+  ): Promise<PrimaryRows> {
+    const out: PrimaryRows = {
+      rows: [],
+      wkb: [],
+      columns: Object.fromEntries(attributes.map((a) => [a, []])),
+    }
+    const finest = this.lodForZoom(this.finestZoom)
+    const leaves = attributes.map((a) => `${this.lod.column}.${finest.name}.${a}`)
+    const groups = this.metadata.row_groups
+      .map((_, g) => g)
+      .filter((g) => intersects(this.rowGroupBbox(g), bbox))
+    const perGroup = await Promise.all(
+      groups.map(async (g) => {
+        let { ranges } = await this.candidateRows(g, bbox, signal)
+        if (ranges.length) ranges = await this.refineRows(g, ranges, bbox, signal)
+        if (!ranges.length)
+          return {
+            g,
+            ranges,
+            geometry: new Map<number, unknown>(),
+            attrs: [] as Map<number, unknown>[],
+          }
+        const [geometry, ...attrs] = await Promise.all([
+          this.readLeafValues(g, this.primary, ranges, signal),
+          ...leaves.map((leaf) => this.readLeafRows(g, leaf, ranges, signal)),
+        ])
+        return { g, ranges, geometry, attrs }
+      }),
+    )
+    for (const { g, ranges, geometry, attrs } of perGroup) {
+      const start = this.rowGroupStarts[g]
+      for (const [a, b] of ranges) {
+        for (let row = a; row < b; row++) {
+          const wkb = geometry.get(row)
+          if (!(wkb instanceof Uint8Array)) continue
+          out.rows.push(start + row)
+          out.wkb.push(wkb)
+          attributes.forEach((name, i) => out.columns[name].push(attrs[i].get(row) ?? null))
+        }
+      }
+    }
     return out
   }
 
@@ -192,6 +322,49 @@ export class LodReader {
     return out
   }
 
+  /** Experimental sidecars bind page locations to this file size and footer length. */
+  get fileSize(): number {
+    return this.file.byteLength
+  }
+
+  /** Decode explicitly located LOD pages without reading their offset indexes. */
+  async readLocatedPages(
+    g: number,
+    leaf: string,
+    pages: PageLocation[],
+    signal?: AbortSignal,
+  ): Promise<Map<number, unknown>> {
+    const dictionary = await this.dictionaryPage(g, leaf)
+    const ordered = [...pages].sort((a, b) => a.byteStart - b.byteStart)
+    const runs: PageLocation[][] = []
+    for (const page of ordered) {
+      const last = runs[runs.length - 1]
+      if (last && last[last.length - 1].byteEnd === page.byteStart) last.push(page)
+      else runs.push([page])
+    }
+    const decoded = await Promise.all(
+      runs.map(async (run) => {
+        const buffer = await this.file.slice(run[0].byteStart, run[run.length - 1].byteEnd, signal)
+        const values = new Map<number, unknown>()
+        for (const page of run) {
+          const bytes = buffer.slice(
+            page.byteStart - run[0].byteStart,
+            page.byteEnd - run[0].byteStart,
+          )
+          let row = page.rowStart
+          for (const data of this.decodePages(bytes, g, leaf, row, page.rowEnd - row, dictionary)) {
+            for (let i = 0; i < data.length; i++, row++) {
+              const value = unwrap(data[i])
+              if (value !== ABSENT) values.set(row, value)
+            }
+          }
+        }
+        return values
+      }),
+    )
+    return new Map(decoded.flatMap((values) => [...values]))
+  }
+
   private warmPrefix(): void {
     const prefix = this.lod.prefix
     if (!prefix) return
@@ -204,12 +377,14 @@ export class LodReader {
   }
 
   private rowGroupBbox(g: number): Bbox {
-    const stat = (leaf: string) => this.chunk(g, leaf).meta_data!.statistics!
+    if (!Number(this.metadata.row_groups[g].num_rows)) return [1, 1, 0, 0]
+    const stat = (leaf: string) => this.chunk(g, leaf).meta_data!.statistics
+    if (!stat('bbox.xmin')) return [1, 1, 0, 0]
     return [
-      stat('bbox.xmin').min_value as unknown as number,
-      stat('bbox.ymin').min_value as unknown as number,
-      stat('bbox.xmax').max_value as unknown as number,
-      stat('bbox.ymax').max_value as unknown as number,
+      stat('bbox.xmin')!.min_value as unknown as number,
+      stat('bbox.ymin')!.min_value as unknown as number,
+      stat('bbox.xmax')!.max_value as unknown as number,
+      stat('bbox.ymax')!.max_value as unknown as number,
     ]
   }
 
@@ -225,14 +400,35 @@ export class LodReader {
     return Number(this.chunk(g, leaf).meta_data!.total_compressed_size)
   }
 
+  /**
+   * Whether reading the bbox values of the candidate rows should save more LOD
+   * bytes than it costs: the LOD leaves' bytes per row times the share of
+   * candidates expected to miss, against the covering's bytes per row.
+   */
+  private refinePays(g: number, leaves: string[], hit: number): boolean {
+    const rows = Number(this.metadata.row_groups[g].num_rows)
+    if (!rows) return false
+    const perRow = (ls: readonly string[]) =>
+      ls.reduce((n, l) => n + this.chunkBytes(g, l), 0) / rows
+    return (1 - hit) * perRow(leaves) > REFINE_MARGIN * perRow(BBOX_LEAVES)
+  }
+
+  /**
+   * Row ranges of the pages whose bbox statistics admit `bbox`, and `hit`,
+   * the share of those pages' extent the tile covers: an estimate of how
+   * many candidate rows will actually intersect, used to decide whether
+   * reading the bbox values to refine them is worth its own page reads.
+   */
   private async candidateRows(
     g: number,
     bbox: Bbox,
     signal?: AbortSignal,
-  ): Promise<[number, number][]> {
+  ): Promise<{ ranges: [number, number][]; hit: number }> {
     const rows = Number(this.metadata.row_groups[g].num_rows)
     const loaded = await Promise.all(
-      BBOX_LEAVES.map((leaf) => Promise.all([this.offsetIndex(g, leaf), this.columnIndex(g, leaf)])),
+      BBOX_LEAVES.map((leaf) =>
+        Promise.all([this.offsetIndex(g, leaf), this.columnIndex(g, leaf)]),
+      ),
     )
     signal?.throwIfAborted()
     let selected: [number, number][] | null = null
@@ -245,9 +441,26 @@ export class LodReader {
         if (tests[i]) ranges.push([pages[p].rowStart, pages[p].rowEnd])
       })
       selected = selected ? intersectRanges(selected, ranges) : ranges
-      if (!selected.length) return []
+      if (!selected.length) return { ranges: [], hit: 0 }
     }
-    return mergeRanges(selected ?? [[0, rows]])
+    const ranges = mergeRanges(selected ?? [[0, rows]])
+    // page extents from the xmin/xmax and ymin/ymax indexes; pages share row boundaries
+    const [[xminPages, xminIndex], [, yminIndex], [, xmaxIndex], [, ymaxIndex]] = loaded
+    let covered = 0
+    let extent = 0
+    xminPages.forEach((p, i) => {
+      if (!ranges.some(([a, b]) => p.rowStart < b && p.rowEnd > a)) return
+      const px0 = xminIndex.min_values[i] as unknown as number
+      const py0 = yminIndex.min_values[i] as unknown as number
+      const px1 = xmaxIndex.max_values[i] as unknown as number
+      const py1 = ymaxIndex.max_values[i] as unknown as number
+      const area = Math.max(px1 - px0, 1e-12) * Math.max(py1 - py0, 1e-12)
+      const ix = Math.max(0, Math.min(px1, bbox[2]) - Math.max(px0, bbox[0]))
+      const iy = Math.max(0, Math.min(py1, bbox[3]) - Math.max(py0, bbox[1]))
+      extent += area
+      covered += Math.min(area, ix * iy)
+    })
+    return { ranges, hit: extent ? covered / extent : 1 }
   }
 
   private async refineRows(
@@ -283,9 +496,20 @@ export class LodReader {
       element: this.elements.get(leaf)!,
       schemaPath: getSchemaPath(this.metadata.schema, leaf.split('.')),
       compressors,
-      parsers: DEFAULT_PARSERS,
-      utf8: false,
+      parsers: RAW_GEOMETRY_PARSERS,
+      utf8: isString(this.elements.get(leaf)!),
     }
+  }
+
+  /** The dictionary page of a chunk, read once, so page runs can be decoded on their own. */
+  private dictionaryPage(g: number, leaf: string): Promise<ArrayBuffer | null> {
+    return this.cached(`d:${g}:${leaf}`, async () => {
+      const meta = this.chunk(g, leaf).meta_data!
+      if (meta.dictionary_page_offset === undefined) return null
+      const start = Number(meta.dictionary_page_offset)
+      const end = Number(meta.data_page_offset)
+      return end > start ? this.file.slice(start, end) : null
+    })
   }
 
   private decodePages(
@@ -294,7 +518,14 @@ export class LodReader {
     leaf: string,
     rowStart: number,
     rows: number,
+    dictionary: ArrayBuffer | null = null,
   ): ArrayLike<unknown>[] {
+    if (dictionary) {
+      const joined = new Uint8Array(dictionary.byteLength + buffer.byteLength)
+      joined.set(new Uint8Array(dictionary), 0)
+      joined.set(new Uint8Array(buffer), dictionary.byteLength)
+      buffer = joined.buffer
+    }
     const { data } = readColumn(
       { view: new DataView(buffer), offset: 0 },
       { groupStart: rowStart, groupRows: rows, selectStart: 0, selectEnd: rows } as never,
@@ -303,18 +534,21 @@ export class LodReader {
     return data as ArrayLike<unknown>[]
   }
 
-  private readWholeLeaf(g: number, leaf: string): Promise<{ row: number; value: Uint8Array }[]> {
+  /** Rows of a leaf under an LOD struct, present rows only. */
+  private readWholeLeaf(g: number, leaf: string): Promise<Map<number, unknown>> {
     return this.cached(`w:${g}:${leaf}`, async () => {
       const chunk = this.chunk(g, leaf)
-      const start = Number(chunk.meta_data!.dictionary_page_offset ?? chunk.meta_data!.data_page_offset)
+      const start = Number(
+        chunk.meta_data!.dictionary_page_offset ?? chunk.meta_data!.data_page_offset,
+      )
       const buffer = await this.file.slice(start, start + this.chunkBytes(g, leaf))
       const rows = Number(this.metadata.row_groups[g].num_rows)
-      const out: { row: number; value: Uint8Array }[] = []
+      const out = new Map<number, unknown>()
       let row = 0
       for (const chunkData of this.decodePages(buffer, g, leaf, 0, rows)) {
         for (let i = 0; i < chunkData.length; i++, row++) {
           const v = unwrap(chunkData[i])
-          if (v) out.push({ row, value: v })
+          if (v !== ABSENT) out.set(row, v)
         }
       }
       return out
@@ -326,28 +560,41 @@ export class LodReader {
     leaf: string,
     ranges: [number, number][],
     signal?: AbortSignal,
-  ): Promise<{ row: number; value: Uint8Array }[]> {
-    const pages = await this.offsetIndex(g, leaf)
+  ): Promise<Map<number, unknown>> {
+    const [pages, dictionary] = await Promise.all([
+      this.offsetIndex(g, leaf),
+      this.dictionaryPage(g, leaf),
+    ])
     const wanted = pages.filter((p) => ranges.some(([a, b]) => p.rowStart < b && p.rowEnd > a))
-    if (!wanted.length) return []
+    const out = new Map<number, unknown>()
+    if (!wanted.length) return out
     const runs: PageLocation[][] = []
     for (const p of wanted) {
       const run = runs[runs.length - 1]
       if (run && run[run.length - 1].byteEnd === p.byteStart) run.push(p)
       else runs.push([p])
     }
-    const out: { row: number; value: Uint8Array }[] = []
     await Promise.all(
       runs.map(async (run) => {
         const buffer = await this.file.slice(run[0].byteStart, run[run.length - 1].byteEnd, signal)
         for (const page of run) {
-          const slice = buffer.slice(page.byteStart - run[0].byteStart, page.byteEnd - run[0].byteStart)
+          const slice = buffer.slice(
+            page.byteStart - run[0].byteStart,
+            page.byteEnd - run[0].byteStart,
+          )
           let row = page.rowStart
-          for (const chunkData of this.decodePages(slice, g, leaf, page.rowStart, page.rowEnd - page.rowStart)) {
+          for (const chunkData of this.decodePages(
+            slice,
+            g,
+            leaf,
+            page.rowStart,
+            page.rowEnd - page.rowStart,
+            dictionary,
+          )) {
             for (let i = 0; i < chunkData.length; i++, row++) {
               if (!ranges.some(([a, b]) => row >= a && row < b)) continue
               const v = unwrap(chunkData[i])
-              if (v !== undefined && v !== null) out.push({ row, value: v })
+              if (v !== ABSENT) out.set(row, v)
             }
           }
         }
@@ -362,14 +609,24 @@ export class LodReader {
     ranges: [number, number][],
     signal?: AbortSignal,
   ): Promise<Map<number, unknown>> {
-    const pages = await this.offsetIndex(g, leaf)
+    const [pages, dictionary] = await Promise.all([
+      this.offsetIndex(g, leaf),
+      this.dictionaryPage(g, leaf),
+    ])
     const wanted = pages.filter((p) => ranges.some(([a, b]) => p.rowStart < b && p.rowEnd > a))
     const out = new Map<number, unknown>()
     await Promise.all(
       wanted.map(async (page) => {
         const buffer = await this.file.slice(page.byteStart, page.byteEnd, signal)
         let row = page.rowStart
-        for (const chunkData of this.decodePages(buffer, g, leaf, page.rowStart, page.rowEnd - page.rowStart)) {
+        for (const chunkData of this.decodePages(
+          buffer,
+          g,
+          leaf,
+          page.rowStart,
+          page.rowEnd - page.rowStart,
+          dictionary,
+        )) {
           for (let i = 0; i < chunkData.length; i++, row++) out.set(row, chunkData[i])
         }
       }),
@@ -388,7 +645,8 @@ export class LodReader {
       const rows = Number(this.metadata.row_groups[g].num_rows)
       return page_locations.map((p, i) => ({
         rowStart: Number(p.first_row_index),
-        rowEnd: i + 1 < page_locations.length ? Number(page_locations[i + 1].first_row_index) : rows,
+        rowEnd:
+          i + 1 < page_locations.length ? Number(page_locations[i + 1].first_row_index) : rows,
         byteStart: Number(p.offset),
         byteEnd: Number(p.offset) + p.compressed_page_size,
       }))
@@ -417,9 +675,30 @@ export class LodReader {
   }
 }
 
-/** hyparquet wraps a struct child's value in a one-element array when the struct is nullable */
-const unwrap = (v: unknown): Uint8Array | undefined =>
-  Array.isArray(v) ? (v[0] as Uint8Array | undefined) : (v as Uint8Array | undefined)
+/** hyparquet would parse GEOMETRY-typed columns to GeoJSON; the tile encoder wants the WKB bytes. */
+const RAW_GEOMETRY_PARSERS = {
+  ...DEFAULT_PARSERS,
+  geometryFromBytes: (bytes: Uint8Array) => bytes,
+  geographyFromBytes: (bytes: Uint8Array) => bytes,
+}
+
+const isString = (element: SchemaTree['element']) =>
+  element.converted_type === 'UTF8' ||
+  (element.logical_type as { type?: string } | undefined)?.type === 'STRING'
+
+const ABSENT = Symbol('absent')
+
+/**
+ * hyparquet assembles a leaf below the nullable LOD struct as one array per
+ * row, empty when the struct is null, so a geometry leaf is `[value]` for a
+ * shown row. A flat leaf (an attribute) comes back as the scalar itself, null
+ * both for a null value and for a row not shown; rows are therefore taken
+ * from the geometry leaves and attributes only looked up.
+ */
+const unwrap = (v: unknown): unknown => {
+  if (!Array.isArray(v)) return v === null || v === undefined ? ABSENT : v
+  return v.length ? v[0] : ABSENT
+}
 
 const intersects = (a: Bbox, b: Bbox) => !(a[0] > b[2] || a[2] < b[0] || a[1] > b[3] || a[3] < b[1])
 

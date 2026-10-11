@@ -1,24 +1,44 @@
 import assert from 'node:assert/strict'
-import { decodeAttributes, decodePoint, decodePolygonTree, PolygonBuilder } from '../dist/index.js'
+import { GeometryBuilder, decodeCoordinates } from '../dist/index.js'
 
-// attribute block: f32 risk, i32 floors, utf8 name; then a point
-const buf = new Uint8Array([0, 0, 0, 63, 2, 0, 0, 0, 2, 104, 105, 0, 0, 128, 63, 0, 0, 0, 64])
-const { values, pos } = decodeAttributes(buf, [{ name: 'risk', type: 'f32' }, { name: 'floors', type: 'i32' }, { name: 'name', type: 'utf8' }])
-assert.equal(values.risk, 0.5)
-assert.equal(values.floors, 2)
-assert.equal(values.name, 'hi')
-assert.deepEqual(decodePoint(buf, pos), [1, 2])
+// a MultiPolygon row as hyparquet returns the interleaved coordinate leaf: polygons > rings > [x, y]
+const mp = [
+  [
+    [
+      [0, 0],
+      [3, 0],
+      [3, 3],
+      [0, 0],
+    ],
+  ],
+  [
+    [
+      [10, 10],
+      [12, 10],
+      [10, 12],
+      [10, 10],
+    ],
+  ],
+]
+assert.deepEqual(decodeCoordinates(mp, [0.5, 0.5], [100, 200])[0][0][1], [101.5, 200])
 
-// polygon tree: 1 polygon, 1 ring, 4 vertices: (0,0) (3,0) (3,3) (0,0) as zigzag deltas
-const tree = new Uint8Array([1, 1, 4, 0, 0, 6, 0, 0, 6, 5, 5])
-const polygons = decodePolygonTree(tree, 0, [1, 1], [0, 0])
-assert.deepEqual(polygons, [[[[0, 0], [3, 0], [3, 3], [0, 0]]]])
-const b = new PolygonBuilder()
-b.add(tree, 0)
+const b = new GeometryBuilder()
+b.add('MultiPolygon', mp)
+b.add('MultiLineString', [
+  [
+    [0, 0],
+    [1, 1],
+  ],
+])
+b.add('Point', [7, 8])
 const g = b.finish([1, 1], [0, 0])
-assert.equal(g.length, 1)
-assert.deepEqual(Array.from(g.x), [0, 3, 3, 0])
+assert.equal(g.length, 3)
+assert.deepEqual(Array.from(g.types), [6, 5, 1])
+assert.deepEqual(Array.from(g.geometryOffsets), [0, 2, 3, 4])
+assert.deepEqual(Array.from(g.polygonOffsets), [0, 1, 2, 3, 4])
+assert.deepEqual(Array.from(g.ringOffsets), [0, 4, 8, 10, 11])
+assert.deepEqual(Array.from(g.x), [0, 3, 3, 0, 10, 12, 10, 10, 0, 1, 7])
+assert.deepEqual(Array.from(g.y), [0, 0, 3, 0, 10, 10, 12, 10, 0, 1, 8])
 
-assert.throws(() => decodePolygonTree(tree.subarray(0, 6), 0, [1, 1], [0, 0]), /truncated|more vertices/)
-assert.throws(() => decodeAttributes(new Uint8Array(2), [{ name: 'a', type: 'f32' }]), /truncated/)
+assert.throws(() => b.add('MultiPolygon', [[[[0, 1, 2]]]]), /pair/)
 console.log('decode tests passed')

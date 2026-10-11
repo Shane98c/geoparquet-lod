@@ -19,7 +19,6 @@ if __name__ == '__main__':
         out,
         thinning=importance('population', per_tile=300),
         zooms=range(0, 15),
-        polygons_from=None,
-        carry=[('name', 'utf8'), ('population', 'u32')],
+        carry=['name', 'population'],
         prefix_zoom=5,
     )

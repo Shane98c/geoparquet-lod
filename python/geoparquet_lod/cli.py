@@ -12,8 +12,12 @@ from .writer import write
 
 
 def parse_thinning(spec: str, where: str | None) -> th.Thin:
-    """`drop[:rate]`, `density[:budget]`, `size[:pixels]`, `importance:column[:per_tile]`,
-    `cluster[:pixels]`; `+` combines, e.g. `size:4+drop:2.5`. `where` restricts eligibility."""
+    """`drop[:rate]`, `density[:budget]`, `size[:pixels]`, `tiny[:pixels]`,
+    `importance:column[:per_tile]`, `cluster[:pixels]`; `+` combines, e.g. `size:4+drop:2.5`;
+    `auto` is the family default. `where` restricts eligibility."""
+    if spec == 'auto':
+        thin = th.default_thinning('auto')
+        return th.only(where, thin) if where else thin
     parts = []
     for part in spec.split('+'):
         kind, _, rest = part.partition(':')
@@ -26,6 +30,8 @@ def parse_thinning(spec: str, where: str | None) -> th.Thin:
         elif kind == 'importance':
             column, _, per_tile = rest.partition(':')
             parts.append(th.importance(column, int(per_tile or 1000)))
+        elif kind == 'tiny':
+            parts.append(th.tiny_polygons(float(rest or 0.5)))
         elif kind == 'cluster':
             parts.append(th.cluster(float(rest or 8)))
         else:
@@ -45,9 +51,9 @@ def cli():
 @click.option(
     '--thinning',
     'thinning_spec',
-    default='drop:2.5',
+    default='auto',
     show_default=True,
-    help='drop[:rate] | density[:budget] | size[:pixels] | importance:column[:n] | cluster[:px]; join with +',
+    help='auto | drop[:rate] | density[:budget] | size[:pixels] | tiny[:px] | importance:column[:n] | cluster[:px]; join with +',
 )
 @click.option(
     '--where', default=None, help='SQL predicate; rows failing it are never shown zoomed out'
@@ -60,19 +66,18 @@ def cli():
     help="inclusive range such as 2-16, or 'auto' to derive from the data",
 )
 @click.option(
-    '--polygons-from',
+    '--complete-from',
     default='auto',
     show_default=True,
-    help="first zoom drawn as footprints, or 'auto' (median feature spans a pixel)",
+    help="zoom from which every feature is present: a zoom, 'auto' (median feature spans a pixel) or 'never'",
 )
-@click.option('--points-only', is_flag=True, help='draw points at every zoom')
 @click.option(
-    '--carry', multiple=True, help='column[:type] to pack into the payload, e.g. risk:f32'
+    '--carry', multiple=True, help='column[:arrow type] to carry per LOD, e.g. risk:float32'
 )
 @click.option('--geometry', default='geometry', show_default=True)
 @click.option('--prefix-zoom', default=6, type=int, show_default=True)
 @click.option('--row-group-rows', default=1_048_576, type=int, show_default=True)
-@click.option('--page-bytes', default=4096, type=int, show_default=True)
+@click.option('--page-bytes', default=16384, type=int, show_default=True)
 @click.option(
     '--batch-rows',
     default=None,
@@ -89,8 +94,7 @@ def write_cmd(
     where,
     columns,
     zooms,
-    polygons_from,
-    points_only,
+    complete_from,
     carry,
     geometry,
     prefix_zoom,
@@ -105,8 +109,8 @@ def write_cmd(
     if zooms != 'auto':
         lo, _, hi = zooms.partition('-')
         zooms = range(int(lo), int(hi or lo) + 1)
-    if polygons_from != 'auto':
-        polygons_from = int(polygons_from)
+    if complete_from != 'auto':
+        complete_from = None if complete_from == 'never' else int(complete_from)
     carried = [tuple(c.split(':', 1)) if ':' in c else c for c in carry]
     write(
         src,
@@ -114,7 +118,7 @@ def write_cmd(
         thinning=parse_thinning(thinning_spec, where),
         columns=columns,
         zooms=zooms,
-        polygons_from=None if points_only else polygons_from,
+        complete_from=complete_from,
         carry=carried,
         geometry=geometry,
         prefix_zoom=prefix_zoom,
@@ -151,3 +155,13 @@ def inspect_cmd(path):
     click.echo(f'bytes per row in row group {info["row_group_sampled"]}:')
     for col, nbytes in info['compressed_bytes_by_column'].items():
         click.echo(f'  {col:40s} {nbytes / max(rows, 1):8.2f}')
+
+
+@cli.command('tiledir')
+@click.argument('path', type=click.Path(exists=True, dir_okay=False))
+@click.option('--out', type=click.Path(dir_okay=False), default=None)
+def tiledir_cmd(path, out):
+    """Build an experimental version-bound PATH.tiledir sidecar."""
+    from .tiledir import build
+
+    click.echo(json.dumps(build(path, out), indent=2))

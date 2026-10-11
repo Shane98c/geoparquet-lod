@@ -1,7 +1,7 @@
 """Buildings with a risk score: show only the ones that matter when zoomed out.
 
 Coarse zooms are a fixed-rate sample of the buildings with nonzero risk;
-every building is drawn as a footprint from z13. Two risk values ride along
+every building is present from z13. Two risk values ride along
 so the map can colour by either period without another request.
 
     uv run python examples/buildings_risk.py buildings.parquet out.parquet
@@ -18,7 +18,7 @@ if __name__ == '__main__':
         src,
         out,
         thinning=only('rps_2011 > 0 AND rps_2047 > 0', drop_rate(2.5)),
-        polygons_from=13,  # the map draws every footprint from z13
-        carry=[('rps_2011', 'f32'), ('rps_2047', 'f32')],
+        complete_from=13,  # every building is present from z13
+        carry=[('rps_2011', 'float32'), ('rps_2047', 'float32')],
         prefix_zoom=6,
     )

@@ -5,17 +5,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import numpy as np
+import pyarrow as pa
 import pyarrow.parquet as pq
 
-from .encoding import (
-    LINE_GEOMETRY,
-    POINT_GEOMETRY,
-    POLYGON_GEOMETRY,
-    Attribute,
-    decode_attributes,
-    decode_polygon_tree,
-)
+from .encoding import COORDINATES, ENCODING, LIST_DEPTH, geometry_rows, geometry_type
 from .writer import LOD_KEY, LOD_VERSION
 
 
@@ -34,28 +27,57 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
     major = str(lod.get('version', '')).split('.')[0]
     if major != LOD_VERSION.split('.')[0]:
         raise ValidationError(f'version {lod.get("version")} is not compatible with {LOD_VERSION}')
+    if lod.get('encoding') != ENCODING:
+        raise ValidationError(f'geometry encoding {lod.get("encoding")!r} is not {ENCODING}')
+    if lod.get('coordinates') != COORDINATES:
+        raise ValidationError(f'coordinate layout {lod.get("coordinates")!r} is not {COORDINATES}')
+    if md.num_row_groups == 0 or md.num_rows == 0:
+        raise ValidationError('empty file: an empty dataset carries no LOD columns')
     column = lod.get('column', 'lod')
     names = f.schema_arrow.names
     if column not in names:
-        raise ValidationError(f'payload column {column} missing')
+        raise ValidationError(f'LOD column {column} missing')
     if 'bbox' not in names:
         raise ValidationError('bbox covering column missing')
     covering = geo.get('columns', {}).get(geo.get('primary_column', 'geometry'), {}).get('covering')
     if not covering:
         raise ValidationError('geo.columns.<geometry>.covering missing')
-    attributes = [Attribute(a['name'], a['type']) for a in lod.get('attributes', [])]
+    attributes = [a['name'] for a in lod.get('attributes', [])]
     lods = lod.get('lods') or {}
     if not lods:
         raise ValidationError('no lods declared')
-    struct = f.schema_arrow.field(column).type
-    children = {struct.field(i).name for i in range(struct.num_fields)}
+    struct = f.schema_arrow.field(column)
+    if struct.nullable:
+        raise ValidationError(f'{column} must be a required struct')
+    children = {
+        struct.type.field(i).name: struct.type.field(i) for i in range(struct.type.num_fields)
+    }
     for name, child in lods.items():
         if name not in children:
             raise ValidationError(f'lod {name} declared but column {column}.{name} missing')
-        if child['geometry'] not in (POINT_GEOMETRY, POLYGON_GEOMETRY, LINE_GEOMETRY):
-            raise ValidationError(f'lod {name} has unknown geometry encoding {child["geometry"]}')
-        if child['geometry'] != POINT_GEOMETRY and ('scale' not in child or 'offset' not in child):
-            raise ValidationError(f'shape lod {name} lacks scale/offset')
+        gtype = child.get('geometry_type')
+        if gtype not in LIST_DEPTH:
+            raise ValidationError(f'lod {name} has unknown geometry_type {gtype!r}')
+        field = children[name]
+        if not field.nullable or not pa.types.is_struct(field.type):
+            raise ValidationError(f'{column}.{name} must be a nullable struct')
+        try:
+            geom = field.type.field('geometry')
+        except KeyError:
+            raise ValidationError(f'{column}.{name} has no geometry child') from None
+        if geom.nullable or geom.type != geometry_type(gtype):
+            raise ValidationError(f'{column}.{name}.geometry is not {ENCODING} {gtype}')
+        for a in attributes:
+            if a not in field.type.names:
+                raise ValidationError(f'{column}.{name} lacks carried attribute {a}')
+            if pa.types.is_nested(field.type.field(a).type):
+                raise ValidationError(f'{column}.{name}.{a} is nested; attributes are scalars')
+        for key in ('scale', 'offset'):
+            v = child.get(key)
+            if not (isinstance(v, list) and len(v) == 2):
+                raise ValidationError(f'lod {name}: {key} must be an [x, y] pair')
+        if min(child['scale']) <= 0:
+            raise ValidationError(f'lod {name}: scale must be positive')
     prefix = lod.get('prefix')
     if prefix and not (0 <= prefix['row_group_end'] < md.num_row_groups):
         raise ValidationError('prefix row_group_end out of range')
@@ -87,21 +109,16 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
                     f'prefix row group {g} holds rows not shown at z{prefix["zoom"]}'
                 )
 
-    # decode a sample of every LOD and require exact byte consumption
+    # a sample of every LOD: non-empty parts, closed rings
     head = f.read_row_group(0, columns=[column]).slice(0, sample_rows)
     checked = {}
     for name, child in lods.items():
         values = head.column(column).combine_chunks().field(name)
-        non_null = [v.as_py() for v in values if v.is_valid]
-        for buf in non_null[:200]:
-            _, pos = decode_attributes(buf, attributes)
-            if child['geometry'] == POINT_GEOMETRY:
-                pos += 8
-            else:
-                _, pos = decode_polygon_tree(buf, pos)
-            if pos != len(buf):
-                raise ValidationError(f'lod {name}: payload has {len(buf) - pos} trailing bytes')
-        checked[name] = len(non_null)
+        shown = values.filter(values.is_valid())
+        geoms = geometry_rows(shown.field('geometry').slice(0, 200))
+        for g in geoms:
+            _check_geometry(name, child['geometry_type'], g)
+        checked[name] = len(shown)
     return {
         'rows': md.num_rows,
         'row_groups': md.num_row_groups,
@@ -112,8 +129,28 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
     }
 
 
+def _check_geometry(name: str, gtype: str, g) -> None:
+    if gtype == 'Point':
+        if len(g) != 2:
+            raise ValidationError(f'lod {name}: a point is not an [x, y] pair')
+        return
+    if not g:
+        raise ValidationError(f'lod {name}: empty geometry on a shown row')
+    for part in g:
+        rings = part if gtype == 'MultiPolygon' else [part]
+        if not rings:
+            raise ValidationError(f'lod {name}: empty polygon')
+        for ring in rings:
+            if len(ring) < 2:
+                raise ValidationError(f'lod {name}: ring with fewer than two vertices')
+            if any(len(v) != 2 for v in ring):
+                raise ValidationError(f'lod {name}: a vertex is not an [x, y] pair')
+            if gtype == 'MultiPolygon' and ring[0] != ring[-1]:
+                raise ValidationError(f'lod {name}: unclosed ring')
+
+
 def inspect(path: str | Path) -> dict:
-    """Metadata plus per-LOD column sizes in the first body row group."""
+    """Metadata plus per-leaf column sizes in the first body row group."""
     f = pq.ParquetFile(path)
     md = f.metadata
     geo = json.loads(dict(f.schema_arrow.metadata or {}).get(b'geo', b'{}') or b'{}')
@@ -139,4 +176,4 @@ def summarize_sizes(sizes: dict, rows: int) -> list[tuple[str, float]]:
     return [(k, v / max(rows, 1)) for k, v in sizes.items()]
 
 
-__all__ = ['ValidationError', 'inspect', 'validate', 'np']
+__all__ = ['ValidationError', 'inspect', 'validate']

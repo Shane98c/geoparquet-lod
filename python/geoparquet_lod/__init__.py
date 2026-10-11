@@ -1,6 +1,5 @@
-"""GeoParquet with per-zoom display payload columns."""
+"""GeoParquet with per-zoom display columns."""
 
-from .encoding import Attribute
 from .thinning import (
     Context,
     Thin,
@@ -11,6 +10,7 @@ from .thinning import (
     importance,
     only,
     size_threshold,
+    tiny_polygons,
 )
 from .validate import ValidationError, inspect, validate
 from .writer import LOD_KEY, LOD_VERSION, write
@@ -18,7 +18,6 @@ from .writer import LOD_KEY, LOD_VERSION, write
 __all__ = [
     'LOD_KEY',
     'LOD_VERSION',
-    'Attribute',
     'Context',
     'Thin',
     'ValidationError',
@@ -30,6 +29,7 @@ __all__ = [
     'inspect',
     'only',
     'size_threshold',
+    'tiny_polygons',
     'validate',
     'write',
 ]

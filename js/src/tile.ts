@@ -1,16 +1,26 @@
-import { MVT_BUFFER, MVT_EXTENT, toMvt } from '@cogp/reader'
-import { decodeAttributes, decodePoint, PolygonBuilder, type AttributeValue } from './payload.js'
-import type { Bbox, LodReader } from './reader.js'
+import { MVT_BUFFER, MVT_EXTENT, geometryColumnFromWkb, toMvt } from '@cogp/reader'
+import { GeometryBuilder } from './geometry.js'
+import type { Bbox, LodReader, LodRows } from './reader.js'
+import { openTileDirectory, TileDirectory } from './tiledir.js'
 
 const VECTOR_TILE_SIZE = 512
 
 export interface TileOptions {
+  /** Experimental sidecar URL; unavailable or incompatible sidecars fall back to page indexes. */
+  tiledir?: string | TileDirectory
   /** MVT layer name for shape LODs (default `features`). */
   layer?: string
   /** MVT layer name for point LODs (default: same as `layer`). */
   pointLayer?: string
   /** Attribute names to copy into MVT properties (default: all carried attributes). */
   properties?: string[]
+  /**
+   * Read the bbox values of candidate pages and keep only rows that intersect
+   * the tile before fetching their LOD pages (default true). Costs a few page
+   * reads of the covering, saves most of the LOD bytes at fine zooms, where a
+   * bbox page holds thousands of rows and a tile wants a few hundred.
+   */
+  refine?: boolean
   signal?: AbortSignal
 }
 
@@ -38,32 +48,58 @@ export const renderTile = async (
 ): Promise<ArrayBuffer> => {
   const { signal } = options
   const bbox = tileBounds(z, x, y)
+  const names = options.properties ?? reader.lod.attributes.map((a) => a.name)
   const lod = reader.lodForZoom(z)
-  const { rows, values } = await reader.readPayloads(lod, bbox, signal)
+  const pointFamily = lod.geometry_type === 'Point'
+  const layer = (pointFamily ? options.pointLayer : undefined) ?? options.layer ?? 'features'
+  if (z > reader.finestZoom) {
+    // finer than any LOD: the exact primary geometry of the rows in the tile
+    const { rows, wkb, columns } = await reader.readPrimary(bbox, names, signal)
+    signal?.throwIfAborted()
+    return toMvt(
+      { geometry: geometryColumnFromWkb(wkb), rowIndex: rows, columns },
+      { z, x, y, layer, signal },
+    )
+  }
+  let located: LodRows | undefined
+  if (options.tiledir) {
+    try {
+      const directory =
+        typeof options.tiledir === 'string'
+          ? await openTileDirectory(reader, options.tiledir)
+          : options.tiledir
+      if (directory.reader !== reader) throw new Error('tile directory belongs to another reader')
+      located = await directory.readLodByTile(lod, z, x, y, names, signal)
+    } catch (error) {
+      signal?.throwIfAborted()
+      console.warn('Experimental tile directory unavailable; using page indexes:', error)
+    }
+  }
+  const { rows, coords, columns } =
+    located ?? (await reader.readLod(lod, bbox, names, signal, { refine: options.refine ?? true }))
   signal?.throwIfAborted()
-  const spec = reader.lod.attributes
-  const names = options.properties ?? spec.map((a) => a.name)
-  const columns: Record<string, AttributeValue[]> = Object.fromEntries(names.map((n) => [n, []]))
-  const keptRows: number[] = []
-  if (lod.geometry === 'point_f32') {
-    const xs: number[] = []
-    const ys: number[] = []
-    values.forEach((v, i) => {
-      const { values: attrs, pos } = decodeAttributes(v, spec)
-      const [px, py] = decodePoint(v, pos)
-      if (px < bbox[0] || px > bbox[2] || py < bbox[1] || py > bbox[3]) return
-      xs.push(px)
-      ys.push(py)
+  if (pointFamily) {
+    const px: number[] = []
+    const py: number[] = []
+    const keptRows: number[] = []
+    const kept: Record<string, unknown[]> = Object.fromEntries(names.map((n) => [n, []]))
+    for (let i = 0; i < rows.length; i++) {
+      const [qx, qy] = coords[i] as [number, number]
+      const lon = lod.offset[0] + lod.scale[0] * qx
+      const lat = lod.offset[1] + lod.scale[1] * qy
+      if (lon < bbox[0] || lon > bbox[2] || lat < bbox[1] || lat > bbox[3]) continue
+      px.push(lon)
+      py.push(lat)
       keptRows.push(rows[i])
-      for (const n of names) columns[n].push(attrs[n])
-    })
-    const n = xs.length
+      for (const n of names) kept[n].push(columns[n][i])
+    }
+    const n = px.length
     const offsets = Uint32Array.from({ length: n + 1 }, (_, i) => i)
     const geometry = {
       length: n,
       types: new Uint8Array(n).fill(1),
-      x: Float64Array.from(xs),
-      y: Float64Array.from(ys),
+      x: Float64Array.from(px),
+      y: Float64Array.from(py),
       geometryOffsets: offsets,
       polygonOffsets: offsets,
       ringOffsets: offsets,
@@ -71,23 +107,14 @@ export const renderTile = async (
       offset: [0, 0] as const,
     }
     return toMvt(
-      { geometry: geometry as never, rowIndex: keptRows, columns },
-      { z, x, y, layer: options.pointLayer ?? options.layer ?? 'features', signal },
+      { geometry: geometry as never, rowIndex: keptRows, columns: kept },
+      { z, x, y, layer, signal },
     )
   }
-  const builder = new PolygonBuilder()
-  const type = lod.geometry === 'line_varint' ? 5 : 6
-  values.forEach((v, i) => {
-    const { values: attrs, pos } = decodeAttributes(v, spec)
-    builder.add(v, pos, type)
-    keptRows.push(rows[i])
-    for (const n of names) columns[n].push(attrs[n])
-  })
-  const geometry = builder.finish(lod.scale!, lod.offset!)
-  return toMvt(
-    { geometry: geometry as never, rowIndex: keptRows, columns },
-    { z, x, y, layer: options.layer ?? 'features', signal },
-  )
+  const builder = new GeometryBuilder()
+  for (let i = 0; i < rows.length; i++) builder.add(lod.geometry_type, coords[i])
+  const geometry = builder.finish(lod.scale, lod.offset)
+  return toMvt({ geometry: geometry as never, rowIndex: rows, columns }, { z, x, y, layer, signal })
 }
 
 export const tileResolution = (z: number, y: number) => {

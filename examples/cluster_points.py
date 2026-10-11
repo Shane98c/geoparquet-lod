@@ -20,7 +20,6 @@ if __name__ == '__main__':
         out,
         thinning=cluster(pixels=8, count='count'),
         zooms=range(0, 15),
-        polygons_from=None,
-        carry=[('count', 'u32')],
+        carry=['count'],
         prefix_zoom=4,
     )
