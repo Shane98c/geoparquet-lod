@@ -35,11 +35,11 @@ for the tile:
 | tile                      | LOD columns | COGP  | PMTiles | Esri SOP |
 | ------------------------- | ----------- | ----- | ------- | -------- |
 | z8 metro, Tokyo           | 41,204      | 1,152 | 51,120  | 28,000   |
-| z11 city, Tokyo           | 22,971      | 72    | 17,402  | 177,679  |
-| z13 downtown, Shibuya     | 52,411      | 460   | 23,309  | 51,996   |
-| z13 suburbs, Chiba        | 6,880       | 94    | 4,109   | 6,841    |
-| z15 street, Tokyo station | 229         | 155   | 1,441   | 229      |
-| z15 street, Osaka         | 1,359       | 796   | 6,523   | 1,362    |
+| z11 city, Tokyo           | 22,971      | 860   | 17,402  | 177,679  |
+| z13 downtown, Shibuya     | 52,411      | 2,739 | 23,309  | 51,996   |
+| z13 suburbs, Chiba        | 6,880       | 454   | 4,109   | 6,841    |
+| z15 street, Tokyo station | 229         | 213   | 1,441   | 229      |
+| z15 street, Osaka         | 1,359       | 1,287 | 6,523   | 1,362    |
 
 And what reading it cost:
 
@@ -47,17 +47,19 @@ And what reading it cost:
 | ------------------------- | -------------- | ----------- | ---------- | --------------- |
 | open                      | 0.47 MB, 4 req | 2.09 MB, 3  | 0.02 MB, 1 | 2.62 MB, 3      |
 | z8 metro, Tokyo           | 1.03 MB, 22    | 0.06 MB, 9  | 0.48 MB, 2 | 26.65 MB, 1,048 |
-| z11 city, Tokyo           | 0.79 MB, 16    | 0.12 MB, 9  | 0.30 MB, 2 | 5.39 MB, 143    |
-| z13 downtown, Shibuya     | 1.68 MB, 28    | 0.31 MB, 26 | 0.37 MB, 2 | 2.61 MB, 92     |
-| z13 suburbs, Chiba        | 0.72 MB, 32    | 0.24 MB, 26 | 0.07 MB, 2 | 1.30 MB, 55     |
-| z15 street, Tokyo station | 0.42 MB, 29    | 0.80 MB, 67 | 0.04 MB, 2 | 1.30 MB, 62     |
-| z15 street, Osaka         | 0.64 MB, 25    | 0.59 MB, 51 | 0.13 MB, 2 | 1.01 MB, 57     |
+| z11 city, Tokyo           | 0.79 MB, 16    | 0.26 MB, 17 | 0.30 MB, 2 | 5.39 MB, 143    |
+| z13 downtown, Shibuya     | 1.68 MB, 28    | 0.71 MB, 42 | 0.37 MB, 2 | 2.61 MB, 92     |
+| z13 suburbs, Chiba        | 0.72 MB, 32    | 0.44 MB, 34 | 0.07 MB, 2 | 1.30 MB, 55     |
+| z15 street, Tokyo station | 0.42 MB, 29    | 0.90 MB, 82 | 0.04 MB, 2 | 1.30 MB, 62     |
+| z15 street, Osaka         | 0.64 MB, 25    | 0.93 MB, 80 | 0.13 MB, 2 | 1.01 MB, 57     |
 
-Read the two tables together. COGP assigns a building to a level by its
-size, with no density target, so on footprints its coarse levels are nearly
-empty: 72 buildings in a z11 tile of central Tokyo, and its small bytes
-there are the cost of drawing almost nothing. At z15 it still omits the
-smallest buildings. Esri's layout never drops a row, so a view reads every
+Read the two tables together. COGP assigns a building to the coarsest
+level where it spans a pixel, with no density target, so on footprints its
+coarse levels are nearly empty: this file has no rows at all in levels 0 to
+10, all of Japan at level 11 fits in one row group, and a z11 tile of
+central Tokyo holds 860 buildings. Its small bytes there are the cost of
+drawing almost nothing. The level, bounds and resolution are the ones
+`@cogp/maplibre` computes for the tile. Esri's layout never drops a row, so a view reads every
 building in it at the chosen level, and its reference reader fetches by XZ
 key ranges rather than pages, which is where the request counts come from;
 its README says a real implementation would tile. tippecanoe drops the
@@ -65,8 +67,8 @@ smallest buildings until a tile fits its limit, and the archive stops at
 z14, so its z15 rows are the parent tile. Ours keeps the busiest tile at
 each zoom under 40,000 buildings plus everything over four pixels.
 
-Where every format draws the full set, at z15, this layout reads about the
-same bytes as COGP in fewer than half the requests, and a third of what the
+Where every format draws close to the full set, at z15, this layout reads
+half the bytes of COGP in a third of the requests, and a third of what the
 Esri reader fetches. At coarser zooms it is the only one of the four
 parquet readers returning a density-capped footprint field, and it pays
 about a megabyte for it, in line with the equivalent PMTiles tile once

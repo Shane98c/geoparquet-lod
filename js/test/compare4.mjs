@@ -5,7 +5,7 @@
 //   npx esbuild vendor/esri-sop/index.ts --bundle --platform=node --format=esm --outfile=test/esri-node.mjs
 //   node test/compare4.mjs
 import { LodReader, httpSource, coalescing, renderTile, tileBounds } from '../dist/index.js'
-import { CogpReader, toMvt } from '@cogp/reader'
+import { CogpReader, MVT_BUFFER, MVT_EXTENT, toMvt } from '@cogp/reader'
 import { PMTiles } from 'pmtiles'
 import { Query } from './esri-node.mjs'
 import { PbfReader } from 'pbf'
@@ -112,15 +112,24 @@ for (const [z, lon, lat, label] of tiles) {
       ),
     )
   }
-  // cogp: fresh reader, the adapter's read for a tile
+  // cogp: fresh reader, the tile bounds, resolution and read call of @cogp/maplibre's tile.js
   {
     const key = 'japan_buildings.cogp.parquet'
     const r = await cogpOpen()
     const a = snap(key)
-    const res = 360 / (512 * 2 ** z)
+    const n = 2 ** z
+    const latAt = (yy) => (Math.atan(Math.sinh(Math.PI * (1 - (2 * yy) / n))) * 180) / Math.PI
+    const pad = MVT_BUFFER / MVT_EXTENT
+    const cogpBbox = [
+      ((x - pad) / n) * 360 - 180,
+      latAt(y + 1 + pad),
+      ((x + 1 + pad) / n) * 360 - 180,
+      latAt(y - pad),
+    ]
+    const res = (360 * Math.cos((latAt(y + 0.5) * Math.PI) / 180)) / (512 * n)
     const level = r.selectLevel(res)
     const batch = await r.read({
-      bbox,
+      bbox: cogpBbox,
       maxLevel: level,
       columns: [r.primaryGeometryColumn],
       useOverview: true,
@@ -129,7 +138,7 @@ for (const [z, lon, lat, label] of tiles) {
     row.push(
       fmt(
         delta(a, snap(key)),
-        `, ${(mvt.byteLength / 1e3).toFixed(0)} KB mvt, ${batch.length} features`,
+        `, ${(mvt.byteLength / 1e3).toFixed(0)} KB mvt, level ${level}, ${batch.length} features`,
       ),
     )
   }
