@@ -1,6 +1,7 @@
-// The same tiles from four files of the same 155.6 million US buildings, each read
-// cold over plain S3 with range requests: this layout, COGP, PMTiles and a plain
-// Hilbert-sorted GeoParquet. Prints markdown tables of the open cost and per-tile cost.
+// The same tiles from four files of the same 155.6 million US buildings, read with range
+// requests: this layout (through page indexes, and through its tile directory when
+// TILEDIR_URL is set), COGP, PMTiles and a plain Hilbert-sorted GeoParquet. Prints markdown
+// tables of the open cost, each tile cold and then warm on the same reader, and short pans.
 //   node test/compare.mjs [z,lon,lat ...]     RUNS=3 by default; median time is reported
 import { parquetMetadataAsync } from 'hyparquet'
 import { CogpReader, toMvt } from '@cogp/reader'
@@ -9,9 +10,9 @@ import { VectorTile } from '@mapbox/vector-tile'
 import { PbfReader } from 'pbf'
 import {
   LodReader,
+  TileDirectory,
   httpSource,
   coalescing,
-  openTileDirectory,
   renderTile,
   tileBounds,
 } from '../dist/index.js'
@@ -128,8 +129,8 @@ const warn = console.warn
 console.warn = (...args) => {
   if (!String(args[0]).includes('no generation id')) warn(...args)
 }
-// TILEDIR_URL adds a `lod_tiledir` implementation: the same file read through its tile directory
-// sidecar (`<file>.tiledir.parquet`), opened cold per tile like the others (its footer counts toward the tile)
+// TILEDIR_URL adds a `lod_tiledir` implementation: the same file read through its tile
+// directory sidecar (`<file>.tiledir.parquet`), whose open counts toward the reader's open
 const TILEDIR = process.env.TILEDIR_URL
 const impls = {
   lod: {
@@ -145,31 +146,37 @@ const impls = {
   ...(TILEDIR
     ? {
         lod_tiledir: {
-          open: async () => LodReader.open(coalescing(await httpSource([FILES.lod]))),
-          async tile(r, z, x, y) {
+          async open() {
+            const r = await LodReader.open(coalescing(await httpSource([FILES.lod])))
             // a directory that fails to open or is bypassed must fail the run, not fall back
-            const td = await openTileDirectory(r, TILEDIR)
-            if (!td.wrapped) {
-              const read = td.readLodByTile.bind(td)
-              td.readLodByTile = async (...args) => {
-                const rows = await read(...args)
-                td.used = true
-                return rows
-              }
-              td.wrapped = true
+            const td = await TileDirectory.open(r, TILEDIR)
+            const read = td.readLodByTile.bind(td)
+            td.readLodByTile = async (...args) => {
+              const rows = await read(...args)
+              td.used = true
+              return rows
             }
+            return { r, td }
+          },
+          async tile({ r, td }, z, x, y) {
             td.used = false
             const mvt = await renderTile(r, z, x, y, {
               layer: 'b',
               properties: ATTRS,
               tiledir: td,
             })
-            if (z <= r.finestZoom && td.covers(r.lodForZoom(z), z) && !td.used)
+            const covered = z <= r.finestZoom && td.covers(r.lodForZoom(z), z)
+            if (covered && !td.used)
               throw new Error('tile directory silently fell back to page indexes')
+            const lod = `LOD ${r.lodForZoom(z).name}`
             return {
               mvt,
               note:
-                z > r.finestZoom ? 'primary WKB geometry' : `tiledir, LOD ${r.lodForZoom(z).name}`,
+                z > r.finestZoom
+                  ? 'primary WKB geometry'
+                  : covered
+                    ? `directory, ${lod}`
+                    : `page indexes (zoom not in directory), ${lod}`,
             }
           },
         },
@@ -304,63 +311,92 @@ const checkEqual = (key, name, mvt) => {
   )
 }
 
+// Short pans on one reader opened beforehand: four tiles eastward from the given one.
+const PANS = [
+  [13, -122.42, 37.78, 'z13 San Francisco, 4 tiles east'],
+  [15, -73.985, 40.758, 'z15 Manhattan, 4 tiles east'],
+]
+
 const results = new Map()
 const opens = Object.fromEntries(Object.keys(impls).map((k) => [k, []]))
-const record = (key, value) => {
-  if (!results.has(key)) results.set(key, [])
-  results.get(key).push(value)
+const pans = new Map()
+const record = (map, key, value) => {
+  if (!map.has(key)) map.set(key, [])
+  map.get(key).push(value)
 }
+const measure = async (fn) => {
+  await settle()
+  reset()
+  const t = performance.now()
+  const value = await fn()
+  const ms = performance.now() - t
+  await settle()
+  return { value, bytes, reqs, ms }
+}
+const active = Object.entries(impls).filter(([name]) => !ONLY || ONLY.includes(name))
 
 for (let run = 0; run < RUNS; run++) {
   for (const [z, lon, lat, label] of tiles) {
     const [x, y] = tileXY(z, lon, lat)
-    for (const [name, impl] of Object.entries(impls)) {
-      if (ONLY && !ONLY.includes(name)) continue
+    for (const [name, impl] of active) {
       const key = `${z}|${label}|${name}`
       try {
-        reset()
-        let t = performance.now()
-        const state = await impl.open()
-        await settle()
-        opens[name].push({ bytes, reqs, ms: performance.now() - t })
-        reset()
-        t = performance.now()
-        const r = await impl.tile(state, z, x, y)
-        const ms = performance.now() - t
-        await settle()
-        const c = r.computed ?? { bytes, reqs }
-        const decoded = r.mvt ? r.mvt.byteLength : null
-        const features = r.mvt ? countFeatures(r.mvt, r.child) : null
+        const open = await measure(() => impl.open())
+        opens[name].push(open)
+        const state = open.value
+        const cold = await measure(() => impl.tile(state, z, x, y))
+        const r = cold.value
+        const c = r.computed ?? { bytes: cold.bytes, reqs: cold.reqs }
         checkEqual(`${run}|${z}/${x}/${y}`, name, r.mvt)
-        // the tile to the east on the same reader: the cost of panning once indexes are cached
-        let pan = null
+        let warm = null
         if (r.mvt) {
-          reset()
-          t = performance.now()
-          const east = await impl.tile(state, z, (x + 1) % 2 ** z, y)
-          const panMs = performance.now() - t
-          await settle()
-          pan = { bytes, reqs, ms: panMs }
-          checkEqual(`${run}|${z}/${(x + 1) % 2 ** z}/${y}`, name, east.mvt)
+          const again = await measure(() => impl.tile(state, z, x, y))
+          warm = { bytes: again.bytes, reqs: again.reqs, ms: again.ms }
+          checkEqual(`${run}|warm|${z}/${x}/${y}`, name, again.value.mvt)
         }
-        record(key, {
+        record(results, key, {
           bytes: c.bytes,
           reqs: c.reqs,
-          ms: r.computed || r.skipped ? null : ms,
-          decoded,
-          features,
-          pan,
+          ms: r.computed || r.skipped ? null : cold.ms,
+          decoded: r.mvt ? r.mvt.byteLength : null,
+          features: r.mvt ? countFeatures(r.mvt, r.child) : null,
+          warm,
           none: Boolean(r.skipped),
           note: r.note ?? '',
         })
       } catch (e) {
         await settle()
-        record(key, { error: String(e?.message ?? e).slice(0, 100) })
+        record(results, key, { error: String(e?.message ?? e).slice(0, 100) })
       }
       process.stderr.write(`run ${run + 1}/${RUNS} z${z} ${label} ${name}\n`)
     }
   }
+  for (const [z, lon, lat, label] of PANS) {
+    const [x0, y] = tileXY(z, lon, lat)
+    for (const [name, impl] of active) {
+      if (name === 'sorted') continue
+      try {
+        const state = (await measure(() => impl.open())).value
+        let features = 0
+        const pan = await measure(async () => {
+          for (let i = 0; i < 4; i++) {
+            const x = (x0 + i) % 2 ** z
+            const r = await impl.tile(state, z, x, y)
+            checkEqual(`${run}|pan|${z}/${x}/${y}`, name, r.mvt)
+            if (r.mvt) features += countFeatures(r.mvt, r.child)
+          }
+        })
+        record(pans, `${label}|${name}`, { bytes: pan.bytes, reqs: pan.reqs, ms: pan.ms, features })
+      } catch (e) {
+        await settle()
+        record(pans, `${label}|${name}`, { error: String(e?.message ?? e).slice(0, 100) })
+      }
+      process.stderr.write(`run ${run + 1}/${RUNS} pan ${label} ${name}\n`)
+    }
+  }
 }
+
+const cell = (b, q, ms) => `${mb(b)}, ${q} req${ms == null ? '' : `, ${Math.round(ms)} ms`}`
 
 console.log(`Open, once per map session (median of ${RUNS * tiles.length} cold opens):\n`)
 console.log('| implementation | transferred | requests | time |')
@@ -376,11 +412,11 @@ for (const [name, xs] of Object.entries(opens)) {
 const rowsFor = (pred) => [...results].filter(([key, runs]) => pred(key.split('|')[2], runs))
 const computed = (runs) => runs.some((r) => r.note?.startsWith('computed'))
 
-console.log(`\nPer tile, cold reader, after open (median time of ${RUNS} runs):\n`)
 console.log(
-  '| tile | impl | transferred | requests | time | decoded MVT | features | next tile east, warm | note |',
+  `\nPer tile after open: first render on a fresh reader (cold), then the same tile again on that reader (warm); median time of ${RUNS} runs:\n`,
 )
-console.log('| --- | --- | --- | --- | --- | --- | --- | --- | --- |')
+console.log('| tile | impl | cold | warm, same tile | decoded MVT | features | note |')
+console.log('| --- | --- | --- | --- | --- | --- | --- |')
 for (const [key, runs] of rowsFor((_, runs) => !computed(runs))) {
   const [z, label, name] = key.split('|')
   const tile = `z${z} ${label}`
@@ -388,7 +424,7 @@ for (const [key, runs] of rowsFor((_, runs) => !computed(runs))) {
   const errors = runs.filter((r) => r.error)
   if (!ok.length) {
     console.log(
-      `| ${tile} | ${name} | | | | | | | error (${errors.length}/${runs.length}): ${errors[0].error} |`,
+      `| ${tile} | ${name} | | | | | error (${errors.length}/${runs.length}): ${errors[0].error} |`,
     )
     continue
   }
@@ -398,15 +434,34 @@ for (const [key, runs] of rowsFor((_, runs) => !computed(runs))) {
   const notes = [first.note]
   if (b || q)
     notes.push(
-      `varies across runs: ${b ? `${mb(b[0])}-${mb(b[1])}` : ''} ${q ? `${q[0]}-${q[1]} req` : ''}`.trim(),
+      `cold varies across runs: ${b ? `${mb(b[0])}-${mb(b[1])}` : ''} ${q ? `${q[0]}-${q[1]} req` : ''}`.trim(),
     )
   if (errors.length) notes.push(`error in ${errors.length}/${runs.length} runs: ${errors[0].error}`)
-  const ms = first.ms == null ? '' : `${Math.round(median(ok.map((r) => r.ms)))} ms`
-  const pan = first.pan
-    ? `${mb(first.pan.bytes)}, ${first.pan.reqs} req, ${Math.round(median(ok.map((r) => r.pan.ms)))} ms`
+  const coldCell = first.none
+    ? ''
+    : cell(first.bytes, first.reqs, first.ms == null ? null : median(ok.map((r) => r.ms)))
+  const warmCell = first.warm
+    ? cell(first.warm.bytes, first.warm.reqs, median(ok.map((r) => r.warm.ms)))
     : ''
   console.log(
-    `| ${tile} | ${name} | ${first.none ? '' : mb(first.bytes)} | ${first.none ? '' : first.reqs} | ${ms} | ${first.decoded == null ? '' : kb(first.decoded)} | ${first.features == null ? '' : first.features.toLocaleString('en-US')} | ${pan} | ${notes.filter(Boolean).join('; ')} |`,
+    `| ${tile} | ${name} | ${coldCell} | ${warmCell} | ${first.decoded == null ? '' : kb(first.decoded)} | ${first.features == null ? '' : first.features.toLocaleString('en-US')} | ${notes.filter(Boolean).join('; ')} |`,
+  )
+}
+
+console.log(
+  `\nPans on one reader after open, four tiles eastward, totals (median time of ${RUNS} runs):\n`,
+)
+console.log('| pan | impl | transferred | requests | time | features |')
+console.log('| --- | --- | --- | --- | --- | --- |')
+for (const [key, runs] of pans) {
+  const [label, name] = key.split('|')
+  const ok = runs.filter((r) => !r.error)
+  if (!ok.length) {
+    console.log(`| ${label} | ${name} | | | | error: ${runs[0].error} |`)
+    continue
+  }
+  console.log(
+    `| ${label} | ${name} | ${mb(ok[0].bytes)} | ${ok[0].reqs} | ${Math.round(median(ok.map((r) => r.ms)))} ms | ${ok[0].features.toLocaleString('en-US')} |`,
   )
 }
 
@@ -426,7 +481,7 @@ for (const [key, runs] of rowsFor((_, runs) => computed(runs))) {
     `| z${z} ${label} | ${mb(r.bytes)} | ${r.reqs} | ${r.note.replace('computed: ', '')} |`,
   )
 }
-const errors = [...results.values()].flat().filter((r) => r.error).length
+const errors = [...results.values(), ...pans.values()].flat().filter((r) => r.error).length
 if (mismatches || errors) {
   console.error(`${mismatches} feature mismatches, ${errors} errors`)
   process.exitCode = 1
