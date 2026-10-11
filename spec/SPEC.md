@@ -93,9 +93,6 @@ Under the `geo` key, a `lod_columns` object:
 | `thinning`    | object         | description of the rule used; informational                                                                                               |
 | `lods`        | object         | LOD name to `{zooms, geometry_type, scale, offset}`; `scale` and `offset` are `[x, y]` pairs in degrees                                   |
 
-`lod_columns` MAY also hold `tile_directory`, declaring the optional
-sidecar described under Tile directory.
-
 Every zoom in `zooms` MUST appear in exactly one LOD. An LOD's zooms are
 contiguous and ascending. Which zooms share an LOD is writer policy: the
 reference writer gives each zoom below the complete zoom its own LOD, pairs
@@ -164,112 +161,11 @@ this roughly halves the bytes at street zooms for a few more requests. The
 tile bounds are padded by one grid cell first, since a placeholder square is
 centred on the feature and can reach one cell past its bbox.
 
-When a tile directory covers the tile's zoom, a reader may replace steps 3
-to 5 with one directory lookup, as below.
-
-## Tile directory (optional rendering profile)
-
-A file MAY have a tile directory: a Parquet table beside it mapping each
-tile, at the zooms it covers, to the LOD pages that tile needs, so a
-renderer skips the bbox statistics, page indexes and refinement reads. It is
-an accelerator and nothing else: correctness never depends on it, and a
-reader that ignores it reads every tile through the page indexes. Its
-declaration is one more member of `lod_columns`, which GeoParquet 1.1
-readers ignore as additional metadata, and the sidecar is an ordinary
-Parquet file, so neither changes what an analysis reader sees. The profile
-is named `parquet-table-1`.
-
-### Semantics
-
-- **Tiles.** 512 px Web Mercator XYZ tiles: zoom `z` has `2^z` by `2^z`
-  tiles, `x` eastward from 180° W, `y` southward from 85.0511° N, and the
-  zoom is the one a renderer requests, served by the LOD whose `zooms`
-  contain it. A tile's id is its Morton code on zoom `z`'s grid: bit `i` of
-  `x` at bit `2i`, bit `i` of `y` at bit `2i + 1`. Zooms are at most 24.
-- **Buffer.** A tile's extent is padded by 64/4096 of a tile on each side,
-  the MVT buffer of 64 in an extent of 4096.
-- **Coverage.** For a covered zoom `z` and a tile, the entry MUST reach
-  every row shown at `z`'s LOD whose LOD geometry can contribute to the
-  buffered tile: for each such row, the page holding it in the LOD's
-  geometry leaf and in every carried attribute leaf. Writers decide this
-  conservatively from the row's bbox padded by one cell of the LOD's grid
-  (`slop_cells: 1`), since a placeholder square is centred on its feature
-  and reaches one cell past its bbox. Extra pages and extra rows are
-  allowed; readers filter decoded rows against the tile.
-- **Rows.** A page's `row_start` is relative to its row group, and its rows
-  are `row_start` to `row_start + row_count`, as the offset index records
-  them.
-- **Leaves.** `leaf` indexes the directory's ordered `paths`: the LOD's
-  geometry leaf first, then one leaf per carried attribute in `attributes`
-  order.
-- **Bytes.** `byte_start` to `byte_start + byte_len` is one data page with
-  its header, as the offset index records it. Dictionary pages are never
-  listed; a reader fetches a chunk's dictionary page itself from the column
-  chunk metadata when one is present.
-- **Covered zooms.** The zooms with a directory. A covered zoom with no row
-  for a tile means the tile is empty at that zoom. A zoom without a
-  directory is read through the page indexes; the reference writer covers
-  every zoom above `prefix.zoom`, since the prefix row groups serve the
-  rest in one or two reads.
-
-### Table
-
-One row per tile with at least one page, sorted by `(zoom, tile)`, each
-pair at most once:
-
-| column  | type                  | meaning                                                                                                        |
-| ------- | --------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `zoom`  | int8, required        | tile zoom                                                                                                      |
-| `tile`  | int64, required       | Morton id on the zoom's grid                                                                                   |
-| `pages` | list<int64>, required | flat sextuples `[row_group, leaf, row_start, row_count, byte_start, byte_len]`, one per page, in the main file |
-
-A reader picks row groups by the `zoom` and `tile` column statistics and
-reads one whole, so writers MUST write those statistics and SHOULD write row
-groups of about 64 KB compressed that never span zooms; a lookup is then one
-range request. The reference writer uses zstd, `DELTA_BINARY_PACKED` on
-`zoom` and `tile`, `PLAIN` on the `pages` leaf (its values interleave six
-fields, so deltas are large), no dictionary, and no page index, which a
-lookup never reads.
-
-The footer's key-value metadata holds `lod_tile_directory`, a JSON object:
-
-| field         | type     | meaning                                                                                       |
-| ------------- | -------- | --------------------------------------------------------------------------------------------- |
-| `profile`     | string   | `parquet-table-1`                                                                             |
-| `tile_size`   | int      | 512                                                                                           |
-| `buffer`      | number   | 0.015625 (64/4096 of a tile)                                                                  |
-| `slop_cells`  | int      | 1                                                                                             |
-| `tile_order`  | string   | `morton`                                                                                      |
-| `source`      | object   | `{file_size, footer_length, generation}` of the file it indexes; `generation` may be null     |
-| `directories` | object[] | `{lod, zoom, paths, entries}` per covered zoom: LOD name, zoom, ordered leaf paths, row count |
-
-### Declaration
-
-`lod_columns.tile_directory`, optional:
-
-| field        | type   | meaning                                                                                    |
-| ------------ | ------ | ------------------------------------------------------------------------------------------ |
-| `path`       | string | the sidecar's path relative to the file, e.g. `buildings.parquet.tiledir.parquet`          |
-| `profile`    | string | `parquet-table-1`                                                                          |
-| `zooms`      | int[]  | covered zooms, ascending                                                                   |
-| `generation` | string | a random id new with every write of the file; the sidecar's `source.generation` repeats it |
-
-A sidecar MAY exist without a declaration, for a file written before it and
-not worth rewriting. A reader then uses it only when given its location
-explicitly, binds it by size and footer length alone, and SHOULD warn.
-
-### Binding and failure
-
-A reader uses a tile directory only when its profile is one it knows; its
-`tile_size`, `buffer`, `slop_cells` and `tile_order` are the values above;
-`source.file_size` and `source.footer_length` equal the file's; when the
-file declares `tile_directory`, `source.generation` equals the declared
-generation and the covered zooms equal the declared `zooms`; and every
-directory names an LOD of the file with the expected leaf paths. Size and
-footer length are a stale-file guard, not a content hash; the generation id
-ties a sidecar to one write. On any mismatch, a missing or unreadable
-sidecar, an unknown profile or an invalid entry, the reader MUST read the
-tile through the page indexes.
+A reader may precompute from the page indexes which pages each tile needs
+at each zoom and keep that beside the file as its own cache. This
+repository's tooling writes such a table as `<file>.tiledir.parquet`, and its
+reader uses one when pointed at it. Nothing in the file refers to it, and the
+file is complete without it.
 
 ## Choosing zooms
 

@@ -41,28 +41,8 @@ if (process.argv[2]) {
     })
   }
   const reader = await LodReader.open(coalescing(source))
-  const warn = console.warn
-  let warnings = 0
-  console.warn = () => warnings++
   const directory = await TileDirectory.open(reader, 'fixture')
-  console.warn = warn
   assert.deepEqual(requests, ['bytes=-65536'], 'one suffix request opens the sidecar')
-  assert.equal(warnings, reader.lod.tile_directory ? 0 : 1, 'warn when no generation id binds it')
-  const descriptor = reader.lod.tile_directory
-  if (descriptor) {
-    const other = await LodReader.open(source)
-    other.lod.tile_directory = { ...descriptor, generation: 'another' }
-    await assert.rejects(TileDirectory.open(other, 'bad-generation'), /generation mismatch/)
-  } else {
-    const other = await LodReader.open(source)
-    other.lod.tile_directory = {
-      path: 'x',
-      profile: 'parquet-table-1',
-      zooms: [4, 5, 6],
-      generation: 'g',
-    }
-    await assert.rejects(TileDirectory.open(other, 'no-generation'), /generation mismatch/)
-  }
   const canonical = (buffer) => {
     const tile = new VectorTile(new PbfReader(new Uint8Array(buffer)))
     return Object.values(tile.layers)
@@ -92,15 +72,22 @@ if (process.argv[2]) {
       }
     }
   }
-  console.warn = () => undefined
   const footerReader = await LodReader.open(source)
   footerReader.metadata.metadata_length++
   await assert.rejects(TileDirectory.open(footerReader, 'bad-footer'), /binding mismatch/)
   const sizeReader = await LodReader.open(source)
   Object.defineProperty(sizeReader, 'fileSize', { value: reader.fileSize + 1 })
   await assert.rejects(TileDirectory.open(sizeReader, 'bad-size'), /binding mismatch/)
+  const key = Buffer.from('"footer_sha256":"')
+  const at = sidecar.indexOf(key) + key.length
+  assert.ok(at >= key.length && /^[0-9a-f]{64}$/.test(sidecar.toString('latin1', at, at + 64)))
+  const digest = Buffer.from(sidecar.subarray(at, at + 64))
+  sidecar.write(digest[0] === 0x30 ? '1'.repeat(64) : '0'.repeat(64), at, 'latin1')
+  await assert.rejects(TileDirectory.open(reader, 'bad-hash'), /binding mismatch/)
+  digest.copy(sidecar, at)
   const expected = canonical(await renderTile(reader, 6, 32, 32))
-  warnings = 0
+  const warn = console.warn
+  let warnings = 0
   console.warn = () => warnings++
   sidecar.fill(0, sidecar.length - 4)
   assert.deepEqual(

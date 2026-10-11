@@ -104,11 +104,6 @@ globalThis.fetch = async (...args) => {
     stats.bytes += Number(response.headers.get('content-length') ?? 0)
   return response
 }
-// the fixtures declare no generation id; the open warns about that on every cold trial
-const warn = console.warn
-console.warn = (...args) => {
-  if (!String(args[0]).includes('no generation id')) warn(...args)
-}
 const results = []
 const sidecars = []
 let mismatches = 0

@@ -1,7 +1,8 @@
-"""Tile directory sidecar: an optional Parquet table mapping each tile to the pages it needs."""
+"""Tile directory: a Parquet table beside the file mapping each tile to the pages it needs."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import struct
 from collections import defaultdict
@@ -205,26 +206,37 @@ def _byte_groups(table, target, options):
     return list(zip(bounds[:-1], bounds[1:], strict=True))
 
 
-def descriptor(path):
-    """The `tile_directory` object of a file's lod_columns metadata, or None."""
-    geo = json.loads(pq.ParquetFile(path).metadata.metadata[b'geo'])
-    return geo['lod_columns'].get('tile_directory')
-
-
 def sidecar_path(path):
-    path = Path(path)
-    found = descriptor(path)
-    return path.parent / found['path'] if found else Path(str(path) + SUFFIX)
+    return Path(str(path) + SUFFIX)
+
+
+def _footer(file):
+    file.seek(-8, 2)
+    footer_length, magic = struct.unpack('<I4s', file.read(8))
+    if magic != b'PAR1':
+        raise ValueError('invalid Parquet trailer')
+    file.seek(-8 - footer_length, 2)
+    return file.read(footer_length)
+
+
+def source_binding(path):
+    """The write of the data file a sidecar is bound to: size, footer length and footer hash."""
+    with Path(path).open('rb') as file:
+        return _binding(path, _footer(file))
+
+
+def _binding(path, footer):
+    return dict(
+        file_size=Path(path).stat().st_size,
+        footer_length=len(footer),
+        footer_sha256=hashlib.sha256(footer).hexdigest(),
+    )
 
 
 def _page_locations(path):
     with Path(path).open('rb') as file:
-        file.seek(-8, 2)
-        footer_length, magic = struct.unpack('<I4s', file.read(8))
-        if magic != b'PAR1':
-            raise ValueError('invalid Parquet trailer')
-        file.seek(-8 - footer_length, 2)
-        footer = Compact(file.read(footer_length)).value(12)
+        raw = _footer(file)
+        footer = Compact(raw).value(12)
         indexes = []
         for group in footer[4]:
             leaves = {}
@@ -247,24 +259,21 @@ def _page_locations(path):
                     raise ValueError('pages splitting a repeated row are unsupported')
                 leaves[name] = pages
             indexes.append(leaves)
-    return footer_length, indexes
+    return _binding(path, raw), indexes
 
 
 def build(path, out=None, row_group_bytes=ROW_GROUP_BYTES):
     """Build the sidecar from Arrow bbox/null masks and Thrift footer/offset-index page locations."""
     path = Path(path)
-    found = descriptor(path)
     out = Path(out) if out else sidecar_path(path)
     if out.resolve() == path.resolve():
         raise ValueError('sidecar output must differ from the Parquet input')
-    if found and found.get('profile') != PROFILE:
-        raise ValueError(f'tile_directory profile {found.get("profile")!r} is not {PROFILE}')
     parquet = pq.ParquetFile(path)
     geo = json.loads(parquet.metadata.metadata[b'geo'])
     metadata = geo['lod_columns']
     if metadata['tile_size'] != 512 or not is_crs84(geo['columns'][geo['primary_column']]):
         raise ValueError('a tile directory requires 512px tiles and OGC:CRS84')
-    footer_length, indexes = _page_locations(path)
+    source, indexes = _page_locations(path)
 
     all_paths = [parquet.schema.column(i).path for i in range(len(parquet.schema))]
     prefix = metadata.get('prefix')
@@ -320,30 +329,18 @@ def build(path, out=None, row_group_bytes=ROW_GROUP_BYTES):
                 directories.append(dict(lod=name, zoom=zoom, paths=paths, entries=len(tiles)))
                 yield zoom, tiles, flat
 
-    covered = [
-        z
-        for lod in metadata['lods'].values()
-        for z in lod['zooms']
-        if not prefix or z > prefix['zoom']
-    ]
-    if found and sorted(found.get('zooms', [])) != sorted(covered):
-        raise ValueError('tile_directory zooms differ from the zooms above the prefix')
-    header = directory_metadata(path, footer_length, found, directories)
+    header = directory_metadata(source, directories)
     write_directory(out, chunks(), header, row_group_bytes)
     return dict(path=str(out), size=out.stat().st_size, **header)
 
 
-def directory_metadata(path, footer_length, found, directories):
+def directory_metadata(source, directories):
     return dict(
         profile=PROFILE,
         tile_size=512,
         buffer=BUFFER,
         slop_cells=1,
         tile_order='morton',
-        source=dict(
-            file_size=Path(path).stat().st_size,
-            footer_length=footer_length,
-            generation=found.get('generation') if found else None,
-        ),
+        source=source,
         directories=directories,
     )
