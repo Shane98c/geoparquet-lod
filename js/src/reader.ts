@@ -201,21 +201,21 @@ export class LodReader {
     }
     const prefix = this.lod.prefix
     const coarse = prefix && Math.max(...lod.zooms) <= prefix.zoom
-    const groups = this.metadata.row_groups
-      .map((_, g) => g)
-      .filter(
-        (g) => (!coarse || g <= prefix!.row_group_end) && intersects(this.rowGroupBbox(g), bbox),
-      )
-    const leaves = [
-      this.geometryLeaf(lod),
-      ...attributes.map((a) => `${this.lod.column}.${lod.name}.${a}`),
-    ]
     // a placeholder square reaches one grid cell past its feature's bbox
     const padded: Bbox = [
       bbox[0] - Math.abs(lod.scale[0]),
       bbox[1] - Math.abs(lod.scale[1]),
       bbox[2] + Math.abs(lod.scale[0]),
       bbox[3] + Math.abs(lod.scale[1]),
+    ]
+    const groups = this.metadata.row_groups
+      .map((_, g) => g)
+      .filter(
+        (g) => (!coarse || g <= prefix!.row_group_end) && intersects(this.rowGroupBbox(g), padded),
+      )
+    const leaves = [
+      this.geometryLeaf(lod),
+      ...attributes.map((a) => `${this.lod.column}.${lod.name}.${a}`),
     ]
     const perGroup = await Promise.all(
       groups.map(async (g) => {
@@ -227,7 +227,7 @@ export class LodReader {
           leaves.map(async (leaf) => {
             if (whole) return this.readWholeLeaf(g, leaf)
             void this.offsetIndex(g, leaf).catch(() => undefined)
-            refined ??= this.candidateRows(g, bbox, signal).then(({ ranges, hit }) =>
+            refined ??= this.candidateRows(g, padded, signal).then(({ ranges, hit }) =>
               ranges.length && options.refine && this.refinePays(g, leaves, hit)
                 ? this.refineRows(g, ranges, padded, signal)
                 : ranges,

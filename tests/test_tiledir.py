@@ -9,7 +9,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 from geoparquet_lod.encoding import lod_type
-from geoparquet_lod.tiledir import BUFFER, Compact, build, morton, tile_span
+from geoparquet_lod.tiledir import BUFFER, Compact, build, is_crs84, morton, tile_span
 
 
 def test_tile_span_boundaries():
@@ -23,6 +23,15 @@ def test_tile_span_boundaries():
     assert morton(3, 2, 2) == 13
     with pytest.raises(ValueError, match='truncated'):
         Compact(b'\x15').value(12)
+
+
+def test_crs84_detection():
+    assert is_crs84({'encoding': 'WKB'})
+    assert not is_crs84({'encoding': 'WKB', 'crs': None})
+    assert is_crs84({'crs': {'id': {'authority': 'OGC', 'code': 'CRS84'}}})
+    assert is_crs84({'crs': {'id': {'authority': 'EPSG', 'code': 4326}}})
+    assert not is_crs84({'crs': {'id': {'authority': 'EPSG', 'code': 3857}}})
+    assert not is_crs84({'crs': 'PROJCRS["x"]'})
 
 
 @pytest.mark.parametrize('family', ['Point', 'MultiPolygon'])

@@ -7,7 +7,14 @@ import { CogpReader, toMvt } from '@cogp/reader'
 import { PMTiles } from 'pmtiles'
 import { VectorTile } from '@mapbox/vector-tile'
 import { PbfReader } from 'pbf'
-import { LodReader, httpSource, coalescing, renderTile, tileBounds } from '../dist/index.js'
+import {
+  LodReader,
+  httpSource,
+  coalescing,
+  openTileDirectory,
+  renderTile,
+  tileBounds,
+} from '../dist/index.js'
 
 const FILES = {
   // LOD_URL overrides the lod file, e.g. a local rewrite served with range support
@@ -135,11 +142,25 @@ const impls = {
         lod_tiledir: {
           open: async () => LodReader.open(coalescing(await httpSource([FILES.lod]))),
           async tile(r, z, x, y) {
+            // a directory that fails to open or is bypassed must fail the run, not fall back
+            const td = await openTileDirectory(r, TILEDIR)
+            if (!td.wrapped) {
+              const read = td.readLodByTile.bind(td)
+              td.readLodByTile = async (...args) => {
+                const rows = await read(...args)
+                td.used = true
+                return rows
+              }
+              td.wrapped = true
+            }
+            td.used = false
             const mvt = await renderTile(r, z, x, y, {
               layer: 'b',
               properties: ATTRS,
-              tiledir: TILEDIR,
+              tiledir: td,
             })
+            if (z <= r.finestZoom && td.covers(r.lodForZoom(z)) && !td.used)
+              throw new Error('tile directory silently fell back to page indexes')
             return {
               mvt,
               note:
@@ -244,6 +265,40 @@ const kb = (b) => (b >= 1e6 ? mb(b) : `${(b / 1e3).toFixed(0)} KB`)
 const span = (xs) =>
   Math.min(...xs) === Math.max(...xs) ? null : [Math.min(...xs), Math.max(...xs)]
 
+// lod and lod_tiledir must decode to the same features: ids, geometry and properties
+const canonical = (buf) => {
+  const vt = new VectorTile(new PbfReader(new Uint8Array(buf)))
+  return Object.entries(vt.layers)
+    .flatMap(([layer, value]) =>
+      Array.from({ length: value.length }, (_, i) => {
+        const f = value.feature(i)
+        return JSON.stringify([layer, f.id, f.type, f.properties, f.loadGeometry()])
+      }),
+    )
+    .sort()
+}
+const decodedByTile = new Map()
+let mismatches = 0
+const checkEqual = (key, name, mvt) => {
+  if (name !== 'lod' && name !== 'lod_tiledir') return
+  if (!decodedByTile.has(key)) decodedByTile.set(key, {})
+  const seen = decodedByTile.get(key)
+  seen[name] = mvt ? canonical(mvt) : null
+  if (!('lod' in seen && 'lod_tiledir' in seen)) return
+  const [a, b] = [seen.lod, seen.lod_tiledir]
+  delete decodedByTile.get(key).lod
+  delete decodedByTile.get(key).lod_tiledir
+  if (JSON.stringify(a) === JSON.stringify(b)) return
+  mismatches++
+  const sa = new Set(a ?? [])
+  const sb = new Set(b ?? [])
+  console.error(
+    `MISMATCH ${key}: ${a?.length} page-index features, ${b?.length} directory features, ` +
+      `${[...sa].filter((f) => !sb.has(f)).length} only in page index, ` +
+      `${[...sb].filter((f) => !sa.has(f)).length} only in directory`,
+  )
+}
+
 const results = new Map()
 const opens = Object.fromEntries(Object.keys(impls).map((k) => [k, []]))
 const record = (key, value) => {
@@ -271,15 +326,17 @@ for (let run = 0; run < RUNS; run++) {
         const c = r.computed ?? { bytes, reqs }
         const decoded = r.mvt ? r.mvt.byteLength : null
         const features = r.mvt ? countFeatures(r.mvt, r.child) : null
+        checkEqual(`${run}|${z}/${x}/${y}`, name, r.mvt)
         // the tile to the east on the same reader: the cost of panning once indexes are cached
         let pan = null
         if (r.mvt) {
           reset()
           t = performance.now()
-          await impl.tile(state, z, (x + 1) % 2 ** z, y)
+          const east = await impl.tile(state, z, (x + 1) % 2 ** z, y)
           const panMs = performance.now() - t
           await settle()
           pan = { bytes, reqs, ms: panMs }
+          checkEqual(`${run}|${z}/${(x + 1) % 2 ** z}/${y}`, name, east.mvt)
         }
         record(key, {
           bytes: c.bytes,
@@ -363,4 +420,9 @@ for (const [key, runs] of rowsFor((_, runs) => computed(runs))) {
   console.log(
     `| z${z} ${label} | ${mb(r.bytes)} | ${r.reqs} | ${r.note.replace('computed: ', '')} |`,
   )
+}
+const errors = [...results.values()].flat().filter((r) => r.error).length
+if (mismatches || errors) {
+  console.error(`${mismatches} feature mismatches, ${errors} errors`)
+  process.exitCode = 1
 }

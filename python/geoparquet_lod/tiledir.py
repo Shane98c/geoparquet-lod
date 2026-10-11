@@ -83,6 +83,18 @@ def varint(value):
     return out
 
 
+def is_crs84(column):
+    """GeoParquet: an omitted `crs` is OGC:CRS84, an explicit null is unknown."""
+    if 'crs' not in column:
+        return True
+    crs = column['crs']
+    if not isinstance(crs, dict):
+        return False
+    ident = crs.get('id') or {}
+    authority, code = str(ident.get('authority', '')).upper(), str(ident.get('code', ''))
+    return (authority, code) in (('OGC', 'CRS84'), ('EPSG', '4326'))
+
+
 def morton(x, y, z):
     return sum(((x >> i) & 1) << (2 * i) | ((y >> i) & 1) << (2 * i + 1) for i in range(z))
 
@@ -158,10 +170,8 @@ def build(path, out=None):
     parquet = pq.ParquetFile(path)
     geo = json.loads(parquet.metadata.metadata[b'geo'])
     metadata = geo['lod_columns']
-    if metadata['tile_size'] != 512 or geo['columns'][geo['primary_column']].get('crs') not in (
-        None,
-    ):
-        raise ValueError('experimental directory requires 512px tiles and default CRS84')
+    if metadata['tile_size'] != 512 or not is_crs84(geo['columns'][geo['primary_column']]):
+        raise ValueError('experimental directory requires 512px tiles and OGC:CRS84')
     with path.open('rb') as file:
         file.seek(-8, 2)
         footer_length, magic = struct.unpack('<I4s', file.read(8))
