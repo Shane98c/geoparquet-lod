@@ -1,7 +1,8 @@
 // Bytes and requests per tile for four readers of the same buildings, served from one place:
 // this layout, COGP (@cogp/reader), PMTiles and Esri's SOP reference reader. Expects
 // japan_buildings.{lod2.parquet,cogp.parquet,pmtiles,sop.parquet} under BASE (default
-// http://localhost:8099/), and the Esri reader bundled for Node first:
+// http://localhost:8099/), and the Esri reader bundled for Node first. COGP names another
+// COGP file to measure, such as the one behind COGP's own demo:
 //   npx esbuild vendor/esri-sop/index.ts --bundle --platform=node --format=esm --outfile=test/esri-node.mjs
 //   node test/compare4.mjs
 import { LodReader, httpSource, coalescing, renderTile, tileBounds } from '../dist/index.js'
@@ -25,6 +26,7 @@ const features = (buf) => {
 }
 
 const base = process.env.BASE ?? 'http://localhost:8099/'
+const cogpFile = process.env.COGP ?? base + 'japan_buildings.cogp.parquet'
 const stats = {}
 const real = globalThis.fetch
 globalThis.fetch = async (input, init) => {
@@ -35,7 +37,9 @@ globalThis.fetch = async (input, init) => {
   if ((init?.method ?? 'GET') !== 'HEAD') e.bytes += Number(r.headers.get('content-length') ?? 0)
   return r
 }
-const snap = (key) => ({ ...(stats[base + key] ?? { requests: 0, bytes: 0 }) })
+const snap = (key) => ({
+  ...(stats[key.startsWith('http') ? key : base + key] ?? { requests: 0, bytes: 0 }),
+})
 const delta = (a, b) => ({ requests: b.requests - a.requests, bytes: b.bytes - a.bytes })
 const fmt = (d, extra = '') => `${(d.bytes / 1e6).toFixed(2)} MB, ${d.requests} req${extra}`
 
@@ -60,7 +64,7 @@ const open = async (name, fn) => {
 }
 const lodOpen = async () =>
   LodReader.open(coalescing(await httpSource([base + 'japan_buildings.lod2.parquet'])))
-const cogpOpen = () => CogpReader.open(base + 'japan_buildings.cogp.parquet')
+const cogpOpen = () => CogpReader.open(cogpFile)
 const pmOpen = async () => {
   const p = new PMTiles(base + 'japan_buildings.pmtiles')
   await p.getHeader()
@@ -84,7 +88,7 @@ for (const [name, fn] of [
       name.startsWith('lod')
         ? 'japan_buildings.lod2.parquet'
         : name === 'cogp'
-          ? 'japan_buildings.cogp.parquet'
+          ? cogpFile
           : name === 'pmtiles'
             ? 'japan_buildings.pmtiles'
             : 'japan_buildings.sop.parquet',
@@ -114,7 +118,7 @@ for (const [z, lon, lat, label] of tiles) {
   }
   // cogp: fresh reader, the tile bounds, resolution and read call of @cogp/maplibre's tile.js
   {
-    const key = 'japan_buildings.cogp.parquet'
+    const key = cogpFile
     const r = await cogpOpen()
     const a = snap(key)
     const n = 2 ** z

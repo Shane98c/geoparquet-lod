@@ -18,7 +18,7 @@ features:
 | ------------------------------ | ---------------------------------------------------------------------------------------------- | ------- |
 | `japan_buildings.parquet`      | the cleaned source, DuckDB                                                                     | 4.84 GB |
 | `japan_buildings.lod2.parquet` | this layout, `combine(size_threshold(4), density_budget(40_000))`, 7 min                       | 6.59 GB |
-| `japan_buildings.cogp.parquet` | `cogp convert` 2.2.1 with overviews on every level, 9.5 min                                    | 9.76 GB |
+| `japan_buildings.cogp.parquet` | `cogp convert --webmerc-minzoom 10` 2.2.1, the level ladder of COGP's own demo file, 5.7 min   | 9.69 GB |
 | `japan_buildings.pmtiles`      | tippecanoe 2.82, `-zg -Z 6 --drop-smallest-as-needed --extend-zooms-if-still-dropping`, 23 min | 1.51 GB |
 | `japan_buildings.sop.parquet`  | Esri's hosted file, `sop write`, 9 levels                                                      | 6.18 GB |
 
@@ -45,8 +45,8 @@ And what reading it cost:
 
 | tile                      | LOD columns    | COGP        | PMTiles    | Esri SOP        |
 | ------------------------- | -------------- | ----------- | ---------- | --------------- |
-| open                      | 0.47 MB, 4 req | 2.09 MB, 3  | 0.02 MB, 1 | 2.62 MB, 3      |
-| z8 metro, Tokyo           | 1.03 MB, 22    | 0.06 MB, 9  | 0.48 MB, 2 | 26.65 MB, 1,048 |
+| open                      | 0.47 MB, 4 req | 1.52 MB, 3  | 0.02 MB, 1 | 2.62 MB, 3      |
+| z8 metro, Tokyo           | 1.03 MB, 22    | 0.17 MB, 8  | 0.48 MB, 2 | 26.65 MB, 1,048 |
 | z11 city, Tokyo           | 0.79 MB, 16    | 0.26 MB, 17 | 0.30 MB, 2 | 5.39 MB, 143    |
 | z13 downtown, Shibuya     | 1.68 MB, 28    | 0.71 MB, 42 | 0.37 MB, 2 | 2.61 MB, 92     |
 | z13 suburbs, Chiba        | 0.72 MB, 32    | 0.44 MB, 34 | 0.07 MB, 2 | 1.30 MB, 55     |
@@ -55,11 +55,17 @@ And what reading it cost:
 
 Read the two tables together. COGP assigns a building to the coarsest
 level where it spans a pixel, with no density target, so on footprints its
-coarse levels are nearly empty: this file has no rows at all in levels 0 to
-10, all of Japan at level 11 fits in one row group, and a z11 tile of
-central Tokyo holds 860 buildings. Its small bytes there are the cost of
-drawing almost nothing. The level, bounds and resolution are the ones
-`@cogp/maplibre` computes for the tile. Esri's layout never drops a row, so a view reads every
+coarse levels are nearly empty: all of Japan at the coarsest level fits in
+one row group, and a z11 tile of central Tokyo holds 860 buildings. Its
+small bytes there are the cost of drawing almost nothing. The level,
+bounds and resolution are the ones `@cogp/maplibre` computes for the tile,
+and the file is written the way COGP's demo file is: a ladder from zoom 10
+avoids levels whose grid would quantize a building to nothing. As a check
+on the conversion, the script run with `COGP=` pointing at the file behind
+COGP's MapLibre demo, a later Overture release of the same Japan buildings
+with 73.4 million rows in 12.9 GB, returns 1,150, 875, 2,730, 484, 213 and
+1,287 features for the six tiles, within a few buildings of the file here.
+Esri's layout never drops a row, so a view reads every
 building in it at the chosen level, and its reference reader fetches by XZ
 key ranges rather than pages, which is where the request counts come from;
 its README says a real implementation would tile. tippecanoe drops the
