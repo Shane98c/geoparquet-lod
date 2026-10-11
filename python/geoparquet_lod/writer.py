@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import json
 import time
-import uuid
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -283,7 +282,7 @@ def write(
     """Write `src` (any GeoParquet with a WKB geometry column) to `out` in the
     LOD columns layout. `complete_from` is the zoom from which every feature is
     present; below it `thinning` chooses the rows. `tile_directory` also builds the
-    optional tile directory sidecar and declares it in the metadata. Returns the output path."""
+    tile directory `out.tiledir.parquet` beside the file. Returns the output path."""
     src = str(src)
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -474,14 +473,6 @@ def write(
             for b in lod_plan
         },
     }
-    if tile_directory:
-        prefix = geo[LOD_KEY]['prefix']
-        geo[LOD_KEY]['tile_directory'] = {
-            'path': out.name + tiledir.SUFFIX,
-            'profile': tiledir.PROFILE,
-            'zooms': [z for z in zooms if not prefix or z > prefix['zoom']],
-            'generation': uuid.uuid4().hex,
-        }
     schema = schema.with_metadata(
         {**(source_schema.metadata or {}), b'geo': json.dumps(geo).encode()}
     )

@@ -13,7 +13,6 @@ import { DEFAULT_PARSERS } from 'hyparquet/src/convert.js'
 import { getSchemaPath } from 'hyparquet/src/schema.js'
 import { compressors } from 'hyparquet-compressors'
 import { LIST_DEPTH, type GeometryType } from './geometry.js'
-import type { TileDirectoryDescriptor } from './tiledir.js'
 
 export type Bbox = [number, number, number, number]
 
@@ -42,7 +41,6 @@ export interface LodMetadata {
   attributes: { name: string; type: string }[]
   thinning: Record<string, unknown>
   lods: Record<string, Omit<Lod, 'name'>>
-  tile_directory?: TileDirectoryDescriptor
 }
 
 /** A hyparquet-style byte source whose slices can be aborted. */
@@ -102,10 +100,13 @@ export class LodReader {
   private readonly cache = new Map<string, Promise<unknown>>()
   private readonly pages = new Map<string, Promise<Map<number, unknown>>>()
   private readonly elements = new Map<string, SchemaTree['element']>()
+  private readonly footer: ArrayBuffer | undefined
+  private digest: Promise<string> | undefined
 
-  private constructor(file: RangeSource, metadata: FileMetaData) {
+  private constructor(file: RangeSource, metadata: FileMetaData, footer?: ArrayBuffer) {
     this.file = file
     this.metadata = metadata
+    this.footer = footer
     const geo = JSON.parse(
       metadata.key_value_metadata?.find((kv) => kv.key === 'geo')?.value ?? '{}',
     )
@@ -169,10 +170,21 @@ export class LodReader {
   }
 
   static async open(file: RangeSource): Promise<LodReader> {
-    const metadata = await parquetMetadataAsync(file as unknown as AsyncBuffer, {
+    let footer: ArrayBuffer | undefined
+    const end = file.byteLength - 8
+    const capturing: RangeSource = {
+      byteLength: file.byteLength,
+      async slice(start, stop, signal) {
+        const buffer = await file.slice(start, stop, signal)
+        if (stop === end && start < end) footer = buffer
+        return buffer
+      },
+    }
+    // with an 8-byte initial fetch, the second slice is exactly the footer
+    const metadata = await parquetMetadataAsync(capturing as unknown as AsyncBuffer, {
       initialFetchSize: 8,
     })
-    const reader = new LodReader(file, metadata)
+    const reader = new LodReader(file, metadata, footer)
     reader.warmPrefix()
     return reader
   }
@@ -334,9 +346,24 @@ export class LodReader {
     return out
   }
 
-  /** Tile directories bind page locations to this file size and footer length. */
+  /** Tile directories bind page locations to this file size, footer length and footer hash. */
   get fileSize(): number {
     return this.file.byteLength
+  }
+
+  /** Lowercase hex SHA-256 of the footer bytes read at open. */
+  footerDigest(): Promise<string> {
+    if (!this.digest) {
+      const footer = this.footer
+      if (!footer || footer.byteLength !== this.metadata.metadata_length)
+        return Promise.reject(new Error('footer bytes from open do not match metadata_length'))
+      this.digest = crypto.subtle
+        .digest('SHA-256', footer)
+        .then((hash) =>
+          Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, '0')).join(''),
+        )
+    }
+    return this.digest
   }
 
   /** Decode explicitly located LOD pages without reading their offset indexes. */

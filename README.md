@@ -353,59 +353,22 @@ touches. The directory replaces both with one read of about 40 to 140 KB.
 
 ### Tile directory
 
-The tile directory is an optional accelerator, defined in `spec/SPEC.md` as
-a rendering profile and described [below](#tile-directory-sidecar): a
-Parquet sidecar, `buildings.parquet.tiledir.parquet`, mapping each tile at
-every zoom above the prefix to the page byte ranges it needs, so a tile
-skips the bbox statistics, page indexes and refinement reads. Nothing
-depends on it: a reader without it, or with a stale or missing one, reads
-through the page indexes and draws the same features. For this file it is
-219.6 MB in 3,535 row groups of about 64 KB, with a 913 KB footer, and
-covers z7 to z16; zooms the prefix row group serves (z6 and below) and z17,
-past the finest LOD, read as before. It was converted from an earlier
-binary sidecar of the same entries, whose build from the 30 GB file took
-40 minutes; `geoparquet-lod tiledir buildings.parquet` builds it directly.
-The file was written before the `tile_directory` declaration existed and
-was not rewritten to add it, so the sidecar is bound by file size and
-footer length only and the reader warns about that.
-
-Two row-group shapes of the same table were measured with the reader on the
-13 tiles from z8 to z16 above, over local HTTP. "Lookup" is the sidecar
-bytes a cold tile reads after the sidecar is open; round trips count
-requests that had to wait for an earlier one.
-
-| shape                                                   | file     | footer (open) | lookup per cold tile                          | round trips per cold tile, with data | next tile east         |
-| ------------------------------------------------------- | -------- | ------------- | --------------------------------------------- | ------------------------------------ | ---------------------- |
-| 75 groups of 200k rows, 16 KB pages, page indexes       | 224.3 MB | 30 KB         | 37 to 79 KB in 4 to 5 requests, 3 round trips | 4                                    | 5 to 33 KB, 2 requests |
-| 3,535 groups of about 64 KB, a zoom never spans a group | 219.6 MB | 913 KB        | 39 to 137 KB in 1 request, 1 round trip       | 2                                    | none, same group       |
-
-The first shape opens for 30 KB but a lookup is a chain: the zoom and tile
-column indexes and the offset indexes, then the tile column's page to find
-the row, then the page holding that row's list. The second is one range per
-lookup chosen from footer statistics, and a neighbouring tile is usually in
-the group already read, at the price of a 913 KB footer read once per
-session. The directory keeps the second shape. The `pages` leaf is PLAIN
-rather than delta coded: its values interleave six fields, so deltas are
-large, and plain values compress about a third smaller under zstd. Page
-indexes and statistics on `pages` are left out, since a lookup never reads
-them; that is a quarter of the footer.
-
-Known limits:
-
-- The builder holds every entry of an LOD in memory as sets of pages per
-  tile and loops over rows and tiles in Python. A row is added to every
-  tile its padded bbox touches at every covered zoom, so large polygons and
-  long lines cost memory and time in proportion to their extent in tiles at
-  the finest zoom. The national build took 40 minutes; regional files take
-  seconds.
-- Antimeridian-crossing data, wrapped world tiles and tiles near the poles
-  are untested; bboxes are clamped to the Web Mercator latitude limit.
-- The directory is bound to one write of the file; any rewrite needs a new
-  sidecar, and without a declared generation id a same-size rewrite with
-  the same footer length would not be detected.
-- The open is 0.91 MB, as large as the file's own; the PMTiles comparison
-  above is a product comparison (different thinning, seven attributes to
-  our two), not a controlled test of the encoding.
+The tile directory is a Parquet table beside the file,
+`buildings.parquet.tiledir.parquet`, built from the page indexes by
+`geoparquet-lod tiledir` and used by the reader when given its URL. It maps
+each tile at every zoom above the prefix to the page byte ranges it needs, so
+a tile skips the bbox statistics, page indexes and refinement reads. It is
+bound to one write of the file by size, footer length and footer hash, and
+nothing in the file refers to it; without it, or with a stale one, the
+reader goes through the page indexes and draws the same features. For this
+file it is 219.6 MB in 3,535 row groups of about 64 KB, with a 913 KB footer,
+and covers z7 to z16; the build took 40 minutes. Row groups never span a
+zoom, so footer statistics pick one and a lookup is one range, at the cost
+of the 913 KB footer read once per session; 75 large groups with page
+indexes open for 30 KB, but a lookup is then three dependent round trips.
+The builder holds an LOD's entries in memory and loops in Python, so large
+polygons cost in proportion to their extent in tiles, and antimeridian,
+wrapped-world and polar tiles are untested.
 
 Reproduce with both files served locally with range support:
 
@@ -439,8 +402,6 @@ the finest zoom.
    for the directory footer. Fewer, larger row groups shrink the file's
    footer; larger directory groups trade lookup bytes for footer bytes.
 2. Build the directory in vectorized or compiled code, with bounded memory.
-3. Rewrite the national file with `--tile-directory` so the sidecar is
-   declared and bound by generation id.
 
 The `lod` file is public; the demo above reads it directly with `?url=`:
 
@@ -474,66 +435,25 @@ Parquet's own or COGP's `quantized_geoarrow`. See `spec/SPEC.md`.
 
 ## Tile directory sidecar
 
-The optional tile directory is a Parquet table beside the file, an
-accelerator a renderer may use and nothing else needs; `spec/SPEC.md`
-defines it as the `parquet-table-1` rendering profile. Build it with the
-file, or for an existing file:
+Build it with the file, or beside an existing one:
 
 ```sh
 uv run geoparquet-lod write src.parquet out.parquet --tile-directory
 uv run geoparquet-lod tiledir overture_denver.lod.parquet   # writes overture_denver.lod.parquet.tiledir.parquet
-cd js && npm run build && node test/tiledir-bench.mjs
 ```
 
 ```js
-const tile = await renderTile(reader, z, x, y, {
-  tiledir: tileDirectoryUrl(reader, fileUrl), // the declared path, else `${fileUrl}.tiledir.parquet`
-})
+const tile = await renderTile(reader, z, x, y, { tiledir: fileUrl + '.tiledir.parquet' })
 ```
 
-`write(..., tile_directory=True)` declares the sidecar in the file's
-`lod_columns.tile_directory` with a random generation id that the sidecar
-repeats, and `validate` checks the declaration and, when the sidecar is
-beside the file, its binding. For a file written without it (rewriting a
-30 GB file to add metadata is not worth it), `geoparquet-lod tiledir` still
-builds the sidecar, bound to the file by size and footer length only, and
-the reader warns that no generation id is present. A missing, mismatched or
-unreadable directory emits a warning and the tile is read through the page
-indexes; a zoom the directory does not cover reads through the page indexes
-without one, and tiles past the finest LOD read the primary geometry.
-`TileDirectory.open(reader, url)`, `covers(lod, z)` and
-`readLodByTile(lod, z, x, y, attributes)` are also exported.
-
 The table has one row per tile with entries, sorted by `(zoom, tile)`:
-`zoom` int8, `tile` int64 (Morton id on the zoom's grid), and `pages`, a list
+`zoom` int8, `tile` int64 (Morton id on the zoom's grid) and `pages`, a list
 of int64 sextuples `[row group, leaf, row start, row count, byte start, byte
-length]` per page, with the row start relative to the row group and the leaf
-an index into that directory's leaf paths. Row groups hold about 64 KB and
-never span zooms, so footer statistics on `zoom` and `tile` pick one and a
-lookup reads it whole in one range; opening reads the footer with a suffix
-range request. Its footer metadata records the profile, tile size, buffer,
-the binding to the file and, per LOD and zoom, the leaf paths and entry
-count.
-
-The Python builder reads bbox values and LOD struct null masks with PyArrow.
-It parses the Parquet footer and offset indexes directly using Thrift compact
-field IDs. For each shown row it pads the bbox by one LOD grid cell, projects
-it to each of the LOD's zooms above the prefix, and adds its geometry and
-carried-attribute pages to every intersecting buffered tile. Tile padding is
-64/4096 of a tile, matching the renderer's eight-pixel buffer on 512px tiles.
-The reader joins leaves by row number, fetches dictionaries through the
-existing cache, and coalesces adjacent data pages. It filters rows using
-bounds computed from decoded display coordinates, without reading bbox
-columns. The existing MVT encoder performs the final clipping. Equality means
-decoded feature IDs, geometries, and properties; feature ordering can change
-serialized MVT size.
-
-The benchmark defaults to Denver on port 8091 and New York `p16384.parquet` on
-port 8098; `DENVER_URL`, `NYC_URL`, and `RUNS` override these. Each trial opens a
-fresh reader, includes footer, prefix warmup, sidecar, and page requests, and
-asserts decoded IDs, geometries, and attributes match. `RESULTS=/path/out.json`
-saves machine-readable results. `FILE_TRANSPORT=1` uses a local-file byte-range
-adapter when localhost networking is unavailable; its request counts are
-logical requests and its timings measure local I/O, not HTTP latency.
-`SCRATCHPAD` sets the New York fixture directory's parent. OS caches are not
-flushed in either mode.
+length]`. Row groups of about 64 KB never span a zoom, and the footer
+metadata `lod_tile_directory` records the profile, the binding and each LOD
+and zoom's leaf paths. The header's `source` holds the file's size, footer
+length and footer SHA-256; on a mismatch, or a missing or unreadable
+sidecar, the reader warns and reads through the page indexes. `node
+test/tiledir-bench.mjs` compares both paths; `DENVER_URL`, `NYC_URL`,
+`RUNS`, `RESULTS`, `FILE_TRANSPORT=1` and `SCRATCHPAD` set its fixtures,
+trial count, output and transport.

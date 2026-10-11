@@ -90,7 +90,7 @@ def cli():
 @click.option(
     '--tile-directory',
     is_flag=True,
-    help='also build OUT.tiledir.parquet, an optional tile directory, and declare it in OUT',
+    help='also build the tile directory OUT.tiledir.parquet beside OUT; nothing is declared in OUT',
 )
 def write_cmd(
     src,
@@ -168,8 +168,8 @@ def inspect_cmd(path):
 @click.argument('path', type=click.Path(exists=True, dir_okay=False))
 @click.option('--out', type=click.Path(dir_okay=False), default=None)
 def tiledir_cmd(path, out):
-    """Build the tile directory sidecar of PATH: the path its metadata declares, else
-    PATH.tiledir.parquet, bound to PATH by size and footer length (and generation if declared)."""
+    """Build the tile directory PATH.tiledir.parquet beside PATH, bound to PATH by size,
+    footer length and footer SHA-256. Nothing is declared in PATH."""
     from .tiledir import build
 
     click.echo(json.dumps(build(path, out), indent=2))

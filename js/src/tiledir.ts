@@ -17,14 +17,6 @@ export const TILE_DIRECTORY_PROFILE = 'parquet-table-1'
 export const TILE_DIRECTORY_KEY = 'lod_tile_directory'
 export const TILE_DIRECTORY_SUFFIX = '.tiledir.parquet'
 
-/** The optional `tile_directory` object of a file's `lod_columns` metadata. */
-export interface TileDirectoryDescriptor {
-  path: string
-  profile: string
-  zooms: number[]
-  generation: string
-}
-
 export interface DirectoryEntry {
   lod: string
   zoom: number
@@ -39,7 +31,7 @@ export interface TileDirectoryHeader {
   buffer: number
   slop_cells: number
   tile_order: string
-  source: { file_size: number; footer_length: number; generation: string | null }
+  source: { file_size: number; footer_length: number; footer_sha256: string }
   directories: DirectoryEntry[]
 }
 
@@ -66,16 +58,8 @@ export const tileId = (z: number, x: number, y: number): number => {
   return id
 }
 
-/** Where a file's sidecar lives: its descriptor's path relative to the file, else `<file>.tiledir.parquet`. */
-export const tileDirectoryUrl = (reader: LodReader, fileUrl: string): string => {
-  const path = reader.lod.tile_directory?.path
-  return path
-    ? new URL(path, new URL(fileUrl, globalThis.location?.href)).href
-    : fileUrl + TILE_DIRECTORY_SUFFIX
-}
-
 /**
- * An optional Parquet-table sidecar mapping (zoom, Morton tile id) to the LOD
+ * A Parquet table kept beside the file, mapping (zoom, Morton tile id) to the LOD
  * pages a buffered tile needs. Rows are sorted by (zoom, tile); a lookup picks
  * row groups by footer statistics and reads one, so a tile skips the main
  * file's bbox and page index reads. Geometry clipping uses the tile encoder.
@@ -133,23 +117,10 @@ export class TileDirectory {
       throw new Error(`unsupported tile directory profile ${header.profile}`)
     if (
       header.source.file_size !== reader.fileSize ||
-      header.source.footer_length !== reader.metadata.metadata_length
+      header.source.footer_length !== reader.metadata.metadata_length ||
+      header.source.footer_sha256 !== (await reader.footerDigest())
     )
       throw new Error('tile directory file binding mismatch')
-    const descriptor = reader.lod.tile_directory
-    if (descriptor) {
-      if (descriptor.profile !== TILE_DIRECTORY_PROFILE)
-        throw new Error(`unsupported tile directory profile ${descriptor.profile}`)
-      if (!header.source.generation || header.source.generation !== descriptor.generation)
-        throw new Error('tile directory generation mismatch')
-      const zooms = [...new Set(header.directories.map((d) => d.zoom))].sort((a, b) => a - b)
-      if (JSON.stringify(zooms) !== JSON.stringify([...descriptor.zooms].sort((a, b) => a - b)))
-        throw new Error('tile directory zooms differ from its descriptor')
-    } else {
-      console.warn(
-        'tile directory bound by file size and footer length only; the file declares no generation id',
-      )
-    }
     for (const entry of header.directories) {
       const lod = reader.lods[entry.lod]
       if (!lod || !lod.zooms.includes(entry.zoom) || entry.zoom > 24)

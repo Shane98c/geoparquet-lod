@@ -124,11 +124,6 @@ const countFeatures = (buf, child) => {
 }
 
 const ONLY = process.env.IMPLS?.split(',')
-// a file written without a tile_directory descriptor warns on every cold directory open
-const warn = console.warn
-console.warn = (...args) => {
-  if (!String(args[0]).includes('no generation id')) warn(...args)
-}
 // TILEDIR_URL adds a `lod_tiledir` implementation: the same file read through its tile
 // directory sidecar (`<file>.tiledir.parquet`), whose open counts toward the reader's open
 const TILEDIR = process.env.TILEDIR_URL

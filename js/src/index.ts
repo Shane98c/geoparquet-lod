@@ -5,11 +5,5 @@ export type { GeometryType } from './geometry.js'
 export { coalescing, httpSource, s3Mirrors } from './range-buffer.js'
 export { renderTile, tileBounds, tileResolution } from './tile.js'
 export type { TileOptions } from './tile.js'
-export {
-  TileDirectory,
-  openTileDirectory,
-  tileDirectoryUrl,
-  tileId,
-  TILE_DIRECTORY_PROFILE,
-} from './tiledir.js'
-export type { TileDirectoryDescriptor, TileDirectoryHeader } from './tiledir.js'
+export { TileDirectory, openTileDirectory, tileId, TILE_DIRECTORY_PROFILE } from './tiledir.js'
+export type { TileDirectoryHeader } from './tiledir.js'
