@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>geoparquet-lod side by side</title>
+    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        font:
+          13px/1.4 system-ui,
+          sans-serif;
+      }
+      #panes {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        height: 100%;
+      }
+      .pane {
+        position: relative;
+        border-right: 1px solid #999;
+      }
+      .map {
+        position: absolute;
+        inset: 0;
+      }
+      .hud {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        background: #fff;
+        padding: 6px 10px;
+        border-radius: 4px;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+        max-width: 90%;
+        font-variant-numeric: tabular-nums;
+      }
+      .hud b {
+        display: block;
+      }
+      #bar {
+        position: absolute;
+        bottom: 8px;
+        left: 8px;
+        background: #fff;
+        padding: 6px 10px;
+        border-radius: 4px;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+        z-index: 2;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="panes"></div>
+    <div id="bar">
+      <button id="reset">reset counters</button>
+      <span id="zoom"></span>
+    </div>
+    <script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+    <script src="https://unpkg.com/pmtiles@4.5.0/dist/pmtiles.js"></script>
+    <script type="module">
+      import { registerProtocol, tileUrl, readStats } from './dist/maplibre.js'
+
+      const params = new URLSearchParams(location.search)
+      const url = params.get('url')
+      if (!url) {
+        document.body.innerHTML =
+          '<p style="padding:1em">Pass a file: <code>?url=http://localhost:8097/buildings_quarter.parquet</code>. ' +
+          'Its <code>.tiledir</code> sidecar is read from the same place, and PMTiles from <code>?pmtiles=</code> ' +
+          '(default: the Open Climate Risk buildings archive).</p>'
+        throw new Error('no ?url=')
+      }
+      const fileUrl = new URL(url, location.href).href
+      const tiledir = params.get('tiledir') ?? fileUrl + '.tiledir'
+      const pmtilesBase =
+        'https://s3.us-west-2.amazonaws.com/us-west-2.opendata.source.coop/carbonplan/carbonplan-ocr/output/fire-risk/vector/production/v1.1.0/pmtiles/'
+      const pmtilesUrl = params.get('pmtiles') ?? pmtilesBase + 'buildings.pmtiles'
+      const pmtilesPoints =
+        params.get('pmtiles_points') ?? pmtilesBase + 'building_centroids.pmtiles'
+      const start = {
+        center: (params.get('center') ?? '-104.99,39.74').split(',').map(Number),
+        zoom: Number(params.get('zoom') ?? 12),
+      }
+
+      // main-thread fetches (PMTiles) tallied the same way as the worker's
+      const mainStats = {}
+      const fetched = window.fetch.bind(window)
+      window.fetch = async (input, init) => {
+        const response = await fetched(input, init)
+        const key = String(input instanceof Request ? input.url : input)
+        const entry = (mainStats[key] ??= { requests: 0, bytes: 0 })
+        entry.requests++
+        if (init?.method !== 'HEAD')
+          entry.bytes += Number(response.headers.get('content-length') ?? 0)
+        return response
+      }
+
+      registerProtocol(maplibregl)
+      const protocol = new pmtiles.Protocol()
+      maplibregl.addProtocol('pmtiles', protocol.tile)
+
+      // the two LOD panes read the same file; a query string on one keeps their tallies apart
+      const panes = [
+        {
+          title: 'page indexes',
+          keys: [fileUrl],
+          sources: {
+            lod: {
+              type: 'vector',
+              tiles: [tileUrl({ url: fileUrl, layer: 'shapes', pointLayer: 'points' })],
+              maxzoom: 22,
+            },
+          },
+          layers: lodLayers('lod'),
+        },
+        {
+          title: 'tile directory',
+          keys: [fileUrl + '?dir', tiledir],
+          sources: {
+            lod: {
+              type: 'vector',
+              tiles: [
+                tileUrl({ url: fileUrl + '?dir', layer: 'shapes', pointLayer: 'points', tiledir }),
+              ],
+              maxzoom: 22,
+            },
+          },
+          layers: lodLayers('lod'),
+        },
+        {
+          title: 'PMTiles',
+          keys: [pmtilesUrl, pmtilesPoints],
+          sources: {
+            shapes: { type: 'vector', url: 'pmtiles://' + pmtilesUrl },
+            points: { type: 'vector', url: 'pmtiles://' + pmtilesPoints },
+          },
+          layers: [fill('shapes', 'risk'), { ...dots('points', 'risk'), maxzoom: 6 }],
+        },
+      ]
+
+      function fill(source, layer) {
+        return {
+          id: `${source}-fill`,
+          type: 'fill',
+          source,
+          'source-layer': layer,
+          paint: { 'fill-color': '#d0421b', 'fill-opacity': 0.5, 'fill-outline-color': '#7a1f08' },
+        }
+      }
+      function dots(source, layer) {
+        return {
+          id: `${source}-dots`,
+          type: 'circle',
+          source,
+          'source-layer': layer,
+          paint: {
+            'circle-color': '#d0421b',
+            'circle-opacity': 0.8,
+            'circle-radius': ['interpolate', ['linear'], ['zoom'], 2, 1.5, 14, 3],
+          },
+        }
+      }
+      function lodLayers(source) {
+        return [fill(source, 'shapes'), dots(source, 'points')]
+      }
+
+      const container = document.getElementById('panes')
+      const maps = []
+      for (const pane of panes) {
+        const div = document.createElement('div')
+        div.className = 'pane'
+        const mapDiv = document.createElement('div')
+        mapDiv.className = 'map'
+        const hud = document.createElement('div')
+        hud.className = 'hud'
+        div.append(mapDiv, hud)
+        container.append(div)
+        const map = new maplibregl.Map({
+          container: mapDiv,
+          style: 'https://basemaps.cartocdn.com/gl/positron-nolabels-gl-style/style.json',
+          ...start,
+          attributionControl: false,
+        })
+        map.on('load', () => {
+          for (const [id, source] of Object.entries(pane.sources)) map.addSource(id, source)
+          for (const layer of pane.layers) map.addLayer(layer)
+        })
+        map.on('error', (e) => console.error(pane.title, e.error ?? e))
+        maps.push({ map, hud, pane })
+      }
+
+      window.maps = maps.map((m) => m.map)
+
+      // keep the three views together
+      let syncing = false
+      for (const { map } of maps) {
+        map.on('move', () => {
+          if (syncing) return
+          syncing = true
+          const view = {
+            center: map.getCenter(),
+            zoom: map.getZoom(),
+            bearing: map.getBearing(),
+            pitch: map.getPitch(),
+          }
+          for (const other of maps) if (other.map !== map) other.map.jumpTo(view)
+          syncing = false
+        })
+      }
+
+      let baseline = {}
+      const format = (bytes) => (bytes / 1e6).toFixed(2) + ' MB'
+      // a file is fetched under several hostnames; match on the object name and query
+      const tally = (stats, keys) => {
+        let requests = 0
+        let bytes = 0
+        for (const key of keys) {
+          const name = key.slice(key.lastIndexOf('/') + 1)
+          for (const [url, entry] of Object.entries(stats)) {
+            if (!url.endsWith('/' + name)) continue
+            const base = baseline[url] ?? { requests: 0, bytes: 0 }
+            requests += entry.requests - base.requests
+            bytes += entry.bytes - base.bytes
+          }
+        }
+        return { requests, bytes }
+      }
+      const current = async () => ({ ...(await readStats()), ...mainStats })
+      const show = async () => {
+        const stats = await current()
+        for (const { hud, pane, map } of maps) {
+          const { requests, bytes } = tally(stats, pane.keys)
+          hud.replaceChildren(
+            Object.assign(document.createElement('b'), { textContent: pane.title }),
+            document.createTextNode(`${format(bytes)} in ${requests} requests`),
+          )
+        }
+        document.getElementById('zoom').textContent = ` zoom ${maps[0].map.getZoom().toFixed(1)}`
+      }
+      document.getElementById('reset').onclick = async () => {
+        baseline = structuredClone(await current())
+        show()
+      }
+      setInterval(show, 500)
+    </script>
+  </body>
+</html>
