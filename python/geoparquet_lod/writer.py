@@ -208,7 +208,8 @@ def _read_schema(src: str) -> pa.Schema:
 
 
 def _leaf_paths(schema: pa.Schema) -> list[list[str]]:
-    """Parquet leaf paths of an Arrow schema, with list levels spelled out."""
+    """Parquet leaf paths of an Arrow schema as pyarrow names them: every list
+    level is `list.element` whatever the Arrow child field is called."""
     out = []
 
     def walk(field: pa.Field, path: list[str]):
@@ -217,7 +218,7 @@ def _leaf_paths(schema: pa.Schema) -> list[list[str]]:
             for i in range(t.num_fields):
                 walk(t.field(i), [*path, t.field(i).name])
         elif pa.types.is_list(t) or pa.types.is_fixed_size_list(t):
-            walk(t.value_field, [*path, 'list', t.value_field.name])
+            walk(t.value_field, [*path, 'list', 'element'])
         else:
             out.append(path)
 

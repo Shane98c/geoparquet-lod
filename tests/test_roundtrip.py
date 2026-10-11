@@ -88,6 +88,13 @@ def test_polygons_roundtrip(buildings, tmp_path):
     assert len(values) == 3000, 'every polygon is present from the complete zoom'
     assert set(values.type.names) == {'geometry', 'risk', 'floors', 'name'}
     assert values.field('floors').type == pa.int32()
+    rg = pq.ParquetFile(out).metadata.row_group(0)
+    coordinate_chunks = [
+        rg.column(i)
+        for i in range(rg.num_columns)
+        if rg.column(i).path_in_schema.startswith(f'lod.{shape}.geometry')
+    ]
+    assert coordinate_chunks and all('BYTE_STREAM_SPLIT' in c.encodings for c in coordinate_chunks)
     polygons = geometry_rows(values.field('geometry').slice(0, 5))
     assert polygons[0][0][0][0] == polygons[0][0][0][-1], 'rings are closed'
     # attribute nulls survive as nulls
