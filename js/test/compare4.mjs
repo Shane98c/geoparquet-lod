@@ -8,6 +8,21 @@ import { LodReader, httpSource, coalescing, renderTile, tileBounds } from '../di
 import { CogpReader, toMvt } from '@cogp/reader'
 import { PMTiles } from 'pmtiles'
 import { Query } from './esri-node.mjs'
+import { PbfReader } from 'pbf'
+
+// feature count of an MVT: layers are field 3 of the tile, features field 2 of a layer
+const features = (buf) => {
+  let n = 0
+  const layer = (tag, _, pbf) => {
+    if (tag === 2) n++
+    pbf.skip(pbf.type)
+  }
+  new PbfReader(new Uint8Array(buf)).readFields((tag, _, pbf) => {
+    if (tag === 3) pbf.readMessage(layer, {})
+    else pbf.skip(pbf.type)
+  }, {})
+  return n
+}
 
 const base = process.env.BASE ?? 'http://localhost:8099/'
 const stats = {}
@@ -90,7 +105,12 @@ for (const [z, lon, lat, label] of tiles) {
     const r = await lodOpen()
     const a = snap(key)
     const mvt = await renderTile(r, z, x, y, { properties: [] })
-    row.push(fmt(delta(a, snap(key)), `, ${(mvt.byteLength / 1e3).toFixed(0)} KB mvt`))
+    row.push(
+      fmt(
+        delta(a, snap(key)),
+        `, ${(mvt.byteLength / 1e3).toFixed(0)} KB mvt, ${features(mvt)} features`,
+      ),
+    )
   }
   // cogp: fresh reader, the adapter's read for a tile
   {
@@ -109,7 +129,7 @@ for (const [z, lon, lat, label] of tiles) {
     row.push(
       fmt(
         delta(a, snap(key)),
-        `, ${(mvt.byteLength / 1e3).toFixed(0)} KB mvt, ${batch.length} rows`,
+        `, ${(mvt.byteLength / 1e3).toFixed(0)} KB mvt, ${batch.length} features`,
       ),
     )
   }
@@ -122,7 +142,12 @@ for (const [z, lon, lat, label] of tiles) {
     const [px, py] = xy(zz, lon, lat)
     const t = await p.getZxy(zz, px, py)
     row.push(
-      fmt(delta(a, snap(key)), t ? `, ${(t.data.byteLength / 1e3).toFixed(0)} KB tile` : ', empty'),
+      fmt(
+        delta(a, snap(key)),
+        t
+          ? `, ${(t.data.byteLength / 1e3).toFixed(0)} KB tile, ${features(t.data)} features`
+          : ', empty',
+      ),
     )
   }
   // esri: fresh query, the reference reader's view query for the tile extent

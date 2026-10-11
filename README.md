@@ -236,8 +236,9 @@ GeoParquet. From a cold reader on the 24.2 GB national file:
 
 A second comparison in the same document puts this layout, COGP, PMTiles and
 Esri's Spatially Optimized Parquet side by side on Esri's own 53.7 million
-Japan buildings, and `demo/compare.html` draws any of the four from URLs with
-a byte and request tally per pane.
+Japan buildings, with feature counts beside the bytes, since the four thin
+so differently that bytes alone mislead. `demo/compare.html` draws any of
+the four from URLs with a byte and request tally per pane.
 
 The floor is one data read per leaf per row group a tile touches, so request
 parity with a format that stores each tile as one blob is out of reach. If
