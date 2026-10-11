@@ -78,6 +78,9 @@ const REFINE_MARGIN = 1.5
 
 /** Below this many bytes across an LOD's leaves, a row group's chunks are read whole rather than through page indexes. */
 const WHOLE_CHUNK_BYTES = 256 * 1024
+
+/** Decoded pages kept for later tiles; the oldest are dropped past this many. */
+const PAGE_CACHE = 1024
 const BBOX_LEAVES = ['bbox.xmin', 'bbox.ymin', 'bbox.xmax', 'bbox.ymax'] as const
 
 /**
@@ -97,6 +100,7 @@ export class LodReader {
   private readonly file: RangeSource
   private readonly rowGroupStarts: number[]
   private readonly cache = new Map<string, Promise<unknown>>()
+  private readonly pages = new Map<string, Promise<Map<number, unknown>>>()
   private readonly elements = new Map<string, SchemaTree['element']>()
 
   private constructor(file: RangeSource, metadata: FileMetaData) {
@@ -219,26 +223,25 @@ export class LodReader {
       this.geometryLeaf(lod),
       ...attributes.map((a) => `${this.lod.column}.${lod.name}.${a}`),
     ]
+    const empty = () => leaves.map(() => new Map<number, unknown>())
     const perGroup = await Promise.all(
       groups.map(async (g) => {
-        let ranges: [number, number][] | null = null
         const whole =
           leaves.reduce((n, leaf) => n + this.chunkBytes(g, leaf), 0) <= WHOLE_CHUNK_BYTES
-        let refined: Promise<[number, number][]> | null = null
-        const values = await Promise.all(
-          leaves.map(async (leaf) => {
-            if (whole) return this.readWholeLeaf(g, leaf)
-            void this.offsetIndex(g, leaf).catch(() => undefined)
-            refined ??= this.candidateRows(g, padded, signal).then(({ ranges, hit }) =>
-              ranges.length && options.refine && this.refinePays(g, leaves, hit)
-                ? this.refineRows(g, ranges, padded, signal)
-                : ranges,
-            )
-            ranges = await refined
-            if (!ranges.length) return new Map<number, unknown>()
-            return this.readLeafRows(g, leaf, ranges, signal)
-          }),
-        )
+        if (whole)
+          return { g, values: await Promise.all(leaves.map((l) => this.readWholeLeaf(g, l))) }
+        // Row groups overlap at their edges, so most candidates hold no row for the tile;
+        // the LOD offset indexes are fetched only once the bbox pages admit one, alongside
+        // the bbox reads that refine them.
+        const { ranges: candidates, hit } = await this.candidateRows(g, padded, signal)
+        if (!candidates.length) return { g, values: empty() }
+        leaves.forEach((l) => void this.offsetIndex(g, l).catch(() => {}))
+        const ranges =
+          options.refine && this.refinePays(g, leaves, hit)
+            ? await this.refineRows(g, candidates, padded, signal)
+            : candidates
+        if (!ranges.length) return { g, values: empty() }
+        const values = await Promise.all(leaves.map((l) => this.readLeafRows(g, l, ranges, signal)))
         return { g, values }
       }),
     )
@@ -343,35 +346,64 @@ export class LodReader {
     pages: PageLocation[],
     signal?: AbortSignal,
   ): Promise<Map<number, unknown>> {
-    const dictionary = await this.dictionaryPage(g, leaf)
+    const out = new Map<number, unknown>()
+    for (const values of await this.pageValues(g, leaf, pages, signal)) {
+      for (const [row, raw] of values) {
+        const value = unwrap(raw)
+        if (value !== ABSENT) out.set(row, value)
+      }
+    }
+    return out
+  }
+
+  /**
+   * Every row of each page, decoded once and kept, so the pages a tile shares
+   * with its neighbours are not fetched again. Pages missing from the cache
+   * that are adjacent in the file are fetched as one range.
+   */
+  private pageValues(
+    g: number,
+    leaf: string,
+    pages: PageLocation[],
+    signal?: AbortSignal,
+  ): Promise<Map<number, unknown>[]> {
+    const key = (page: PageLocation) => `p:${g}:${leaf}:${page.byteStart}`
     const ordered = [...pages].sort((a, b) => a.byteStart - b.byteStart)
+    const wanted = new Map<string, Promise<Map<number, unknown>>>()
     const runs: PageLocation[][] = []
     for (const page of ordered) {
+      const cached = this.pages.get(key(page))
+      if (cached) {
+        wanted.set(key(page), cached)
+        continue
+      }
       const last = runs[runs.length - 1]
       if (last && last[last.length - 1].byteEnd === page.byteStart) last.push(page)
       else runs.push([page])
     }
-    const decoded = await Promise.all(
-      runs.map(async (run) => {
-        const buffer = await this.file.slice(run[0].byteStart, run[run.length - 1].byteEnd, signal)
-        const values = new Map<number, unknown>()
-        for (const page of run) {
-          const bytes = buffer.slice(
+    while (this.pages.size > PAGE_CACHE) this.pages.delete(this.pages.keys().next().value!)
+    for (const run of runs) {
+      const dictionary = this.dictionaryPage(g, leaf)
+      const buffer = this.file.slice(run[0].byteStart, run[run.length - 1].byteEnd, signal)
+      for (const page of run) {
+        const decoded = Promise.all([buffer, dictionary]).then(([bytes, dict]) => {
+          const slice = bytes.slice(
             page.byteStart - run[0].byteStart,
             page.byteEnd - run[0].byteStart,
           )
+          const values = new Map<number, unknown>()
           let row = page.rowStart
-          for (const data of this.decodePages(bytes, g, leaf, row, page.rowEnd - row, dictionary)) {
-            for (let i = 0; i < data.length; i++, row++) {
-              const value = unwrap(data[i])
-              if (value !== ABSENT) values.set(row, value)
-            }
+          for (const data of this.decodePages(slice, g, leaf, row, page.rowEnd - row, dict)) {
+            for (let i = 0; i < data.length; i++, row++) values.set(row, data[i])
           }
-        }
-        return values
-      }),
-    )
-    return new Map(decoded.flatMap((values) => [...values]))
+          return values
+        })
+        wanted.set(key(page), decoded)
+        this.pages.set(key(page), decoded)
+        decoded.catch(() => this.pages.delete(key(page)))
+      }
+    }
+    return Promise.all(pages.map((page) => wanted.get(key(page))!))
   }
 
   private warmPrefix(): void {
@@ -564,82 +596,38 @@ export class LodReader {
     })
   }
 
+  /** Rows of an LOD leaf within `ranges`, present rows only. */
   private async readLeafRows(
     g: number,
     leaf: string,
     ranges: [number, number][],
     signal?: AbortSignal,
   ): Promise<Map<number, unknown>> {
-    const [pages, dictionary] = await Promise.all([
-      this.offsetIndex(g, leaf),
-      this.dictionaryPage(g, leaf),
-    ])
+    const pages = await this.offsetIndex(g, leaf)
     const wanted = pages.filter((p) => ranges.some(([a, b]) => p.rowStart < b && p.rowEnd > a))
     const out = new Map<number, unknown>()
-    if (!wanted.length) return out
-    const runs: PageLocation[][] = []
-    for (const p of wanted) {
-      const run = runs[runs.length - 1]
-      if (run && run[run.length - 1].byteEnd === p.byteStart) run.push(p)
-      else runs.push([p])
+    for (const values of await this.pageValues(g, leaf, wanted, signal)) {
+      for (const [row, raw] of values) {
+        if (!ranges.some(([a, b]) => row >= a && row < b)) continue
+        const v = unwrap(raw)
+        if (v !== ABSENT) out.set(row, v)
+      }
     }
-    await Promise.all(
-      runs.map(async (run) => {
-        const buffer = await this.file.slice(run[0].byteStart, run[run.length - 1].byteEnd, signal)
-        for (const page of run) {
-          const slice = buffer.slice(
-            page.byteStart - run[0].byteStart,
-            page.byteEnd - run[0].byteStart,
-          )
-          let row = page.rowStart
-          for (const chunkData of this.decodePages(
-            slice,
-            g,
-            leaf,
-            page.rowStart,
-            page.rowEnd - page.rowStart,
-            dictionary,
-          )) {
-            for (let i = 0; i < chunkData.length; i++, row++) {
-              if (!ranges.some(([a, b]) => row >= a && row < b)) continue
-              const v = unwrap(chunkData[i])
-              if (v !== ABSENT) out.set(row, v)
-            }
-          }
-        }
-      }),
-    )
     return out
   }
 
+  /** Every row of the pages overlapping `ranges`, as decoded. */
   private async readLeafValues(
     g: number,
     leaf: string,
     ranges: [number, number][],
     signal?: AbortSignal,
   ): Promise<Map<number, unknown>> {
-    const [pages, dictionary] = await Promise.all([
-      this.offsetIndex(g, leaf),
-      this.dictionaryPage(g, leaf),
-    ])
+    const pages = await this.offsetIndex(g, leaf)
     const wanted = pages.filter((p) => ranges.some(([a, b]) => p.rowStart < b && p.rowEnd > a))
     const out = new Map<number, unknown>()
-    await Promise.all(
-      wanted.map(async (page) => {
-        const buffer = await this.file.slice(page.byteStart, page.byteEnd, signal)
-        let row = page.rowStart
-        for (const chunkData of this.decodePages(
-          buffer,
-          g,
-          leaf,
-          page.rowStart,
-          page.rowEnd - page.rowStart,
-          dictionary,
-        )) {
-          for (let i = 0; i < chunkData.length; i++, row++) out.set(row, chunkData[i])
-        }
-      }),
-    )
+    for (const values of await this.pageValues(g, leaf, wanted, signal))
+      for (const [row, value] of values) out.set(row, value)
     return out
   }
 
