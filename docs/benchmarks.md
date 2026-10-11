@@ -1,17 +1,16 @@
 # Benchmarks
 
-The numbers below were measured on the national buildings file written on
-2026-10-10, before the writer gained `BYTE_STREAM_SPLIT` on coordinate leaves
-and zstd level 9. A rewrite with the current writer is in progress; every
-`lod` and `lod_tiledir` figure here will be re-measured against it, and the
-competitor figures are unchanged. Until then read the `lod` columns as an
-upper bound.
+The `lod` and `lod_tiledir` numbers were measured on 2026-10-11 against the
+national file written that day by the current writer, with
+`BYTE_STREAM_SPLIT` on coordinate leaves and zstd level 9. The `cogp`,
+`pmtiles` and `sorted` numbers were measured the day before against files
+that have not changed.
 
 ## Measured
 
 The same 155.6 million US building footprints served four ways:
 
-- `lod`: this layout, 30.3 GB, 150 row groups, 15 LODs, every source column
+- `lod`: this layout, 24.2 GB, 150 row groups, 15 LODs, every source column
   kept, read through its page indexes. LOD geometry is interleaved GeoArrow
   quantized to a quarter pixel, in 16 KB pages, and each LOD carries
   `rps_2011` and `rps_2047`. Thinning is
@@ -46,7 +45,7 @@ S3 would answer the first request.
 **Method.** Open is counted once per reader, separately, as the median of 51
 cold opens: footers, the PMTiles header and root directory, and every read a
 reader starts at open. `LodReader.open` reads the file's last 1 MB in one request,
-which holds the 924 KB footer, then warms the prefix row groups' bbox page
+which holds the 922 KB footer, then warms the prefix row groups' bbox page
 indexes and the coarse LODs' offset indexes; `lod_tiledir`'s open adds the
 directory's 0.91 MB footer. Each tile is then rendered on a fresh
 reader (cold), and again on that same reader (warm, same tile): what a
@@ -84,8 +83,8 @@ Open, once per map session (median of 51 cold opens):
 
 | implementation | transferred | requests | time    |
 | -------------- | ----------- | -------- | ------- |
-| lod            | 0.93 MB     | 5        | 23 ms   |
-| lod_tiledir    | 1.84 MB     | 9        | 44 ms   |
+| lod            | 0.94 MB     | 6        | 22 ms   |
+| lod_tiledir    | 1.81 MB     | 10       | 45 ms   |
 | cogp           | 1.00 MB     | 3        | 1073 ms |
 | pmtiles        | 0.02 MB     | 1        | 232 ms  |
 | sorted         | 1.96 MB     | 3        | 1407 ms |
@@ -95,72 +94,72 @@ tile again on that reader (warm); median time of 3 runs:
 
 | tile                                 | impl        | cold                       | warm, same tile         | decoded MVT | features | note                                         |
 | ------------------------------------ | ----------- | -------------------------- | ----------------------- | ----------- | -------- | -------------------------------------------- |
-| z3 national                          | lod         | 0.24 MB, 1 req, 30 ms      | 0.00 MB, 0 req, 9 ms    | 226 KB      | 2,925    | LOD f3                                       |
-| z3 national                          | lod_tiledir | 0.24 MB, 1 req, 28 ms      | 0.00 MB, 0 req, 7 ms    | 226 KB      | 2,925    | page indexes (zoom not in directory), LOD f3 |
+| z3 national                          | lod         | 0.22 MB, 1 req, 29 ms      | 0.00 MB, 0 req, 8 ms    | 226 KB      | 2,925    | LOD f3                                       |
+| z3 national                          | lod_tiledir | 0.22 MB, 1 req, 30 ms      | 0.00 MB, 0 req, 9 ms    | 226 KB      | 2,925    | page indexes (zoom not in directory), LOD f3 |
 | z3 national                          | cogp        | 2.13 MB, 42 req, 1411 ms   | 0.00 MB, 0 req, 77 ms   | 1 KB        | 10       | level 0, 43505 rows read                     |
 | z3 national                          | pmtiles     |                            |                         |             |          | no tile: archive minzoom is 6                |
-| z5 regional, Bay Area                | lod         | 0.24 MB, 4 req, 30 ms      | 0.24 MB, 3 req, 30 ms   | 339 KB      | 4,415    | LOD f5                                       |
-| z5 regional, Bay Area                | lod_tiledir | 0.24 MB, 4 req, 24 ms      | 0.24 MB, 3 req, 23 ms   | 339 KB      | 4,415    | page indexes (zoom not in directory), LOD f5 |
+| z5 regional, Bay Area                | lod         | 0.29 MB, 3 req, 32 ms      | 0.29 MB, 3 req, 33 ms   | 339 KB      | 4,415    | LOD f5                                       |
+| z5 regional, Bay Area                | lod_tiledir | 0.29 MB, 3 req, 29 ms      | 0.29 MB, 3 req, 29 ms   | 339 KB      | 4,415    | page indexes (zoom not in directory), LOD f5 |
 | z5 regional, Bay Area                | cogp        | 1.06 MB, 23 req, 1106 ms   | 0.00 MB, 0 req, 44 ms   | 8 KB        | 99       | level 1, 17291 rows read                     |
 | z5 regional, Bay Area                | pmtiles     |                            |                         |             |          | no tile: archive minzoom is 6                |
-| z6 regional, Southern California     | lod         | 0.08 MB, 4 req, 14 ms      | 0.07 MB, 3 req, 10 ms   | 157 KB      | 2,049    | LOD f6                                       |
-| z6 regional, Southern California     | lod_tiledir | 0.08 MB, 4 req, 11 ms      | 0.07 MB, 3 req, 10 ms   | 157 KB      | 2,049    | page indexes (zoom not in directory), LOD f6 |
+| z6 regional, Southern California     | lod         | 0.17 MB, 3 req, 26 ms      | 0.17 MB, 3 req, 20 ms   | 157 KB      | 2,049    | LOD f6                                       |
+| z6 regional, Southern California     | lod_tiledir | 0.17 MB, 3 req, 20 ms      | 0.17 MB, 3 req, 16 ms   | 157 KB      | 2,049    | page indexes (zoom not in directory), LOD f6 |
 | z6 regional, Southern California     | cogp        | 0.94 MB, 50 req, 1205 ms   | 0.00 MB, 0 req, 39 ms   | 14 KB       | 184      | level 2, 8668 rows read                      |
 | z6 regional, Southern California     | pmtiles     | 0.11 MB, 2 req, 251 ms     | 0.10 MB, 1 req, 99 ms   | 242 KB      | 3,620    |                                              |
-| z8 metro, Denver                     | lod         | 0.59 MB, 11 req, 239 ms    | 0.05 MB, 3 req, 21 ms   | 390 KB      | 5,014    | LOD f8                                       |
-| z8 metro, Denver                     | lod_tiledir | 0.35 MB, 9 req, 125 ms     | 0.28 MB, 8 req, 109 ms  | 390 KB      | 5,014    | directory, LOD f8                            |
+| z8 metro, Denver                     | lod         | 0.54 MB, 7 req, 292 ms     | 0.09 MB, 3 req, 22 ms   | 390 KB      | 5,014    | LOD f8                                       |
+| z8 metro, Denver                     | lod_tiledir | 0.33 MB, 9 req, 319 ms     | 0.26 MB, 8 req, 305 ms  | 390 KB      | 5,014    | directory, LOD f8                            |
 | z8 metro, Denver                     | cogp        | 1.79 MB, 61 req, 1465 ms   | 0.00 MB, 0 req, 75 ms   | 620 KB      | 8,081    | level 4, 24243 rows read                     |
 | z8 metro, Denver                     | pmtiles     | 0.17 MB, 2 req, 395 ms     | 0.16 MB, 1 req, 180 ms  | 334 KB      | 4,875    |                                              |
-| z9 metro, Atlanta                    | lod         | 1.22 MB, 36 req, 279 ms    | 0.75 MB, 19 req, 258 ms | 844 KB      | 10,651   | LOD f9                                       |
-| z9 metro, Atlanta                    | lod_tiledir | 0.80 MB, 20 req, 120 ms    | 0.73 MB, 19 req, 110 ms | 844 KB      | 10,651   | directory, LOD f9                            |
+| z9 metro, Atlanta                    | lod         | 1.02 MB, 31 req, 289 ms    | 0.88 MB, 18 req, 290 ms | 844 KB      | 10,651   | LOD f9                                       |
+| z9 metro, Atlanta                    | lod_tiledir | 0.72 MB, 21 req, 242 ms    | 0.64 MB, 20 req, 226 ms | 844 KB      | 10,651   | directory, LOD f9                            |
 | z9 metro, Atlanta                    | cogp        | 4.14 MB, 211 req, 10795 ms | 0.00 MB, 0 req, 305 ms  | 3.10 MB     | 38,840   | level 5, 49033 rows read                     |
 | z9 metro, Atlanta                    | pmtiles     | 0.15 MB, 2 req, 363 ms     | 0.14 MB, 1 req, 94 ms   | 280 KB      | 3,891    |                                              |
-| z11 city, Denver                     | lod         | 0.44 MB, 22 req, 125 ms    | 0.29 MB, 11 req, 122 ms | 109 KB      | 1,413    | LOD f11                                      |
-| z11 city, Denver                     | lod_tiledir | 0.30 MB, 8 req, 44 ms      | 0.24 MB, 7 req, 34 ms   | 109 KB      | 1,413    | directory, LOD f11                           |
+| z11 city, Denver                     | lod         | 0.42 MB, 22 req, 138 ms    | 0.27 MB, 11 req, 132 ms | 109 KB      | 1,413    | LOD f11                                      |
+| z11 city, Denver                     | lod_tiledir | 0.27 MB, 8 req, 105 ms     | 0.22 MB, 7 req, 101 ms  | 109 KB      | 1,413    | directory, LOD f11                           |
 | z11 city, Denver                     | cogp        | 2.41 MB, 215 req, 15951 ms | 0.00 MB, 0 req, 80 ms   | 520 KB      | 7,376    | level 7, 7381 rows read                      |
 | z11 city, Denver                     | pmtiles     | 0.17 MB, 2 req, 375 ms     | 0.16 MB, 1 req, 153 ms  | 334 KB      | 4,741    |                                              |
-| z12 suburbs, Atlanta                 | lod         | 0.47 MB, 16 req, 38 ms     | 0.30 MB, 7 req, 31 ms   | 179 KB      | 2,283    | LOD f12                                      |
-| z12 suburbs, Atlanta                 | lod_tiledir | 0.34 MB, 8 req, 29 ms      | 0.26 MB, 7 req, 22 ms   | 179 KB      | 2,283    | directory, LOD f12                           |
+| z12 suburbs, Atlanta                 | lod         | 0.41 MB, 16 req, 39 ms     | 0.28 MB, 7 req, 32 ms   | 179 KB      | 2,283    | LOD f12                                      |
+| z12 suburbs, Atlanta                 | lod_tiledir | 0.31 MB, 8 req, 33 ms      | 0.23 MB, 7 req, 26 ms   | 179 KB      | 2,283    | directory, LOD f12                           |
 | z12 suburbs, Atlanta                 | cogp        | 2.15 MB, 198 req, 9495 ms  | 0.00 MB, 0 req, 78 ms   | 463 KB      | 6,510    | level 8, 6512 rows read                      |
 | z12 suburbs, Atlanta                 | pmtiles     | 0.13 MB, 2 req, 342 ms     | 0.12 MB, 1 req, 107 ms  | 223 KB      | 3,098    |                                              |
-| z12 desert, Tonopah NV               | lod         | 0.24 MB, 14 req, 16 ms     | 0.15 MB, 6 req, 11 ms   | 25 KB       | 316      | LOD f12                                      |
-| z12 desert, Tonopah NV               | lod_tiledir | 0.14 MB, 7 req, 16 ms      | 0.09 MB, 6 req, 9 ms    | 25 KB       | 316      | directory, LOD f12                           |
+| z12 desert, Tonopah NV               | lod         | 0.21 MB, 14 req, 11 ms     | 0.10 MB, 6 req, 8 ms    | 25 KB       | 316      | LOD f12                                      |
+| z12 desert, Tonopah NV               | lod_tiledir | 0.14 MB, 7 req, 13 ms      | 0.09 MB, 6 req, 9 ms    | 25 KB       | 316      | directory, LOD f12                           |
 | z12 desert, Tonopah NV               | cogp        | 0.84 MB, 87 req, 1370 ms   | 0.00 MB, 0 req, 28 ms   | 59 KB       | 772      | level 8, 772 rows read                       |
 | z12 desert, Tonopah NV               | pmtiles     | 0.01 MB, 2 req, 263 ms     | 0.00 MB, 1 req, 108 ms  | 8 KB        | 95       |                                              |
-| z13 downtown, San Francisco          | lod         | 1.56 MB, 24 req, 179 ms    | 0.63 MB, 7 req, 148 ms  | 627 KB      | 16,948   | LOD f13                                      |
-| z13 downtown, San Francisco          | lod_tiledir | 0.70 MB, 8 req, 94 ms      | 0.63 MB, 7 req, 75 ms   | 627 KB      | 16,948   | directory, LOD f13                           |
+| z13 downtown, San Francisco          | lod         | 1.39 MB, 24 req, 162 ms    | 0.46 MB, 7 req, 137 ms  | 627 KB      | 16,948   | LOD f13                                      |
+| z13 downtown, San Francisco          | lod_tiledir | 0.54 MB, 8 req, 81 ms      | 0.46 MB, 7 req, 71 ms   | 627 KB      | 16,948   | directory, LOD f13                           |
 | z13 downtown, San Francisco          | cogp        | 1.49 MB, 111 req, 1527 ms  | 0.00 MB, 0 req, 71 ms   | 525 KB      | 16,963   | level 9, 16969 rows read                     |
 | z13 downtown, San Francisco          | pmtiles     | 0.22 MB, 2 req, 409 ms     | 0.21 MB, 1 req, 162 ms  | 483 KB      | 7,855    |                                              |
-| z13 downtown, Los Angeles            | lod         | 1.24 MB, 27 req, 110 ms    | 0.44 MB, 8 req, 84 ms   | 381 KB      | 10,632   | LOD f13                                      |
-| z13 downtown, Los Angeles            | lod_tiledir | 0.53 MB, 9 req, 61 ms      | 0.44 MB, 8 req, 49 ms   | 381 KB      | 10,632   | directory, LOD f13                           |
+| z13 downtown, Los Angeles            | lod         | 1.09 MB, 26 req, 107 ms    | 0.32 MB, 7 req, 88 ms   | 381 KB      | 10,632   | LOD f13                                      |
+| z13 downtown, Los Angeles            | lod_tiledir | 0.42 MB, 8 req, 57 ms      | 0.32 MB, 7 req, 72 ms   | 381 KB      | 10,632   | directory, LOD f13                           |
 | z13 downtown, Los Angeles            | cogp        | 1.34 MB, 116 req, 1538 ms  | 0.00 MB, 0 req, 60 ms   | 333 KB      | 10,611   | level 9, 10647 rows read                     |
 | z13 downtown, Los Angeles            | pmtiles     | 0.15 MB, 2 req, 325 ms     | 0.14 MB, 1 req, 107 ms  | 315 KB      | 5,091    |                                              |
-| z13 rural, Broken Bow NE             | lod         | 0.48 MB, 18 req, 31 ms     | 0.15 MB, 6 req, 18 ms   | 149 KB      | 2,131    | LOD f13                                      |
-| z13 rural, Broken Bow NE             | lod_tiledir | 0.19 MB, 7 req, 30 ms      | 0.15 MB, 6 req, 20 ms   | 149 KB      | 2,131    | directory, LOD f13                           |
+| z13 rural, Broken Bow NE             | lod         | 0.44 MB, 18 req, 28 ms     | 0.15 MB, 6 req, 17 ms   | 149 KB      | 2,131    | LOD f13                                      |
+| z13 rural, Broken Bow NE             | lod_tiledir | 0.19 MB, 7 req, 25 ms      | 0.15 MB, 6 req, 18 ms   | 149 KB      | 2,131    | directory, LOD f13                           |
 | z13 rural, Broken Bow NE             | cogp        | 1.05 MB, 109 req, 1462 ms  | 0.00 MB, 0 req, 38 ms   | 146 KB      | 2,131    | level 9, 2132 rows read                      |
 | z13 rural, Broken Bow NE             | pmtiles     | 0.06 MB, 2 req, 285 ms     | 0.05 MB, 1 req, 168 ms  | 85 KB       | 1,042    |                                              |
-| z13 empty, Nebraska Sandhills        | lod         | 0.24 MB, 12 req, 11 ms     | 0.00 MB, 0 req, 4 ms    | 0 KB        | 0        | LOD f13                                      |
-| z13 empty, Nebraska Sandhills        | lod_tiledir | 0.04 MB, 1 req, 8 ms       | 0.00 MB, 0 req, 1 ms    | 0 KB        | 0        | directory, LOD f13                           |
+| z13 empty, Nebraska Sandhills        | lod         | 0.25 MB, 12 req, 11 ms     | 0.00 MB, 0 req, 2 ms    | 0 KB        | 0        | LOD f13                                      |
+| z13 empty, Nebraska Sandhills        | lod_tiledir | 0.04 MB, 1 req, 9 ms       | 0.00 MB, 0 req, 0 ms    | 0 KB        | 0        | directory, LOD f13                           |
 | z13 empty, Nebraska Sandhills        | cogp        | 0.81 MB, 62 req, 858 ms    | 0.00 MB, 0 req, 18 ms   | 0 KB        | 0        | level 9, 0 rows read                         |
 | z13 empty, Nebraska Sandhills        | pmtiles     | 0.01 MB, 1 req, 94 ms      |                         |             |          | no tile: empty                               |
-| z14 row-group edge, Chicago          | lod         | 0.80 MB, 26 req, 74 ms     | 0.22 MB, 8 req, 56 ms   | 279 KB      | 8,868    | LOD f13                                      |
-| z14 row-group edge, Chicago          | lod_tiledir | 0.32 MB, 9 req, 44 ms      | 0.22 MB, 8 req, 35 ms   | 279 KB      | 8,868    | directory, LOD f13                           |
+| z14 row-group edge, Chicago          | lod         | 0.79 MB, 28 req, 87 ms     | 0.19 MB, 8 req, 67 ms   | 279 KB      | 8,868    | LOD f13                                      |
+| z14 row-group edge, Chicago          | lod_tiledir | 0.29 MB, 9 req, 44 ms      | 0.19 MB, 8 req, 57 ms   | 279 KB      | 8,868    | directory, LOD f13                           |
 | z14 row-group edge, Chicago          | cogp        | 1.16 MB, 115 req, 1491 ms  | 0.00 MB, 0 req, 48 ms   | 267 KB      | 8,872    | level 10, 8877 rows read                     |
 | z14 row-group edge, Chicago          | pmtiles     | 0.18 MB, 2 req, 353 ms     | 0.17 MB, 1 req, 118 ms  | 487 KB      | 9,020    |                                              |
-| z15 street, Manhattan                | lod         | 0.52 MB, 18 req, 31 ms     | 0.12 MB, 3 req, 18 ms   | 50 KB       | 1,098    | LOD f15                                      |
-| z15 street, Manhattan                | lod_tiledir | 0.25 MB, 4 req, 24 ms      | 0.12 MB, 3 req, 9 ms    | 50 KB       | 1,098    | directory, LOD f15                           |
+| z15 street, Manhattan                | lod         | 0.37 MB, 18 req, 25 ms     | 0.07 MB, 3 req, 16 ms   | 50 KB       | 1,098    | LOD f15                                      |
+| z15 street, Manhattan                | lod_tiledir | 0.21 MB, 4 req, 20 ms      | 0.07 MB, 3 req, 9 ms    | 50 KB       | 1,098    | directory, LOD f15                           |
 | z15 street, Manhattan                | cogp        | 1.26 MB, 122 req, 2250 ms  | 0.00 MB, 0 req, 40 ms   | 47 KB       | 1,098    | level 11, 1099 rows read                     |
 | z15 street, Manhattan                | pmtiles     | 0.10 MB, 2 req, 301 ms     | 0.09 MB, 1 req, 112 ms  | 204 KB      | 1,037    | overzoomed from z14                          |
-| z15 street, Denver suburbs           | lod         | 0.34 MB, 18 req, 20 ms     | 0.06 MB, 4 req, 11 ms   | 18 KB       | 351      | LOD f15                                      |
-| z15 street, Denver suburbs           | lod_tiledir | 0.17 MB, 5 req, 21 ms      | 0.06 MB, 4 req, 7 ms    | 18 KB       | 351      | directory, LOD f15                           |
+| z15 street, Denver suburbs           | lod         | 0.32 MB, 18 req, 22 ms     | 0.04 MB, 4 req, 11 ms   | 18 KB       | 351      | LOD f15                                      |
+| z15 street, Denver suburbs           | lod_tiledir | 0.15 MB, 5 req, 14 ms      | 0.04 MB, 4 req, 8 ms    | 18 KB       | 351      | directory, LOD f15                           |
 | z15 street, Denver suburbs           | cogp        | 1.40 MB, 144 req, 5602 ms  | 0.00 MB, 0 req, 42 ms   | 17 KB       | 350      | level 11, 354 rows read                      |
 | z15 street, Denver suburbs           | pmtiles     | 0.06 MB, 2 req, 316 ms     | 0.05 MB, 1 req, 110 ms  | 96 KB       | 333      | overzoomed from z14                          |
-| z16 street, San Francisco            | lod         | 0.37 MB, 16 req, 20 ms     | 0.06 MB, 3 req, 10 ms   | 7 KB        | 148      | LOD f15                                      |
-| z16 street, San Francisco            | lod_tiledir | 0.16 MB, 4 req, 18 ms      | 0.06 MB, 3 req, 6 ms    | 7 KB        | 148      | directory, LOD f15                           |
+| z16 street, San Francisco            | lod         | 0.35 MB, 16 req, 27 ms     | 0.03 MB, 3 req, 15 ms   | 7 KB        | 148      | LOD f15                                      |
+| z16 street, San Francisco            | lod_tiledir | 0.13 MB, 4 req, 15 ms      | 0.03 MB, 3 req, 6 ms    | 7 KB        | 148      | directory, LOD f15                           |
 | z16 street, San Francisco            | cogp        | 0.98 MB, 103 req, 1403 ms  | 0.00 MB, 0 req, 34 ms   | 6 KB        | 148      | level 12, 154 rows read                      |
 | z16 street, San Francisco            | pmtiles     | 0.13 MB, 2 req, 342 ms     | 0.12 MB, 1 req, 117 ms  | 269 KB      | 147      | overzoomed from z14                          |
-| z17 beyond finest LOD, San Francisco | lod         | 0.42 MB, 16 req, 19 ms     | 0.16 MB, 3 req, 10 ms   | 1 KB        | 15       | primary WKB geometry                         |
-| z17 beyond finest LOD, San Francisco | lod_tiledir | 0.42 MB, 16 req, 15 ms     | 0.33 MB, 11 req, 11 ms  | 1 KB        | 15       | primary WKB geometry                         |
+| z17 beyond finest LOD, San Francisco | lod         | 0.35 MB, 16 req, 20 ms     | 0.07 MB, 3 req, 9 ms    | 1 KB        | 15       | primary WKB geometry                         |
+| z17 beyond finest LOD, San Francisco | lod_tiledir | 0.35 MB, 16 req, 18 ms     | 0.07 MB, 3 req, 7 ms    | 1 KB        | 15       | primary WKB geometry                         |
 | z17 beyond finest LOD, San Francisco | cogp        | 0.96 MB, 95 req, 1359 ms   | 0.00 MB, 0 req, 30 ms   | 1 KB        | 15       | level 12, 15 rows read                       |
 | z17 beyond finest LOD, San Francisco | pmtiles     | 0.13 MB, 2 req, 376 ms     | 0.12 MB, 1 req, 106 ms  | 269 KB      | 14       | overzoomed from z14                          |
 
@@ -169,12 +168,12 @@ runs):
 
 | pan                             | impl        | transferred | requests | time    | features |
 | ------------------------------- | ----------- | ----------- | -------- | ------- | -------- |
-| z13 San Francisco, 4 tiles east | lod         | 2.00 MB     | 42       | 285 ms  | 27,745   |
-| z13 San Francisco, 4 tiles east | lod_tiledir | 1.16 MB     | 19       | 165 ms  | 27,745   |
+| z13 San Francisco, 4 tiles east | lod         | 1.74 MB     | 42       | 266 ms  | 27,745   |
+| z13 San Francisco, 4 tiles east | lod_tiledir | 0.90 MB     | 19       | 167 ms  | 27,745   |
 | z13 San Francisco, 4 tiles east | cogp        | 2.01 MB     | 171      | 3131 ms | 27,761   |
 | z13 San Francisco, 4 tiles east | pmtiles     | 0.34 MB     | 5        | 689 ms  | 11,661   |
-| z15 Manhattan, 4 tiles east     | lod         | 0.77 MB     | 35       | 73 ms   | 3,047    |
-| z15 Manhattan, 4 tiles east     | lod_tiledir | 0.47 MB     | 17       | 48 ms   | 3,047    |
+| z15 Manhattan, 4 tiles east     | lod         | 0.49 MB     | 31       | 60 ms   | 3,047    |
+| z15 Manhattan, 4 tiles east     | lod_tiledir | 0.33 MB     | 17       | 43 ms   | 3,047    |
 | z15 Manhattan, 4 tiles east     | cogp        | 1.47 MB     | 158      | 7108 ms | 3,051    |
 | z15 Manhattan, 4 tiles east     | pmtiles     | 0.32 MB     | 5        | 630 ms  | 2,875    |
 
@@ -204,37 +203,39 @@ two attributes of every row group whose bbox statistics touch the tile):
 ### Findings
 
 **Where this matches PMTiles.** The coarse LODs sit in one prefix row group,
-so the z3 tile is 0.24 MB in one request and z5 is 0.24 MB in four; the
-PMTiles archive has no tiles below z6. At z6 we read 0.08 MB to PMTiles'
-0.11 MB, with 2,049 buildings to its 3,620. Without an LOD the cost is orders
+so the z3 tile is 0.22 MB in one request and z5 is 0.29 MB in three; the
+PMTiles archive has no tiles below z6. At z6 we read 0.17 MB to PMTiles'
+0.11 MB, with 2,049 buildings to its 3,620; on the earlier file this tile
+was 0.08 MB, and the difference is the refinement cost model, which with
+smaller LOD leaves now judges the bbox reads not worth it there. Without an LOD the cost is orders
 of magnitude higher: a plain sorted GeoParquet would read 7.7 MB to 5 GB per
 tile. COGP is behind us on every tile but the z13 city tiles, where through
-the page indexes it reads about the same bytes (1.49 MB to our 1.56 in San
-Francisco, 1.34 to 1.24 in Los Angeles) in 4 times the requests; through the
-directory we read half. Elsewhere it reads 1.4 to 12 times our page-index
+the page indexes it reads somewhat more bytes (1.49 MB to our 1.39 in San
+Francisco, 1.34 to 1.09 in Los Angeles) in 4 to 5 times the requests;
+through the directory we read a third. Elsewhere it reads 1.4 to 12 times our page-index
 bytes in 5 to 42 times our requests, and its coarse tiles hold 10 to 184
 buildings.
 
 **Where it does not.** From z8 up, leaving out the two near-empty tiles, a
-cold tile through the page indexes costs 2.6 to 8.3 times PMTiles' bytes
-(median 4.8) and 5.5 to 18 times its requests. Through the directory the
-same tiles cost 1.2 to 5.3 times PMTiles' bytes (median 2.7): 1.2 to 2.8
-times on street tiles (z14 to z16) in 4 to 9 requests, 3.2 to 3.5 times on
-the z13 city tiles in 8 or 9, and 5.3 times at z9 Atlanta in 20, where a
+cold tile through the page indexes costs 2.5 to 7.3 times PMTiles' bytes
+(median 4.0) and 3.5 to 15.5 times its requests. Through the directory the
+same tiles cost 1.0 to 4.8 times PMTiles' bytes (median 2.4): 1.0 to 2.5
+times on street tiles (z14 to z16) in 4 to 9 requests, 2.5 to 2.8 times on
+the z13 city tiles in 8, and 4.8 times at z9 Atlanta in 21, where a
 metro tile wants thousands of rows spread over many pages. At the
 near-empty desert and Sandhills tiles PMTiles reads about 10 KB; the page
-indexes read 0.24 to 0.27 MB and the directory 0.14 MB (desert) and one
+indexes read 0.21 to 0.25 MB and the directory 0.14 MB (desert) and one
 40 KB directory read (Sandhills). Warm, the requests stay apart: revisiting
-a tile costs 3 to 19 requests through either path (none for the empty tile),
+a tile costs 3 to 20 requests through either path (none for the empty tile),
 the LOD data pages again, against one. A four-tile pan at z15 in Manhattan is
-0.47 MB in 17 requests through the directory, 0.77 MB in 35 through the page
+0.33 MB in 17 requests through the directory, 0.49 MB in 31 through the page
 indexes, and 0.32 MB in 5 for PMTiles. Opening costs
-0.93 MB in five requests, 1.84 MB in nine with the directory, against
+0.94 MB in six requests, 1.81 MB in ten with the directory, against
 PMTiles' 16 KB in one.
 
 What a cold tile spends its bytes on depends on zoom. Through the page
 indexes, at the z13 city tiles the bbox refinement reads are the largest
-item, about 750 KB of San Francisco's 1.56 MB: a bbox page holds 7,000 rows
+item, about 750 KB of San Francisco's 1.39 MB: a bbox page holds 7,000 rows
 and the Hilbert order crosses the tile several times, so a quarter of the
 candidate rows are in the tile. On street tiles (z14 to z17) the indexes
 dominate: a tile touches three or four row groups whose bbox statistics
@@ -256,10 +257,10 @@ a tile skips the bbox statistics, page indexes and refinement reads. It is
 bound to one write of the file by size, footer length and footer hash, and
 nothing in the file refers to it; without it, or with a stale one, the
 reader goes through the page indexes and draws the same features. For this
-file it is 219.6 MB in 3,535 row groups of about 64 KB, with a 913 KB footer,
-and covers z7 to z16; the build took 40 minutes. Row groups never span a
-zoom, so footer statistics pick one and a lookup is one range, at the cost
-of the 913 KB footer read once per session; 75 large groups with page
+file it is 212.5 MB in 3,400 row groups of about 64 KB, with an 878 KB
+footer, and covers z7 to z16; the build takes about 40 minutes. Row groups
+never span a zoom, so footer statistics pick one and a lookup is one range,
+at the cost of the 878 KB footer read once per session; 75 large groups with page
 indexes open for 30 KB, but a lookup is then three dependent round trips.
 The builder holds an LOD's entries in memory and loops in Python, so large
 polygons cost in proportion to their extent in tiles, and antimeridian,
@@ -276,12 +277,12 @@ TILEDIR_URL=http://localhost:8097/buildings.parquet.tiledir.parquet \
 ```
 
 **Where this leaves the comparison.** On Parquet's own indexes a cold tile
-costs a median 4.8 times PMTiles' bytes and 5.5 to 18 times its requests from
-z8 up. Through the directory it costs a median 2.7 times the bytes, 1.2 to
-2.8 times at street zooms, in 4 to 9 requests against 2, and a pan of four
-street tiles 1.5 times PMTiles' bytes in 17 requests against 5 (2.4 times in
-35 through the page indexes). That is after
-an open of 1.84 MB against 16 KB. The floor is a data read per leaf per row
+costs a median 4.0 times PMTiles' bytes and 3.5 to 15.5 times its requests
+from z8 up. Through the directory it costs a median 2.4 times the bytes, 1.0
+to 2.5 times at street zooms, in 4 to 9 requests against 2, and a pan of
+four street tiles the same bytes as PMTiles in 17 requests against 5 (1.5
+times in 31 through the page indexes). That is after an open of 1.81 MB
+against 16 KB. The floor is a data read per leaf per row
 group a tile touches, so request parity with a format that stores each tile
 as one blob is out of reach while tiles are assembled from column chunks. If
 the map is the product and the data is secondary, build PMTiles. This layout
@@ -293,14 +294,16 @@ the finest zoom.
 
 **Next steps, by effect.**
 
-1. Shrink the opens: 0.93 MB for the file, nearly all its 924 KB footer,
-   and 0.91 MB for the directory footer. The footer is 9,150 column chunks
+1. Shrink the opens: 0.94 MB for the file, nearly all its 922 KB footer,
+   and 0.88 MB for the directory footer. The footer is 9,150 column chunks
    at about 100 bytes each: 257 KB of nested leaf paths, 126 KB of size
    statistics pyarrow cannot be told to omit, 77 KB of encoding statistics.
    Fewer, larger row groups shrink it in proportion but enlarge every
    per-tile index read; larger directory groups trade lookup bytes for
    footer bytes.
 2. Build the directory in vectorized or compiled code, with bounded memory.
+3. Retune the refinement cost model: with LOD leaves a third smaller it now
+   skips the bbox reads at z5 and z6, which doubled the z6 tile's bytes.
 
 The `lod` file is public; the demo above reads it directly with `?url=`:
 

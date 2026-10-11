@@ -222,18 +222,16 @@ groups of about 64 KB that never span a zoom.
 The full method and tables are in [docs/benchmarks.md](docs/benchmarks.md):
 the same 155.6 million US building footprints served as this layout, as
 Kanahiro's COGP, as the production PMTiles archive, and as plain sorted
-GeoParquet. Those numbers were taken on a file written before the writer
-gained `BYTE_STREAM_SPLIT` and zstd level 9, which cut LOD geometry bytes by
-about a third; they are being re-measured. On that file, from a cold reader:
+GeoParquet. From a cold reader on the 24.2 GB national file:
 
-- A national view (z3) is 0.24 MB in one request; the PMTiles archive has no
+- A national view (z3) is 0.22 MB in one request; the PMTiles archive has no
   tiles below z6.
-- Street tiles (z15 to z16) are 0.3 to 0.5 MB in 16 to 18 requests through
-  the page indexes, 0.16 to 0.25 MB in 4 or 5 through the tile directory,
+- Street tiles (z15 to z16) are 0.3 to 0.4 MB in 16 to 18 requests through
+  the page indexes, 0.13 to 0.21 MB in 4 or 5 through the tile directory,
   against 0.06 to 0.13 MB in 2 for PMTiles.
-- City tiles (z13) are 1.2 to 1.6 MB; COGP reads about the same bytes there
-  in four times the requests, and more everywhere else.
-- Opening costs 0.93 MB, nearly all footer, against 16 KB for PMTiles.
+- City tiles (z13) are 1.1 to 1.4 MB; COGP reads 1.3 to 1.5 MB there in four
+  to five times the requests, and more everywhere else.
+- Opening costs 0.94 MB, nearly all footer, against 16 KB for PMTiles.
 - A plain sorted GeoParquet would read 8 MB to 5 GB per tile.
 
 The floor is one data read per leaf per row group a tile touches, so request
