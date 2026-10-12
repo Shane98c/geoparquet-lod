@@ -81,7 +81,7 @@ interface Pending {
  */
 export const coalescing = (
   source: RangeSource,
-  { maxGap = 32 * 1024, maxRun = 4 * 1024 * 1024 } = {},
+  { maxGap = 32 * 1024, minGap = 4 * 1024, gapRatio = 0.5, maxRun = 4 * 1024 * 1024 } = {},
 ): RangeSource => {
   let pending: Pending[] = []
   let scheduled = false
@@ -93,6 +93,7 @@ export const coalescing = (
     let run: Pending[] = []
     let runStart = 0
     let runEnd = 0
+    let useful = 0
     const send = () => {
       if (!run.length) return
       const members = run
@@ -118,17 +119,18 @@ export const coalescing = (
         (error) => members.forEach((m) => m.reject(error)),
       )
       run = []
+      useful = 0
     }
     for (const p of batch) {
-      if (
-        run.length &&
-        (p.start - runEnd > maxGap || Math.max(runEnd, p.end) - runStart > maxRun)
-      ) {
+      // a gap is worth skipping only when it is small next to the bytes already wanted
+      const gap = Math.min(maxGap, Math.max(minGap, useful * gapRatio))
+      if (run.length && (p.start - runEnd > gap || Math.max(runEnd, p.end) - runStart > maxRun)) {
         send()
       }
       if (!run.length) runStart = p.start
       runEnd = run.length ? Math.max(runEnd, p.end) : p.end
       run.push(p)
+      useful += p.end - p.start
     }
     send()
   }

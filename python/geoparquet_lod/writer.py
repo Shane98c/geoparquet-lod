@@ -50,8 +50,29 @@ from .thinning import Context, Thin, default_thinning, describe
 
 LOD_KEY = 'lod_columns'
 KEY_COLUMN = 'hilbert'
-KEY_DEPTH = 16
-KEY_FIELD = pa.field(KEY_COLUMN, pa.uint32(), nullable=True)
+KEY_DEPTH = 24
+KEY_FIELD = pa.field(KEY_COLUMN, pa.int64(), nullable=True)
+
+
+def hilbert_key(x: np.ndarray, y: np.ndarray, depth: int) -> np.ndarray:
+    """Standard Hilbert index (xy2d) of cells (x, y) on a 2^depth grid."""
+    x = np.asarray(x, dtype=np.int64).copy()
+    y = np.asarray(y, dtype=np.int64).copy()
+    n = 1 << depth
+    d = np.zeros(len(x), dtype=np.int64)
+    s = n >> 1
+    while s > 0:
+        rx = (x & s) > 0
+        ry = (y & s) > 0
+        d += s * s * ((3 * rx.astype(np.int64)) ^ ry.astype(np.int64))
+        flip = ~ry & rx
+        x = np.where(flip, n - 1 - x, x)
+        y = np.where(flip, n - 1 - y, y)
+        x, y = np.where(~ry, y, x), np.where(~ry, x, y)
+        s >>= 1
+    return d
+
+
 # columns the writer computes carry a prefix no source column uses; thinnings see them unprefixed
 THINNING_COLUMNS = ('id', 'cx', 'cy', 'diag', 'area', 'nv', 'u')
 LOD_VERSION = '0.1.0'
@@ -334,17 +355,15 @@ def write(
     ).fetchone()
     if xmin is None:
         raise ValueError(f'{src} has no non-empty geometries')
-    # Hilbert index at depth KEY_DEPTH of the Web Mercator cell holding the bbox centre, cells
-    # numbered as XYZ tiles are, so a tile at any zoom up to the depth is one key interval
+    # the Web Mercator cell at depth KEY_DEPTH holding the bbox centre, cells numbered as XYZ
+    # tiles are; the Hilbert index of that cell is computed in numpy and the rows sorted by it
     cells = 1 << KEY_DEPTH
     lon = f'(ST_XMin({geometry}) + ST_XMax({geometry})) / 2'
     lat = f'radians(greatest(-{MAX_LATITUDE}, least({MAX_LATITUDE}, (ST_YMin({geometry}) + ST_YMax({geometry})) / 2)))'
-    key = (
-        f'ST_Hilbert(least({cells - 1}, greatest(0, floor(({lon} + 180) / 360 * {cells}))), '
-        f'least({cells - 1}, greatest(0, floor((1 - ln(tan({lat}) + 1 / cos({lat})) / pi()) / 2 * {cells}))), '
-        f'{{min_x: 0, min_y: 0, max_x: {cells - 1}, max_y: {cells - 1}}}::BOX_2D)'
-    )
+    cell_x = f'least({cells - 1}, greatest(0, floor(({lon} + 180) / 360 * {cells})))::BIGINT'
+    cell_y = f'least({cells - 1}, greatest(0, floor((1 - ln(tan({lat}) + 1 / cos({lat})) / pi()) / 2 * {cells})))::BIGINT'
     sorted_path = out.with_suffix('.sorted.parquet')
+    unsorted_path = out.with_suffix('.unsorted.parquet')
     log(f'sorting {src}')
     passthrough = '* EXCLUDE (bbox)' if 'bbox' in source_schema.names else '*'
     con.execute(
@@ -357,12 +376,34 @@ def write(
                 CASE WHEN {valid} THEN ST_Area({geometry}) END AS __area,
                 CASE WHEN {valid} THEN ST_NPoints({geometry}) END AS __nv,
                 CASE WHEN {valid} THEN {{xmin: ST_XMin({geometry}), ymin: ST_YMin({geometry}), xmax: ST_XMax({geometry}), ymax: ST_YMax({geometry})}} END AS __bbox,
-                CASE WHEN {valid} THEN {key} END AS __h,
+                CASE WHEN {valid} THEN {cell_x} END AS __kx,
+                CASE WHEN {valid} THEN {cell_y} END AS __ky,
                 {passthrough}
-            FROM (SELECT * FROM read_parquet('{src}') ORDER BY CASE WHEN {valid} THEN {key} END)
+            FROM read_parquet('{src}')
+        ) TO '{unsorted_path}' (FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE {row_group_rows})
+    """
+    )
+    cells_table = con.execute(
+        f"SELECT __id, __kx, __ky FROM '{unsorted_path}' WHERE __kx IS NOT NULL"
+    ).fetchnumpy()
+    keys = pa.table(
+        {
+            '__id': cells_table['__id'],
+            '__h': hilbert_key(cells_table['__kx'], cells_table['__ky'], KEY_DEPTH),
+        }
+    )
+    con.register('keys', keys)
+    con.execute(
+        f"""
+        COPY (
+            SELECT u.* EXCLUDE (__kx, __ky), k.__h
+            FROM '{unsorted_path}' u LEFT JOIN keys k USING (__id)
+            ORDER BY k.__h NULLS LAST
         ) TO '{sorted_path}' (FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE {row_group_rows})
     """
     )
+    unsorted_path.unlink()
+    del keys, cells_table
     n_rows = con.execute(f"SELECT count(*) FROM '{sorted_path}'").fetchone()[0]
     log(f'  {n_rows:,} rows sorted, {time.time() - t0:.0f}s')
     from .tiledir import is_crs84
@@ -544,7 +585,10 @@ def write(
         compression='zstd',
         compression_level=compression_level,
         use_dictionary=False,
-        column_encoding={leaf: 'BYTE_STREAM_SPLIT' for leaf in coordinate_leaves},
+        column_encoding={
+            **{leaf: 'BYTE_STREAM_SPLIT' for leaf in coordinate_leaves},
+            KEY_COLUMN: 'DELTA_BINARY_PACKED',
+        },
         write_statistics=['bbox.xmin', 'bbox.ymin', 'bbox.xmax', 'bbox.ymax', KEY_COLUMN],
         write_page_index=True,
         write_batch_size=batch_rows,
@@ -588,7 +632,7 @@ def write(
         out_table = pa.table(
             {
                 'bbox': _bbox_float32(cols['__bbox']),
-                KEY_COLUMN: cols['__h'].cast(pa.uint32()),
+                KEY_COLUMN: cols['__h'].cast(pa.int64()),
                 'lod': lod,
                 **{f.name: cols[f.name] for f in rest},
                 geometry: cols[geometry],
