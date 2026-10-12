@@ -75,7 +75,7 @@ export interface PrimaryRows {
 const REFINE_MARGIN = 1.5
 
 /** Below this many bytes across an LOD's leaves, a row group's chunks are read whole rather than through page indexes. */
-const WHOLE_CHUNK_BYTES = 256 * 1024
+const WHOLE_CHUNK_BYTES = 64 * 1024
 
 /** Compressed bytes of decoded bbox pages kept for later tiles; the oldest go first. */
 const PAGE_CACHE_BYTES = 4 * 1024 * 1024

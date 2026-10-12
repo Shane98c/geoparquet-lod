@@ -201,7 +201,7 @@ type, into that LOD's field.
 4. Candidate pages: for each bbox leaf, the pages whose statistics admit
    the tile; intersect the four row ranges.
 5. The leaves to read are the LOD's coordinate leaf and one leaf per wanted
-   attribute. If their chunks in the row group total under 256 KB, the
+   attribute. If their chunks in the row group total under 64 KB, the
    reference reader reads them whole and keeps the decoded values for the
    reader's life. Otherwise it reads only the pages overlapping the
    candidate rows, merging adjacent pages into one range per leaf, and keeps
