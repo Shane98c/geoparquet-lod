@@ -46,7 +46,7 @@ export interface LodMetadata {
   key?: { column: string; depth: number }
   encoding: string
   pack_version: number
-  attributes: { name: string; type: string }[]
+  attributes: { name: string; type: string; values?: string[] }[]
   thinning: Record<string, unknown>
   lods: Record<string, Omit<Lod, 'name'>>
 }
@@ -141,7 +141,11 @@ export class LodReader {
       }
     }
     if (!lod.key) throw new Error(`${LOD_KEY} file stores no key column`)
-    this.fields = lod.attributes.map((a) => ({ name: a.name, kind: attributeKind(a.type) }))
+    this.fields = lod.attributes.map((a) =>
+      a.values
+        ? { name: a.name, kind: 'enum' as const, values: a.values }
+        : { name: a.name, kind: attributeKind(a.type) },
+    )
     this.lod = lod
     this.lods = Object.fromEntries(
       Object.entries(lod.lods).map(([name, child]) => [name, { ...child, name }]),

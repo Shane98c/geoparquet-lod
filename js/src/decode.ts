@@ -7,11 +7,13 @@
 
 import type { GeometryType } from './geometry.js'
 
-export type AttributeKind = 'int' | 'float32' | 'float64' | 'bool' | 'string'
+export type AttributeKind = 'int' | 'float32' | 'float64' | 'bool' | 'string' | 'enum'
 
 export interface AttributeField {
   name: string
   kind: AttributeKind
+  /** The value table of an `enum` attribute, indexed by the packed value. */
+  values?: string[]
 }
 
 export interface DecodedCopy {
@@ -124,6 +126,9 @@ const attributes = (
         break
       case 'string':
         strings.push([out, i, v])
+        break
+      case 'enum':
+        out[i] = fields[i].values?.[v] ?? null
         break
     }
   }

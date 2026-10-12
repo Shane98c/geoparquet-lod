@@ -40,6 +40,7 @@ def buildings(tmp_path):
                 [None if i % 7 == 0 else int(i % 5 + 1) for i in range(n)], pa.int32()
             ),
             'name': pa.array([f'b{i}' for i in range(n)]),
+            'zone': pa.array([f'zone{i % 4}' for i in range(n)]),
             'geometry': pa.array([shapely.to_wkb(p) for p in polys], pa.binary()),
         }
     )
@@ -345,16 +346,24 @@ def test_reader_finds_straddler_copies(buildings, tmp_path):
     from geoparquet_lod.spill import straddlers
 
     out = write(
-        buildings, tmp_path / 'spill.parquet', carry=['floors'], workers=1, log=lambda *_: None
+        buildings,
+        tmp_path / 'spill.parquet',
+        carry=['floors', 'zone'],
+        workers=1,
+        log=lambda *_: None,
     )
     meta = json.loads(pq.read_schema(out).metadata[b'geo'])['lod_columns']
     finest = max(meta['zooms'])
+    zone = next(a for a in meta['attributes'] if a['name'] == 'zone')
+    assert zone['values'] == ['zone0', 'zone1', 'zone2', 'zone3'], (
+        'few distinct strings get a value table'
+    )
     t = pq.read_table(out, columns=['geometry'])
     bounds = shapely.bounds(shapely.from_wkb(t.column('geometry').to_numpy(zero_copy_only=False)))
     rows, tiles = straddlers(bounds[:, 0], bounds[:, 1], bounds[:, 2], bounds[:, 3], finest)
     n = 2**finest
     cases = [
-        {'z': finest, 'x': int(tl // n), 'y': int(tl % n), 'id': int(r), 'attribute': 'floors'}
+        {'z': finest, 'x': int(tl // n), 'y': int(tl % n), 'id': int(r), 'attribute': 'zone'}
         for r, tl in zip(rows[:20], tiles[:20], strict=True)
     ]
     (tmp_path / 'cases.json').write_text(json.dumps(cases))

@@ -105,12 +105,13 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
     # a sample of every LOD: non-empty parts, closed rings
     head = f.read_row_group(0, columns=[column]).slice(0, sample_rows)
     fields = [pa.field(a['name'], pa.type_for_alias(a['type'])) for a in lod.get('attributes', [])]
+    dictionaries = {a['name']: a['values'] for a in lod.get('attributes', []) if 'values' in a}
     checked = {}
     for name, child in lods.items():
         values = head.column(column).combine_chunks().field(name)
         shown = values.filter(values.is_valid())
         for blob in shown.slice(0, 200).to_pylist():
-            u = Unpacker(blob, child['geometry_type'], fields)
+            u = Unpacker(blob, child['geometry_type'], fields, dictionaries)
             row = u.row()
             if u.pos != len(blob):
                 raise ValidationError(f'lod {name}: a packed row has trailing bytes')

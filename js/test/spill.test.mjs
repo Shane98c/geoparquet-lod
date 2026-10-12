@@ -24,6 +24,7 @@ for (const { z, x, y, id, attribute = 'h' } of cases) {
   assert.ok(at >= 0, `row ${id} reaches tile ${z}/${x}/${y} but was not read`)
   assert.ok(Array.isArray(coords[at]) && coords[at].length, 'the copy carries geometry')
   assert.ok(columns[attribute][at] !== undefined, 'the copy carries its attributes')
+  if (attribute === 'zone') assert.match(columns[attribute][at], /^zone\d$/)
   copies++
   const mvt = await renderTile(reader, z, x, y)
   assert.ok(mvt.byteLength > 0)

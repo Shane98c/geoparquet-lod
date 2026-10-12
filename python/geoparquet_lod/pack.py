@@ -14,7 +14,9 @@ varints knowing the structure and then takes string payloads in turn.
                point: zigzag(x) zigzag(y)
     attrs   := presence bitmap (one varint, bit i for attribute i), then each
                present value: integers zigzag, float32 as its bit pattern,
-               float64 as its bit pattern, bool 0/1, string as its byte length
+               float64 as its bit pattern, bool 0/1, string as its byte length,
+               or for a string attribute with a `values` table in the
+               metadata the value's index in that table
     spill   := count, per copy: tile (zoom << 48 | x * 2^zoom + y), file row
                index, own, attrs
 
@@ -124,7 +126,7 @@ def _point_values(x: np.ndarray, y: np.ndarray):
     return out, np.full(len(x), 2, np.int64)
 
 
-def _attr_values(fields: list[pa.Field], arrays: dict[str, pa.Array], n: int):
+def _attr_values(fields: list[pa.Field], arrays: dict[str, pa.Array], n: int, dictionaries=None):
     """Varint values of the attribute block per row, values per row, and the
     string payload bytes per row (lengths and a flat byte buffer)."""
     present = np.zeros(n, np.uint64)
@@ -136,7 +138,12 @@ def _attr_values(fields: list[pa.Field], arrays: dict[str, pa.Array], n: int):
         valid = arr.is_valid().to_numpy(zero_copy_only=False)
         present |= valid.astype(np.uint64) << np.uint64(i)
         t = f.type
-        if pa.types.is_integer(t):
+        if dictionaries and f.name in dictionaries:
+            import pyarrow.compute as pc
+
+            codes = pc.index_in(arr, value_set=pa.array(dictionaries[f.name], arr.type))
+            vals = codes.fill_null(0).to_numpy(zero_copy_only=False).astype(np.uint64)
+        elif pa.types.is_integer(t):
             vals = zigzag(np.where(valid, arr.fill_null(0).to_numpy(zero_copy_only=False), 0))
         elif pa.types.is_floating(t):
             if pa.types.is_float64(t):
@@ -193,6 +200,7 @@ def pack(
     fields: list[pa.Field],
     attrs: dict[str, pa.Array],
     spill=None,
+    dictionaries: dict[str, list] | None = None,
 ) -> pa.Array:
     """Packed blobs for one batch: `parts` the rows' geometry (ragged arrays
     for shapes, (x, y) for points), `attrs` the carried attribute arrays, and
@@ -202,7 +210,7 @@ def pack(
     depth = FAMILY_DEPTH[family]
     n = len(parts[0]) if family == 'Point' else len(parts[0]) - 1
     own, own_len = _point_values(*parts) if family == 'Point' else _segment_values(parts, depth)
-    av, a_len, s_len, strings = _attr_values(fields, attrs, n)
+    av, a_len, s_len, strings = _attr_values(fields, attrs, n, dictionaries)
     blocks = [(own, own_len), (av, a_len)]
     if spill is None:
         spill = (
@@ -218,7 +226,7 @@ def pack(
         sown, sown_len = (
             _point_values(*sparts) if family == 'Point' else _segment_values(sparts, depth)
         )
-        sav, sa_len, ss_len, sstrings = _attr_values(fields, sattrs, m)
+        sav, sa_len, ss_len, sstrings = _attr_values(fields, sattrs, m, dictionaries)
         # per entry: tile, id, own, attrs
         e_len = 2 + sown_len + sa_len
         e_start = np.concatenate([[0], np.cumsum(e_len)])
@@ -310,11 +318,12 @@ def _merge_strings(n, own_strings, own_len, spill_strings, spill_len, counts):
 class Unpacker:
     """Decoder of one packed row, for validation and tests."""
 
-    def __init__(self, blob: bytes, family: str, fields: list[pa.Field]):
+    def __init__(self, blob: bytes, family: str, fields: list[pa.Field], dictionaries=None):
         self.b = blob
         self.pos = 0
         self.family = family
         self.fields = fields
+        self.dictionaries = dictionaries or {}
         self.strings: list[tuple[int, int]] = []  # (slot, length) in order
 
     def varint(self) -> int:
@@ -358,7 +367,9 @@ class Unpacker:
                 continue
             v = self.varint()
             t = f.type
-            if pa.types.is_integer(t):
+            if f.name in self.dictionaries:
+                out[f.name] = self.dictionaries[f.name][v]
+            elif pa.types.is_integer(t):
                 out[f.name] = unzigzag(v)
             elif pa.types.is_float64(t):
                 out[f.name] = float(np.array([v], np.uint64).view(np.float64)[0])

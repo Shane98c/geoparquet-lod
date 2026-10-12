@@ -57,6 +57,7 @@ from .thinning import Context, Thin, default_thinning, describe
 LOD_KEY = 'lod_columns'
 KEY_COLUMN = 'hilbert'
 KEY_DEPTH = 24
+DICTIONARY_MAX = 256
 KEY_FIELD = pa.field(KEY_COLUMN, pa.int64(), nullable=True)
 
 
@@ -513,6 +514,16 @@ def write(
         f'SELECT {slim}, (hash({geometry}) % 1000000007) / 1000000007.0 AS u '
         f"FROM '{sorted_path}' WHERE __cx IS NOT NULL ORDER BY __id"
     ).to_arrow_table()
+    # a string attribute with few distinct values is packed as an index into a value table
+    dictionaries: dict[str, list] = {}
+    for a in attributes:
+        if pa.types.is_string(a.type) or pa.types.is_large_string(a.type):
+            distinct = con.execute(
+                f"SELECT DISTINCT {a.name} FROM '{sorted_path}' WHERE {a.name} IS NOT NULL "
+                f'ORDER BY 1 LIMIT {DICTIONARY_MAX + 1}'
+            ).fetchall()
+            if len(distinct) <= DICTIONARY_MAX:
+                dictionaries[a.name] = [v[0] for v in distinct]
     ctx = Context(tuple(zooms), zooms[-1] if complete_from is None else complete_from, 512, degrees)
     # bit i of a row's levels is set when it is shown at zooms[i]; null or empty geometry is shown nowhere
     levels = np.zeros(n_rows, dtype=np.int64)
@@ -666,7 +677,14 @@ def write(
         else {'zoom': zooms[prefix_level], 'row_group_end': prefix_end},
         'encoding': ENCODING,
         'pack_version': PACK_VERSION,
-        'attributes': [{'name': a.name, 'type': str(a.type)} for a in attributes],
+        'attributes': [
+            {
+                'name': a.name,
+                'type': str(a.type),
+                **({'values': dictionaries[a.name]} if a.name in dictionaries else {}),
+            }
+            for a in attributes
+        ],
         'thinning': describe(thinning),
         'lods': {
             b['name']: {
@@ -801,7 +819,7 @@ def write(
             )
             if spill is not None:
                 mask = mask | (spill[0] > 0)
-            blobs = pack(b['geometry_type'], parts, attributes, attrs, spill)
+            blobs = pack(b['geometry_type'], parts, attributes, attrs, spill, dictionaries)
             arrays.append(pc.if_else(pa.array(mask), blobs, pa.scalar(None, pa.binary())))
         lod = pa.StructArray.from_arrays(arrays, [b['name'] for b in lod_plan])
         cols = {name: table.column(name) for name in table.column_names}
