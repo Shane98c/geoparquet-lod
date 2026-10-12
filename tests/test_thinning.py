@@ -29,3 +29,30 @@ def test_density_budget_holds_across_zooms():
         _, counts = np.unique(ctx.tile_of(kept, zoom), return_counts=True)
         assert counts.max() <= 5_000 * 1.05, f'zoom {zoom} busiest tile {counts.max()}'
     assert kept.num_rows > 1_000, 'the coarsest zoom still shows the countryside'
+
+
+def test_chain_drop_smallest_keeps_largest_per_tile():
+    from geoparquet_lod.thinning import chain, drop_smallest, tiny_polygons
+
+    rng = np.random.default_rng(1)
+    n = 20_000
+    rows = pa.table(
+        {
+            'id': np.arange(1, n + 1),
+            'cx': rng.random(n) * 0.05,
+            'cy': rng.random(n) * 0.05,
+            'diag': np.full(n, 1e-4),
+            'area': rng.random(n) * 1e-8,
+            'u': rng.random(n),
+        }
+    )
+    ctx = Context((0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12), 12, 512, True)
+    thin = chain(tiny_polygons(1.5), drop_smallest(500))
+    assert thin.placeholder_pixels == 1.5
+    kept = thin(rows, 12, ctx)
+    _, counts = np.unique(ctx.tile_of(kept, 12), return_counts=True)
+    assert counts.max() <= 500
+    # what survives is the largest, measured by the area tiny_polygons carried
+    reduced = tiny_polygons(1.5)(rows, 12, ctx)
+    threshold = np.sort(reduced.column('area').to_numpy())[-500]
+    assert kept.column('area').to_numpy().min() >= threshold

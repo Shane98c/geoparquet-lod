@@ -53,9 +53,11 @@ few lines each and meant to be copied:
 | `tiny_polygons(0.5)`            | inspired by tippecanoe's tiny-polygon reduction: small areas accumulate and one half-pixel square is kept per square of area | area-true coverage; nearly empty at national scale |
 | `importance('population', 300)` | keep the top N per tile by a column                                                                                          | named places, ranked facilities                    |
 | `cluster(8, count='count')`     | one representative per 8 px cell carrying how many it stands for                                                             | dense points                                       |
-| `density_budget(60_000)`        | cap the busiest tile; flattens dense places                                                                                  | bounding the largest tiles                         |
+| `density_budget(60_000)`        | cap the busiest tile with a uniform sample; flattens dense places                                                            | bounding the largest tiles                         |
+| `drop_smallest(40_000)`         | a tile over budget keeps its largest by area (tippecanoe `--drop-smallest-as-needed`)                                        | buildings, after `tiny_polygons`                   |
 | `only('risk > 0', inner)`       | restrict eligibility before `inner`                                                                                          | partial datasets                                   |
 | `combine(a, b)`                 | keep what any part keeps                                                                                                     | size plus sample, etc.                             |
+| `chain(a, b)`                   | apply `b` to what `a` kept                                                                                                   | `tiny_polygons` then `drop_smallest`               |
 
 Anything the built-ins cannot express is a short function of a table. The
 writer's other options (zooms, the complete zoom, prefix zoom, row group and

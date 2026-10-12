@@ -159,6 +159,16 @@ def density_budget(budget: int = 60_000) -> Thin:
     return thin
 
 
+def drop_smallest(budget: int = 40_000) -> Thin:
+    """Tippecanoe's `--drop-smallest-as-needed`: a tile over `budget` rows
+    keeps its `budget` largest by `area`. After `tiny_polygons` the area is
+    the carried sum, so a square standing for a block outranks one house."""
+
+    thin = importance('area', budget)
+    thin.__name__ = f'drop_smallest({budget})'
+    return thin
+
+
 def importance(column: str, per_tile: int = 1000, descending: bool = True) -> Thin:
     """Keep the top `per_tile` rows of each tile by `column`."""
 
@@ -256,6 +266,21 @@ def combine(*parts: Thin) -> Thin:
         return base
 
     thin.__name__ = 'combine(' + ', '.join(getattr(p, '__name__', 'thin') for p in parts) + ')'
+    sizes = [p.placeholder_pixels for p in parts if hasattr(p, 'placeholder_pixels')]
+    if sizes:
+        thin.placeholder_pixels = max(sizes)
+    return thin
+
+
+def chain(*parts: Thin) -> Thin:
+    """Apply the parts in order, each to what the one before kept."""
+
+    def thin(rows, zoom, ctx):
+        for p in parts:
+            rows = p(rows, zoom, ctx)
+        return rows
+
+    thin.__name__ = 'chain(' + ', '.join(getattr(p, '__name__', 'thin') for p in parts) + ')'
     sizes = [p.placeholder_pixels for p in parts if hasattr(p, 'placeholder_pixels')]
     if sizes:
         thin.placeholder_pixels = max(sizes)

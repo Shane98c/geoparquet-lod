@@ -12,12 +12,19 @@ from .writer import write
 
 
 def parse_thinning(spec: str, where: str | None) -> th.Thin:
-    """`drop[:rate]`, `density[:budget]`, `size[:pixels]`, `tiny[:pixels]`,
+    """`drop[:rate]`, `density[:budget]`, `smallest[:budget]`, `size[:pixels]`, `tiny[:pixels]`,
     `importance:column[:per_tile]`, `cluster[:pixels]`; `+` combines, e.g. `size:4+drop:2.5`;
-    `auto` is the family default. `where` restricts eligibility."""
+    `>` chains, e.g. `tiny:1.5>smallest:40000`; `auto` is the family default. `where` restricts
+    eligibility."""
     if spec == 'auto':
         thin = th.default_thinning('auto')
         return th.only(where, thin) if where else thin
+    stages = [_parse_union(stage) for stage in spec.split('>')]
+    thin = stages[0] if len(stages) == 1 else th.chain(*stages)
+    return th.only(where, thin) if where else thin
+
+
+def _parse_union(spec: str) -> th.Thin:
     parts = []
     for part in spec.split('+'):
         kind, _, rest = part.partition(':')
@@ -25,6 +32,8 @@ def parse_thinning(spec: str, where: str | None) -> th.Thin:
             parts.append(th.drop_rate(float(rest or 2.5)))
         elif kind == 'density':
             parts.append(th.density_budget(int(rest or 60_000)))
+        elif kind == 'smallest':
+            parts.append(th.drop_smallest(int(rest or 40_000)))
         elif kind == 'size':
             parts.append(th.size_threshold(float(rest or 4)))
         elif kind == 'importance':
@@ -36,8 +45,7 @@ def parse_thinning(spec: str, where: str | None) -> th.Thin:
             parts.append(th.cluster(float(rest or 8)))
         else:
             raise click.BadParameter(f'unknown thinning {part!r}')
-    thin = parts[0] if len(parts) == 1 else th.combine(*parts)
-    return th.only(where, thin) if where else thin
+    return parts[0] if len(parts) == 1 else th.combine(*parts)
 
 
 @click.group()
@@ -53,7 +61,7 @@ def cli():
     'thinning_spec',
     default='auto',
     show_default=True,
-    help='auto | drop[:rate] | density[:budget] | size[:pixels] | tiny[:px] | importance:column[:n] | cluster[:px]; join with +',
+    help='auto | drop[:rate] | density[:budget] | smallest[:budget] | size[:pixels] | tiny[:px] | importance:column[:n] | cluster[:px]; + unions, > chains',
 )
 @click.option(
     '--where', default=None, help='SQL predicate; rows failing it are never shown zoomed out'
