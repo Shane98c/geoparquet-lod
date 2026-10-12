@@ -259,7 +259,9 @@ def test_null_override_and_combined_tiny(points, tmp_path):
     ctx = Context((0, 1, 2), 2, 512, True)
     solo = tiny_polygons(2.0)
     both = combine(tiny_polygons(2.0), size_threshold(1e12))
-    square = (2.0 * ctx.resolution(1)) ** 2
+    square = (
+        4.0 * ctx.pixel_unit(rows, 1)[0]
+    )  # a two-pixel square in degrees squared at this latitude
     # four rows make a hair over one square at zoom 1, so sixteen rows keep four representatives
     rows = rows.set_column(
         rows.schema.get_field_index('area'), 'area', pa.array(np.full(n, square / 4 * 1.001))

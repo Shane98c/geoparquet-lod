@@ -1,6 +1,6 @@
 // Bytes and requests per tile for four readers of the same buildings, served from one place:
 // this layout, COGP (@cogp/reader), PMTiles and Esri's SOP reference reader. Expects
-// japan_buildings.{lod3.parquet,cogp.parquet,pmtiles,sop.parquet} under BASE (default
+// japan_buildings.{lod6.parquet,cogp.parquet,pmtiles,sop.parquet} under BASE (default
 // http://localhost:8099/), and the Esri reader bundled for Node first. COGP names another
 // COGP file to measure, such as the one behind COGP's own demo, and LOD another file in this layout:
 //   npx esbuild vendor/esri-sop/index.ts --bundle --platform=node --format=esm --outfile=test/esri-node.mjs
@@ -27,7 +27,7 @@ const features = (buf) => {
 
 const base = process.env.BASE ?? 'http://localhost:8099/'
 const cogpFile = process.env.COGP ?? base + 'japan_buildings.cogp.parquet'
-const lodFile = process.env.LOD ?? base + 'japan_buildings.lod3.parquet'
+const lodFile = process.env.LOD ?? base + 'japan_buildings.lod6.parquet'
 const stats = {}
 const real = globalThis.fetch
 globalThis.fetch = async (input, init) => {

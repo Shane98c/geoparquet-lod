@@ -81,6 +81,9 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
                 raise ValidationError(f'lod {name}: {key} must be an [x, y] pair')
         if min(child['scale']) <= 0:
             raise ValidationError(f'lod {name}: scale must be positive')
+        placeholder = child.get('placeholder')
+        if not (isinstance(placeholder, (int, float)) and placeholder > 0):
+            raise ValidationError(f'lod {name}: placeholder must be a positive width in grid cells')
     prefix = lod.get('prefix')
     if prefix and not (0 <= prefix['row_group_end'] < md.num_row_groups):
         raise ValidationError('prefix row_group_end out of range')

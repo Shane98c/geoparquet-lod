@@ -27,7 +27,11 @@ export interface Lod {
   geometry_type: GeometryType
   scale: [number, number]
   offset: [number, number]
+  /** Width in grid cells of the square drawn for a shape too small for the grid. */
+  placeholder?: number
 }
+
+const DEFAULT_PLACEHOLDER_CELLS = 2
 
 export interface LodMetadata {
   version: string
@@ -223,12 +227,13 @@ export class LodReader {
     }
     const prefix = this.lod.prefix
     const coarse = prefix && Math.max(...lod.zooms) <= prefix.zoom
-    // a placeholder square reaches one grid cell past its feature's bbox
+    // a placeholder square sits on its centroid's grid cell and reaches half its width past it
+    const reach = 1 + (lod.placeholder ?? DEFAULT_PLACEHOLDER_CELLS) / 2
     const padded: Bbox = [
-      bbox[0] - Math.abs(lod.scale[0]),
-      bbox[1] - Math.abs(lod.scale[1]),
-      bbox[2] + Math.abs(lod.scale[0]),
-      bbox[3] + Math.abs(lod.scale[1]),
+      bbox[0] - Math.abs(lod.scale[0]) * reach,
+      bbox[1] - Math.abs(lod.scale[1]) * reach,
+      bbox[2] + Math.abs(lod.scale[0]) * reach,
+      bbox[3] + Math.abs(lod.scale[1]) * reach,
     ]
     const groups = this.metadata.row_groups
       .map((_, g) => g)

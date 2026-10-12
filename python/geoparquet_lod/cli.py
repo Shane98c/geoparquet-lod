@@ -12,9 +12,9 @@ from .writer import write
 
 
 def parse_thinning(spec: str, where: str | None) -> th.Thin:
-    """`drop[:rate]`, `density[:budget]`, `smallest[:budget]`, `size[:pixels]`, `tiny[:pixels]`,
+    """`drop[:rate]`, `density[:budget]`, `smallest[:bytes]`, `size[:pixels]`, `tiny[:pixels]`,
     `importance:column[:per_tile]`, `cluster[:pixels]`; `+` combines, e.g. `size:4+drop:2.5`;
-    `>` chains, e.g. `tiny:1.5>smallest:40000`; `auto` is the family default. `where` restricts
+    `>` chains, e.g. `smallest:600000>tiny`; `auto` is the family default. `where` restricts
     eligibility."""
     if spec == 'auto':
         thin = th.default_thinning('auto')
@@ -33,14 +33,14 @@ def _parse_union(spec: str) -> th.Thin:
         elif kind == 'density':
             parts.append(th.density_budget(int(rest or 60_000)))
         elif kind == 'smallest':
-            parts.append(th.drop_smallest(int(rest or 40_000)))
+            parts.append(th.drop_smallest(int(rest or 600_000)))
         elif kind == 'size':
             parts.append(th.size_threshold(float(rest or 4)))
         elif kind == 'importance':
             column, _, per_tile = rest.partition(':')
             parts.append(th.importance(column, int(per_tile or 1000)))
         elif kind == 'tiny':
-            parts.append(th.tiny_polygons(float(rest or 0.5)))
+            parts.append(th.tiny_polygons(float(rest or th.TINY_PIXELS)))
         elif kind == 'cluster':
             parts.append(th.cluster(float(rest or 8)))
         else:
@@ -61,7 +61,7 @@ def cli():
     'thinning_spec',
     default='auto',
     show_default=True,
-    help='auto | drop[:rate] | density[:budget] | smallest[:budget] | size[:pixels] | tiny[:px] | importance:column[:n] | cluster[:px]; + unions, > chains',
+    help='auto | drop[:rate] | density[:budget] | smallest[:bytes] | size[:pixels] | tiny[:px] | importance:column[:n] | cluster[:px]; + unions, > chains',
 )
 @click.option(
     '--where', default=None, help='SQL predicate; rows failing it are never shown zoomed out'

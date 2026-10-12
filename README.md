@@ -34,39 +34,41 @@ Which rows appear at which zoom is a _thinning function_, one shape:
 def thin(rows: pa.Table, zoom: int, ctx: Context) -> pa.Table
 ```
 
-The writer calls it once per zoom from fine to coarse, starting from the
-complete zoom where every feature is present, each time with the rows kept
-at the zoom just finer, and it returns the subset to keep. Nesting is
-guaranteed by construction. Shapes stay shapes at every zoom on a
-quarter-pixel grid; one too small for it is stored as a half-pixel square,
-so zoomed out a thinned building set reads as a faint density texture in the
-same fill layer, as tippecanoe draws it. `rows` carries `id`, centroid, bbox
-diagonal, area, a per-row uniform `u` hashed from the geometry, and the
-carried attributes; returning a carried column overrides its value in that
+The writer calls it once per zoom with every row, as tippecanoe builds each
+zoom from the whole dataset, and it returns the rows to show there; the
+finest zoom always shows every row. Membership need not nest across zooms.
+Shapes stay shapes at every zoom on a quarter-pixel grid; one too small for
+it is stored as a square on its centroid's cell, so zoomed out a thinned
+building set reads as a faint density texture in the same fill layer, as
+tippecanoe draws it. `rows` carries `id`, centroid, bbox diagonal, area,
+vertex count, a per-row uniform `u` hashed from the geometry, and the
+carried attributes; `Context` converts area and size to screen pixels at
+the row's latitude. Returning a carried column overrides its value in that
 zoom's LOD, which is how a cluster passes its count along. Built-ins are a
 few lines each and meant to be copied:
 
-| thinning                        | rule                                                                                                                         | good for                                           |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| `drop_rate(2.5)`                | each zoom coarser keeps 1/rate, uniformly, so relative density survives (tippecanoe `-r`); the default                       | points, small polygons                             |
-| `size_threshold(4)`             | keep a feature while it still spans 4 pixels                                                                                 | large polygons and lines first                     |
-| `tiny_polygons(0.5)`            | inspired by tippecanoe's tiny-polygon reduction: small areas accumulate and one half-pixel square is kept per square of area | area-true coverage; nearly empty at national scale |
-| `importance('population', 300)` | keep the top N per tile by a column                                                                                          | named places, ranked facilities                    |
-| `cluster(8, count='count')`     | one representative per 8 px cell carrying how many it stands for                                                             | dense points                                       |
-| `density_budget(60_000)`        | cap the busiest tile with a uniform sample; flattens dense places                                                            | bounding the largest tiles                         |
-| `drop_smallest(40_000)`         | a tile over budget keeps its largest by area (tippecanoe `--drop-smallest-as-needed`)                                        | buildings, after `tiny_polygons`                   |
-| `only('risk > 0', inner)`       | restrict eligibility before `inner`                                                                                          | partial datasets                                   |
-| `combine(a, b)`                 | keep what any part keeps                                                                                                     | size plus sample, etc.                             |
-| `chain(a, b)`                   | apply `b` to what `a` kept                                                                                                   | `tiny_polygons` then `drop_smallest`               |
+| thinning                        | rule                                                                                                                                    | good for                                   |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `drop_rate(2.5)`                | each zoom coarser keeps 1/rate, uniformly, so relative density survives (tippecanoe `-r`); the default                                  | points, small polygons                     |
+| `size_threshold(4)`             | keep a feature while it still spans 4 pixels                                                                                            | large polygons and lines first             |
+| `tiny_polygons(0.25)`           | tippecanoe's tiny-polygon reduction: areas under a quarter-pixel square accumulate per tile and one square is kept per square's worth   | area-true coverage of buildings zoomed out |
+| `importance('population', 300)` | keep the top N per tile by a column                                                                                                     | named places, ranked facilities            |
+| `cluster(8, count='count')`     | one representative per 8 px cell carrying how many it stands for                                                                        | dense points                               |
+| `density_budget(60_000)`        | cap the busiest tile with a uniform sample; flattens dense places                                                                       | bounding the largest tiles                 |
+| `drop_smallest(600_000)`        | one area bar per zoom, raised until the busiest tile's estimated bytes fit, applied everywhere (tippecanoe `--drop-smallest-as-needed`) | buildings, before `tiny_polygons`          |
+| `only('risk > 0', inner)`       | restrict eligibility before `inner`                                                                                                     | partial datasets                           |
+| `combine(a, b)`                 | keep what any part keeps                                                                                                                | size plus sample, etc.                     |
+| `chain(a, b)`                   | apply `b` to what `a` kept                                                                                                              | `drop_smallest` then `tiny_polygons`       |
 
 Anything the built-ins cannot express is a short function of a table. The
 writer's other options (zooms, the complete zoom, prefix zoom, row group and
 page sizes, compression level) shape the file, not the row selection.
 
 Zooms are derived from the data unless given: the coarsest zoom is where the
-dataset's extent fits a tile, every feature is present from the zoom where
-the median feature spans a pixel, and the finest zoom is where the median
-vertex spacing spans four pixels. The writer logs the guess; pass `zooms=` or
+dataset's extent fits a tile, the base zoom a rate-based thinning counts
+from is where the median feature spans a pixel, and the finest zoom is where
+the median vertex spacing spans four pixels. The writer logs the guess and
+records which zooms actually keep every row; pass `zooms=` or
 `complete_from=` to override. On Overture buildings for a city that is zooms
 2 to 16, complete from 13; on US counties, complete at every zoom; on census
 tracts, complete from 4.

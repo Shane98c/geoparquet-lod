@@ -48,9 +48,8 @@ from .quantize import DOT_CELLS, SUBPIXELS, grid, render_lines, render_polygons
 from .thinning import Context, Thin, default_thinning, describe
 
 LOD_KEY = 'lod_columns'
-NEVER = 10_000
 # columns the writer computes carry a prefix no source column uses; thinnings see them unprefixed
-THINNING_COLUMNS = ('id', 'cx', 'cy', 'diag', 'area', 'u')
+THINNING_COLUMNS = ('id', 'cx', 'cy', 'diag', 'area', 'nv', 'u')
 LOD_VERSION = '0.1.0'
 BBOX_FIELD = pa.field(
     'bbox',
@@ -80,8 +79,8 @@ def lods(
 ) -> list[dict]:
     """LODs: one stored representation per contiguous zoom range. Zooms may share
     an LOD only when row selection and carried attributes agree, and an LOD uses
-    its finest zoom's grid. Below `complete_from` the thinning changes the row
-    set every zoom, so each zoom is its own LOD; from `complete_from` up every
+    its finest zoom's grid. Below `complete_from` the thinning may change the
+    row set every zoom, so each zoom is its own LOD; from `complete_from` up every
     row is present, so zooms are paired on one quantized copy, or all share one
     copy when the full-detail geometry is small enough that copies would cost
     more than they save. Shapes stay shapes at every zoom, collapsing to
@@ -282,8 +281,10 @@ def write(
     log=print,
 ) -> Path:
     """Write `src` (any GeoParquet with a WKB geometry column) to `out` in the
-    LOD columns layout. `complete_from` is the zoom from which every feature is
-    present; below it `thinning` chooses the rows. `compression_level` is zstd's;
+    LOD columns layout. `thinning` chooses the rows shown at every zoom;
+    `complete_from` is the zoom it should treat as the base where every feature
+    belongs, as `drop_rate` does, and the writer records which zooms actually
+    keep every row. `compression_level` is zstd's;
     decoding speed does not depend on it. `tile_directory` also builds the
     tile directory `out.tiledir.parquet` beside the file. Returns the output path."""
     src = str(src)
@@ -335,10 +336,11 @@ def write(
         f"""
         COPY (
             SELECT row_number() OVER () AS __id,
-                CASE WHEN {valid} THEN ST_X(ST_Centroid({geometry}))::FLOAT END AS __cx,
-                CASE WHEN {valid} THEN ST_Y(ST_Centroid({geometry}))::FLOAT END AS __cy,
+                CASE WHEN {valid} THEN ST_X(ST_Centroid({geometry}))::DOUBLE END AS __cx,
+                CASE WHEN {valid} THEN ST_Y(ST_Centroid({geometry}))::DOUBLE END AS __cy,
                 CASE WHEN {valid} THEN sqrt((ST_XMax({geometry}) - ST_XMin({geometry})) ^ 2 + (ST_YMax({geometry}) - ST_YMin({geometry})) ^ 2) END AS __diag,
                 CASE WHEN {valid} THEN ST_Area({geometry}) END AS __area,
+                CASE WHEN {valid} THEN ST_NPoints({geometry}) END AS __nv,
                 CASE WHEN {valid} THEN {{xmin: ST_XMin({geometry}), ymin: ST_YMin({geometry}), xmax: ST_XMax({geometry}), ymax: ST_YMax({geometry})}} END AS __bbox,
                 CASE WHEN {valid} THEN ST_Hilbert({geometry}, {box}) END AS __h,
                 {passthrough}
@@ -366,6 +368,56 @@ def write(
         degrees,
         log,
     )
+    # 2. which rows appear at which zoom: run `thinning` at every zoom over every row
+    if thinning is None:
+        thinning = default_thinning(family)
+        log(f'  thinning: {describe(thinning)["name"]}')
+    slim = ', '.join(
+        dict.fromkeys(
+            [
+                '__id AS id',
+                '__cx AS cx',
+                '__cy AS cy',
+                '__diag AS diag',
+                '__area AS area',
+                '__nv AS nv',
+            ]
+            + [a.name for a in attributes]
+            + list(columns)
+        )
+    )
+    rows = con.execute(
+        f'SELECT {slim}, (hash({geometry}) % 1000000007) / 1000000007.0 AS u '
+        f"FROM '{sorted_path}' WHERE __cx IS NOT NULL ORDER BY __id"
+    ).to_arrow_table()
+    ctx = Context(tuple(zooms), zooms[-1] if complete_from is None else complete_from, 512, degrees)
+    # bit i of a row's levels is set when it is shown at zooms[i]; null or empty geometry is shown nowhere
+    levels = np.zeros(n_rows, dtype=np.int64)
+    if rows.num_rows < n_rows:
+        log(
+            f'  {n_rows - rows.num_rows:,} rows have null or empty geometry and are shown at no zoom'
+        )
+    overrides: dict[int, pa.Table] = {}
+    counts = {}
+    for i in range(len(zooms) - 1, -1, -1):
+        # the finest zoom shows every row, whatever the thinning says
+        kept = rows if i == len(zooms) - 1 else thinning(rows, zooms[i], ctx)
+        ids = kept.column('id').to_numpy()
+        levels[ids - 1] |= 1 << i
+        counts[i] = len(ids)
+        carried = [a.name for a in attributes if a.name in kept.column_names]
+        if carried:
+            overrides[i] = kept.select(['id', *carried])
+    log(
+        '  rows shown at each zoom: '
+        + ', '.join(f'z{zooms[i]}={counts[i]:,}' for i in range(len(zooms)))
+    )
+    # the zooms are complete from the first of the run of finest zooms that keep every row
+    complete_from = None
+    for i in range(len(zooms) - 1, -1, -1):
+        if counts[i] != rows.num_rows:
+            break
+        complete_from = zooms[i]
     single = False
     if family != 'point' and complete_from is not None:
         single = (
@@ -377,64 +429,28 @@ def write(
         if single:
             log('  full-detail shapes are small; one shape LOD serves every zoom')
     lod_plan = lods(zooms, complete_from, family, single_shape_lod=single)
-
-    # 2. which rows appear at which zoom: run `thinning` from the finest sampled zoom down
-    if thinning is None:
-        thinning = default_thinning(family)
-        log(f'  thinning: {describe(thinning)["name"]}')
-    sample_zooms = zooms[: zooms.index(complete_from) + 1] if complete_from in zooms else zooms
-    slim = ', '.join(
-        dict.fromkeys(
-            ['__id AS id', '__cx AS cx', '__cy AS cy', '__diag AS diag', '__area AS area']
-            + [a.name for a in attributes]
-            + list(columns)
-        )
-    )
-    rows = con.execute(
-        f'SELECT {slim}, (hash({geometry}) % 1000000007) / 1000000007.0 AS u '
-        f"FROM '{sorted_path}' WHERE __cx IS NOT NULL ORDER BY __id"
-    ).to_arrow_table()
-    ctx = Context(tuple(zooms), sample_zooms[-1], 512, degrees)
-    # rows with a null or empty geometry are shown at no LOD
-    level = np.full(n_rows, NEVER, dtype=np.int32)
-    level[rows.column('id').to_numpy() - 1] = len(sample_zooms) - 1
-    if rows.num_rows < n_rows:
-        log(
-            f'  {n_rows - rows.num_rows:,} rows have null or empty geometry and are shown at no zoom'
-        )
-    overrides: dict[int, pa.Table] = {}
-    kept = rows
-    for i in range(len(sample_zooms) - 2, -1, -1):
-        kept = thinning(kept, sample_zooms[i], ctx)
-        ids = kept.column('id').to_numpy()
-        level[ids - 1] = i
-        carried = [a.name for a in attributes if a.name in kept.column_names]
-        if carried:
-            overrides[i] = kept.select(['id', *carried])
     con.register(
-        'levels', pa.table({'id': np.arange(1, n_rows + 1, dtype=np.int64), 'level': level})
+        'levels', pa.table({'id': np.arange(1, n_rows + 1, dtype=np.int64), 'levels': levels})
     )
     con.execute('CREATE TEMP TABLE rows AS SELECT * FROM levels')
-    counts = dict(con.execute('SELECT level, count(*) FROM rows GROUP BY 1 ORDER BY 1').fetchall())
-    log(
-        '  rows entering at each zoom: '
-        + ', '.join(f'z{zooms[k]}={v:,}' for k, v in counts.items() if k != NEVER)
-    )
 
     # 3. schema and metadata, known before writing
     origin = (float(xmin), float(ymin))
+    # placeholder squares are given in pixels; the grid is finer than a pixel
+    dot_cells = float(getattr(thinning, 'placeholder_pixels', DOT_CELLS / SUBPIXELS)) * SUBPIXELS
     grids = {b['name']: (grid(b['grid_zoom'], degrees=degrees), origin) for b in lod_plan}
     shape_lods = [b for b in lod_plan if b['geometry_type'] != 'Point']
-    # the prefix covers the zooms up to prefix_zoom that the file actually serves
+    # the prefix covers the zooms up to prefix_zoom that the file actually thins
     prefix_candidates = [
-        z for z in sample_zooms[:-1] if prefix_zoom is not None and z <= prefix_zoom
+        z
+        for z in zooms
+        if prefix_zoom is not None
+        and z <= prefix_zoom
+        and (complete_from is None or z < complete_from)
     ]
     prefix_level = zooms.index(prefix_candidates[-1]) if prefix_candidates else None
-    prefix_rows = (
-        0
-        if prefix_level is None
-        else sum(v for k, v in counts.items() if k is not None and k <= prefix_level)
-    )
+    prefix_mask = 0 if prefix_level is None else (1 << (prefix_level + 1)) - 1
+    prefix_rows = int(np.count_nonzero(levels & prefix_mask))
     prefix_end = -(-prefix_rows // row_group_rows) - 1 if prefix_rows else -1
     lod_field = pa.field(
         'lod',
@@ -473,6 +489,7 @@ def write(
                 'geometry_type': b['geometry_type'],
                 'scale': [grids[b['name']][0]] * 2,
                 'offset': list(origin),
+                'placeholder': dot_cells,
             }
             for b in lod_plan
         },
@@ -518,14 +535,11 @@ def write(
     writer = pq.ParquetWriter(out, schema, **options)
     pool = ProcessPoolExecutor(max_workers=workers)
     row_groups = 0
-    lod_level = {b['name']: zooms.index(max(b['zooms'])) for b in lod_plan}
-    # placeholder squares are given in pixels; the grid is finer than a pixel
-    dot_cells = float(getattr(thinning, 'placeholder_pixels', DOT_CELLS / SUBPIXELS)) * SUBPIXELS
+    lod_bit = {b['name']: zooms.index(b['zooms'][0]) for b in lod_plan}
 
     def flush(table: pa.Table, fut):
         nonlocal row_groups
-        level = table.column('__level').to_numpy(zero_copy_only=False)
-        level = np.where(np.isnan(level.astype(float)), NEVER, level).astype(np.int64)
+        levels = table.column('__levels').to_numpy(zero_copy_only=False).astype(np.int64)
         cx = table.column('__cx').to_numpy(zero_copy_only=False)
         cy = table.column('__cy').to_numpy(zero_copy_only=False)
         rendered = fut.result() if fut is not None else []
@@ -533,8 +547,8 @@ def write(
         arrays = []
         k = 0
         for b in lod_plan:
-            mask = level <= lod_level[b['name']]
-            z_index = zooms.index(b['zooms'][0])
+            mask = (levels >> lod_bit[b['name']]) & 1 == 1
+            z_index = lod_bit[b['name']]
             source = (
                 _with_overrides(table, ids, overrides[z_index]) if z_index in overrides else table
             )
@@ -564,7 +578,7 @@ def write(
 
     def write_rows(where: str):
         reader = con.execute(f"""
-            SELECT s.*, r.level AS __level FROM '{sorted_path}' s JOIN rows r ON r.id = s.__id
+            SELECT s.*, r.levels AS __levels FROM '{sorted_path}' s JOIN rows r ON r.id = s.__id
             WHERE {where} ORDER BY s.__h
         """).to_arrow_reader(row_group_rows)
         pending = []
@@ -572,13 +586,13 @@ def write(
             table = pa.Table.from_batches([batch])
             fut = None
             if shape_lods:
-                level = table.column('__level').to_numpy(zero_copy_only=False)
+                levels = table.column('__levels').to_numpy(zero_copy_only=False).astype(np.int64)
                 job = (
                     table.column(geometry).to_numpy(zero_copy_only=False),
                     table.column('__cx').to_numpy(zero_copy_only=False),
                     table.column('__cy').to_numpy(zero_copy_only=False),
                     [
-                        (*grids[b['name']], np.flatnonzero(level <= lod_level[b['name']]))
+                        (*grids[b['name']], np.flatnonzero((levels >> lod_bit[b['name']]) & 1))
                         for b in shape_lods
                     ],
                     family,
@@ -593,12 +607,12 @@ def write(
 
     if prefix_end >= 0:
         log(f'  prefix: rows shown by z{zooms[prefix_level]} come first')
-        write_rows(f'r.level <= {prefix_level}')
+        write_rows(f'(r.levels & {prefix_mask}) != 0')
         if row_groups - 1 != prefix_end:
             raise RuntimeError(
                 f'prefix wrote {row_groups} row groups, metadata expected {prefix_end + 1}'
             )
-        write_rows(f'r.level > {prefix_level}')
+        write_rows(f'(r.levels & {prefix_mask}) = 0')
     else:
         write_rows('TRUE')
     writer.close()

@@ -65,9 +65,9 @@ A conforming file MUST satisfy:
 The validator checks the metadata, the schema shapes, covering statistics,
 page indexes, that prefix row groups hold only prefix rows, and a sample
 decode of every LOD from the first row group. It does not verify the sort
-order, that every row is shown at the finest LOD, or that membership nests
-across LODs; those are what the reference writer does, and a conformance
-suite with fixtures for them is open work.
+order or that every row is shown at the finest LOD; those are what the
+reference writer does, and a conformance suite with fixtures for them is
+open work.
 
 The following SHOULD hold and are what the reference writer does:
 
@@ -83,29 +83,31 @@ The following SHOULD hold and are what the reference writer does:
 
 Under the `geo` key, a `lod_columns` object:
 
-| field         | type           | meaning                                                                                                                                   |
-| ------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `version`     | string         | `0.1.0`; readers reject a different major version, and while the major is 0 a different minor as well, since minors may change the layout |
-| `column`      | string         | name of the LOD struct column                                                                                                             |
-| `order`       | string         | `hilbert`                                                                                                                                 |
-| `zooms`       | int[]          | every zoom the file serves, ascending                                                                                                     |
-| `tile_size`   | int            | pixels per tile the zooms assume (512)                                                                                                    |
-| `prefix`      | object or null | `{zoom, row_group_end}`, see Layout 2                                                                                                     |
-| `encoding`    | string         | `quantized_geoarrow`, see Geometry                                                                                                        |
-| `coordinates` | string         | `interleaved`: each vertex is one list of two int32, x then y                                                                             |
-| `attributes`  | object[]       | `{name, type}` of the carried attributes; `type` is the Arrow type name, informational since the schema carries it                        |
-| `thinning`    | object         | description of the rule used; informational                                                                                               |
-| `lods`        | object         | LOD name to `{zooms, geometry_type, scale, offset}`; `scale` and `offset` are `[x, y]` pairs in degrees                                   |
+| field         | type           | meaning                                                                                                                                                                                                            |
+| ------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `version`     | string         | `0.1.0`; readers reject a different major version, and while the major is 0 a different minor as well, since minors may change the layout                                                                          |
+| `column`      | string         | name of the LOD struct column                                                                                                                                                                                      |
+| `order`       | string         | `hilbert`                                                                                                                                                                                                          |
+| `zooms`       | int[]          | every zoom the file serves, ascending                                                                                                                                                                              |
+| `tile_size`   | int            | pixels per tile the zooms assume (512)                                                                                                                                                                             |
+| `prefix`      | object or null | `{zoom, row_group_end}`, see Layout 2                                                                                                                                                                              |
+| `encoding`    | string         | `quantized_geoarrow`, see Geometry                                                                                                                                                                                 |
+| `coordinates` | string         | `interleaved`: each vertex is one list of two int32, x then y                                                                                                                                                      |
+| `attributes`  | object[]       | `{name, type}` of the carried attributes; `type` is the Arrow type name, informational since the schema carries it                                                                                                 |
+| `thinning`    | object         | description of the rule used; informational                                                                                                                                                                        |
+| `lods`        | object         | LOD name to `{zooms, geometry_type, scale, offset, placeholder}`; `scale` and `offset` are `[x, y]` pairs in degrees, `placeholder` the width in grid cells of the square drawn for a shape too small for the grid |
 
 All fields are required. Every zoom in `zooms` MUST appear in exactly one
 LOD, `zooms` MUST be contiguous, and `scale` and `offset` MUST be finite. The
 prefix's `zoom` MUST be in `zooms` and `row_group_end` MUST be less than the
-row group count. Membership MUST nest: a row shown at an LOD is shown at
-every finer LOD, and every row with a non-null, non-empty primary geometry
-is shown at the finest LOD. An LOD's zooms are contiguous and ascending. Which zooms share an LOD is writer policy: the
-reference writer gives each zoom below the complete zoom its own LOD, pairs
-zooms above it, and uses one LOD for all complete zooms when the full-detail
-geometry is small.
+row group count. Every row with a non-null, non-empty primary geometry MUST
+be shown at the finest LOD. Membership at the other LODs is the writer's
+choice per LOD and need not nest: a row may be shown zoomed out and hidden
+one zoom in, as tippecanoe's per-zoom dropping produces. An LOD's zooms are
+contiguous and ascending. Which zooms share an LOD is writer policy: the
+reference writer gives each zoom its own LOD until the zoom from which the
+thinning keeps every row, pairs zooms above it, and uses one LOD for all
+complete zooms when the full-detail geometry is small.
 
 ### Example
 
@@ -125,8 +127,8 @@ the usual GeoParquet fields:
   "attributes": [{ "name": "height", "type": "float" }, { "name": "class", "type": "string" }],
   "thinning": { "rule": "combine(size_threshold(4), drop_rate(2.5))" },
   "lods": {
-    "f8": { "zooms": [8], "geometry_type": "MultiPolygon", "scale": [6.8665e-4, 6.8665e-4], "offset": [-105.1, 39.6] },
-    "f13": { "zooms": [13, 14], "geometry_type": "MultiPolygon", "scale": [1.0729e-5, 1.0729e-5], "offset": [-105.1, 39.6] }
+    "f8": { "zooms": [8], "geometry_type": "MultiPolygon", "scale": [6.8665e-4, 6.8665e-4], "offset": [-105.1, 39.6], "placeholder": 1 },
+    "f13": { "zooms": [13, 14], "geometry_type": "MultiPolygon", "scale": [1.0729e-5, 1.0729e-5], "offset": [-105.1, 39.6], "placeholder": 1 }
   }
 }
 ```
@@ -172,10 +174,12 @@ zero.
 `Point` is the bare coordinate pair with the same transform, used only for
 point datasets. COGP does not define a point family; this is our extension,
 to be proposed there. A family keeps its geometry type at every zoom. A shape
-too small for an LOD's grid is a square around its centroid, half a pixel
-wide unless the thinning asks for another size, so a thinned set of
-buildings zoomed out reads as a faint texture of its density, as tippecanoe's
-tiny-polygon squares do. The grid is a quarter pixel at the LOD's finest
+too small for an LOD's grid in both directions is a square on the grid cell
+holding its centroid, `placeholder` cells wide and as many cells tall as
+draw square on a Mercator screen at its latitude, half a pixel unless the
+thinning asks for another size, so a thinned set of buildings zoomed out
+reads as a faint texture of its density, as tippecanoe's tiny-polygon
+squares do. The grid is a quarter pixel at the LOD's finest
 zoom, in nominal Web Mercator pixels at the equator, close
 to tippecanoe's eighth-pixel tolerance; features a pixel or two across keep
 their own shape. On buildings that costs about twice the geometry bytes of a
@@ -214,8 +218,9 @@ Refinement, on by default in the reference reader: read the candidate bbox
 pages and keep only rows whose bbox intersects before fetching LOD pages. A
 bbox page holds thousands of rows and a fine tile wants a few hundred, so
 this roughly halves the bytes at street zooms for a few more requests. The
-tile bounds are padded by one grid cell first, since a placeholder square is
-centred on the feature and can reach one cell past its bbox. Row groups
+tile bounds are padded by one grid cell plus half the placeholder width
+first, since a placeholder square sits on its centroid's cell and can reach
+that far past the feature's bbox. Row groups
 overlap at their edges, so most candidate row groups hold no row for a
 tile; the reference reader fetches an LOD leaf's offset index only once the
 bbox page statistics admit candidate rows in that group, in parallel with

@@ -19,6 +19,7 @@ WEBMERC_CIRCUMFERENCE = 40075016.68557849
 METERS_PER_DEGREE = 111320
 SUBPIXELS = 4
 DOT_CELLS = 2
+MAX_LATITUDE = 85.0511287798066
 
 
 def resolution(zoom: int, tile_size: int = 512, degrees: bool = True) -> float:
@@ -32,11 +33,25 @@ def grid(zoom: int, tile_size: int = 512, degrees: bool = True) -> float:
     return resolution(zoom, tile_size, degrees) / SUBPIXELS
 
 
-def _dot_squares(qx, qy, cells: float):
-    h = cells / 2
-    corners = [(-h, -h), (h, -h), (h, h), (-h, h), (-h, -h)]
-    ring = np.stack([np.stack([qx + dx + 1, qy + dy + 1], axis=1) for dx, dy in corners], axis=1)
+def _dot_squares(qx, qy, cells: float, aspect):
+    """A `cells`-wide square on the centre of the grid cell holding each
+    centroid, `cells * aspect` tall so it draws square on screen. It reaches
+    at most `1 + cells / 2` cells past the centroid, which the reader pads
+    tile bounds by."""
+    hx = max(cells / 2, 0.5)
+    hy = np.maximum(cells * aspect / 2, 0.5)
+    corners = [(-1, -1), (1, -1), (1, 1), (-1, 1), (-1, -1)]
+    ring = np.stack(
+        [np.stack([qx + 0.5 + dx * hx, qy + 0.5 + dy * hy], axis=1) for dx, dy in corners],
+        axis=1,
+    )
     return shapely.polygons(ring)
+
+
+def _aspect(cy):
+    """Screen width of a degree grid cell over its screen height at each
+    latitude: Web Mercator stretches latitude by 1 / cos(lat)."""
+    return np.cos(np.radians(np.clip(np.nan_to_num(cy), -MAX_LATITUDE, MAX_LATITUDE)))
 
 
 def _quantize(g, scale: float):
@@ -62,15 +77,17 @@ def render_polygons(
     g = shapely.transform(shapely.from_wkb(wkb), lambda c: (c - offset) / scale)
     g = _quantize(g, scale)
     minx, miny, maxx, maxy = shapely.bounds(g).T
+    aspect = _aspect(cy)
     with np.errstate(invalid='ignore'):
         small = shapely.is_missing(g) | shapely.is_empty(g) | ~shapely.is_valid(g)
-        small |= (maxx - minx < dot_cells) | (maxy - miny < dot_cells)
+        small |= (maxx - minx < dot_cells) & (maxy - miny < dot_cells * aspect)
     if small.any():
         g = g.copy()
         g[small] = _dot_squares(
             np.floor((cx[small] - offset[0]) / scale),
             np.floor((cy[small] - offset[1]) / scale),
             dot_cells,
+            aspect[small],
         )
     polys, poly_parent = shapely.get_parts(g, return_index=True)
     rings, ring_parent = shapely.get_rings(polys, return_index=True)
