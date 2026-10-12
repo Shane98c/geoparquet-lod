@@ -8,7 +8,15 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from .encoding import COORDINATES, DELTAS, ENCODING, LIST_DEPTH, geometry_rows, geometry_type
+from .encoding import (
+    COORDINATES,
+    DELTAS,
+    ENCODING,
+    LIST_DEPTH,
+    geometry_rows,
+    geometry_type,
+    spill_type,
+)
 from .tiledir import KEY as TILE_DIRECTORY_KEY
 from .tiledir import sidecar_path, source_binding
 from .writer import LOD_KEY, LOD_VERSION
@@ -72,6 +80,10 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
             raise ValidationError(f'{column}.{name} has no geometry child') from None
         if geom.nullable or geom.type != geometry_type(gtype):
             raise ValidationError(f'{column}.{name}.geometry is not {ENCODING} {gtype}')
+        if 'spill' not in field.type.names or field.type.field('spill').type != spill_type(
+            gtype, [field.type.field(a) for a in attributes]
+        ):
+            raise ValidationError(f'{column}.{name}.spill is missing or has the wrong shape')
         for a in attributes:
             if a not in field.type.names:
                 raise ValidationError(f'{column}.{name} lacks carried attribute {a}')
@@ -126,8 +138,9 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
         values = head.column(column).combine_chunks().field(name)
         shown = values.filter(values.is_valid())
         geoms = geometry_rows(shown.field('geometry').slice(0, 200))
-        for g in geoms:
-            _check_geometry(name, child['geometry_type'], g)
+        hosting = shown.field('spill').slice(0, 200).is_valid().to_pylist()
+        for g, hosts in zip(geoms, hosting, strict=True):
+            _check_geometry(name, child['geometry_type'], g, hosts)
         checked[name] = len(shown)
     return {
         'rows': md.num_rows,
@@ -153,12 +166,15 @@ def check_tile_directory(path: str | Path) -> str | None:
     return 'bound'
 
 
-def _check_geometry(name: str, gtype: str, g) -> None:
+def _check_geometry(name: str, gtype: str, g, hosts: bool = False) -> None:
     if gtype == 'Point':
         if len(g) != 2:
             raise ValidationError(f'lod {name}: a point is not an [x, y] pair')
         return
     if not g:
+        # a row shown only to host straddler copies has no geometry of its own
+        if hosts:
+            return
         raise ValidationError(f'lod {name}: empty geometry on a shown row')
     for part in g:
         rings = part if gtype == 'MultiPolygon' else [part]

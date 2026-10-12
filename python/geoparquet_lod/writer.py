@@ -44,8 +44,10 @@ from .encoding import (
     lod_type,
     nested_array,
     point_array,
+    spill_array,
 )
 from .quantize import DOT_CELLS, MAX_LATITUDE, SUBPIXELS, grid, render_lines, render_polygons
+from .spill import hosts, straddlers, take_ragged
 from .thinning import Context, Thin, default_thinning, describe
 
 LOD_KEY = 'lod_columns'
@@ -266,6 +268,66 @@ def _with_overrides(table: pa.Table, ids: np.ndarray, override: pa.Table) -> pa.
     return table
 
 
+def _concat_parts(parts_list):
+    """Ragged polygon arrays of consecutive batches as one store."""
+    geom, poly, ring, xs, ys = (
+        [np.zeros(1, np.int64)],
+        [np.zeros(1, np.int64)],
+        [np.zeros(1, np.int64)],
+        [],
+        [],
+    )
+    for g, p, r, x, y in parts_list:
+        geom.append(g[1:] + geom[-1][-1])
+        poly.append(p[1:] + poly[-1][-1])
+        ring.append(r[1:] + ring[-1][-1])
+        xs.append(x)
+        ys.append(y)
+    return (
+        np.concatenate(geom),
+        np.concatenate(poly),
+        np.concatenate(ring),
+        np.concatenate(xs) if xs else np.zeros(0, np.int32),
+        np.concatenate(ys) if ys else np.zeros(0, np.int32),
+    )
+
+
+def _spill_for_batch(
+    b, ids, attributes, spill_entries, spill_store, attr_values, file_pos, grids, src_ids
+):
+    """The `spill` list of one batch for LOD `b`, or None when no row hosts a copy."""
+    entries = spill_entries.get(b['name'])
+    if entries is None:
+        return None
+    host, zoom_of, tile_of, src = entries
+    lo = np.searchsorted(host, ids - 1, side='left')
+    hi = np.searchsorted(host, ids - 1, side='right')
+    counts = hi - lo
+    if not counts.any():
+        return None
+    pick = np.concatenate(
+        [np.arange(a, c) for a, c in zip(lo[counts > 0], hi[counts > 0], strict=True)]
+    )
+    srcs, store = spill_store[b['name']]
+    pos = np.searchsorted(srcs, src[pick])
+    if b['geometry_type'] == 'Point':
+        geom = point_array(store[0][pos], store[1][pos], *grids[b['name']])
+    else:
+        geom = nested_array(take_ragged(store, pos), LIST_DEPTH[b['geometry_type']])
+    at = np.searchsorted(src_ids, src[pick])
+    attrs = {a.name: attr_values[a.name].take(pa.array(at)) for a in attributes}
+    return spill_array(
+        b['geometry_type'],
+        attributes,
+        counts,
+        zoom_of[pick],
+        tile_of[pick],
+        file_pos[src[pick]],
+        geom,
+        attrs,
+    )
+
+
 def _render(args):
     """Quantized parts per shape LOD for one batch, rendering only the rows shown
     there; the other rows get empty geometry, which the null struct hides."""
@@ -297,6 +359,7 @@ def write(
     single_lod_bytes: int = 16 * 1024 * 1024,
     row_group_rows: int = 1_048_576,
     page_bytes: int = 16384,
+    page_rows: int = 8192,
     compression_level: int = 9,
     batch_rows: int | None = None,
     workers: int | None = None,
@@ -513,6 +576,53 @@ def write(
     prefix_mask = 0 if prefix_level is None else (1 << (prefix_level + 1)) - 1
     prefix_rows = int(np.count_nonzero(levels & prefix_mask))
     prefix_end = -(-prefix_rows // row_group_rows) - 1 if prefix_rows else -1
+
+    # 3b. straddlers: a feature reaching into a tile beyond its own gets a copy of its LOD
+    # geometry on the first row of that tile's key interval, so a tile is one interval
+    lod_bit = {b['name']: zooms.index(b['zooms'][0]) for b in lod_plan}
+    extent = con.execute(
+        f'SELECT __id, __bbox.xmin AS xmin, __bbox.ymin AS ymin, __bbox.xmax AS xmax, '
+        f"__bbox.ymax AS ymax, __h FROM '{sorted_path}' WHERE __cx IS NOT NULL ORDER BY __id"
+    ).fetchnumpy()
+    valid_ids = extent['__id'].astype(np.int64) - 1
+    bounds = {k: np.full(n_rows, np.nan) for k in ('xmin', 'ymin', 'xmax', 'ymax')}
+    for k in bounds:
+        bounds[k][valid_ids] = extent[k]
+    keys = np.full(n_rows, -1, np.int64)
+    keys[valid_ids] = extent['__h']
+    del extent
+    in_prefix = (levels & prefix_mask) != 0
+    by_key = valid_ids[np.argsort(keys[valid_ids], kind='stable')]
+    section_rows = {
+        True: by_key[in_prefix[by_key]],
+        False: by_key[~in_prefix[by_key]],
+    }
+    file_pos = np.full(n_rows, -1, np.int64)
+    file_pos[np.concatenate([section_rows[True], section_rows[False]])] = np.arange(len(valid_ids))
+    spill_entries: dict[str, tuple] = {}  # LOD name -> (host, zoom, tile, src), sorted by host
+    for b in lod_plan:
+        shown = np.flatnonzero((levels >> lod_bit[b['name']]) & 1)
+        parts = []
+        for z in b['zooms']:
+            src, tiles = straddlers(
+                bounds['xmin'][shown],
+                bounds['ymin'][shown],
+                bounds['xmax'][shown],
+                bounds['ymax'][shown],
+                z,
+            )
+            src = shown[src]
+            # hosts live in the main section, which a reader always searches
+            rows_in = section_rows[False] if len(section_rows[False]) else section_rows[True]
+            host = hosts(tiles, z, KEY_DEPTH, keys[rows_in], rows_in)
+            parts.append((host, np.full(len(tiles), z, np.int8), tiles, src))
+        if parts:
+            host, zoom_of, tile_of, src = (np.concatenate(c) for c in zip(*parts, strict=True))
+            order = np.argsort(host, kind='stable')
+            spill_entries[b['name']] = (host[order], zoom_of[order], tile_of[order], src[order])
+    spill_total = sum(len(v[0]) for v in spill_entries.values())
+    log(f'  {spill_total:,} straddler copies across {len(spill_entries)} LODs')
+    del bounds, keys, by_key
     lod_field = pa.field(
         'lod',
         pa.struct(
@@ -593,6 +703,7 @@ def write(
         write_page_index=True,
         write_batch_size=batch_rows,
         data_page_size=page_bytes,
+        max_rows_per_page=page_rows,
         data_page_version='1.0',
     )
     log(f'  {len(lod_plan)} LODs, batch {batch_rows} rows, prefix row groups {prefix_end + 1}')
@@ -600,8 +711,53 @@ def write(
     # 5. write: prefix rows first, then everything else, each in Hilbert order
     writer = pq.ParquetWriter(out, schema, **options)
     pool = ProcessPoolExecutor(max_workers=workers)
+
+    # the straddlers' copies, rendered once per LOD, and their attributes
+    spill_store: dict[str, tuple] = {}
+    spill_src = (
+        np.unique(np.concatenate([v[3] for v in spill_entries.values()]))
+        if spill_entries
+        else np.zeros(0, np.int64)
+    )
+    spill_attr_values: dict[str, np.ndarray] = {}
+    if len(spill_src):
+        con.register('spill_ids', pa.table({'__id': spill_src + 1}))
+        attr_select = ''.join(f', s.{a.name}' for a in attributes)
+        src_table = con.execute(
+            f'SELECT s.__id, s.{geometry} AS g, s.__cx AS cx, s.__cy AS cy{attr_select} '
+            f"FROM '{sorted_path}' s JOIN spill_ids USING (__id) ORDER BY s.__id"
+        ).to_arrow_table()
+        src_ids = src_table.column('__id').to_numpy() - 1
+        src_cx = src_table.column('cx').to_numpy(zero_copy_only=False)
+        src_cy = src_table.column('cy').to_numpy(zero_copy_only=False)
+        src_wkb = src_table.column('g').to_numpy(zero_copy_only=False)
+        for a in attributes:
+            spill_attr_values[a.name] = src_table.column(a.name).combine_chunks()
+        for b in lod_plan:
+            if b['name'] not in spill_entries:
+                continue
+            srcs = np.unique(spill_entries[b['name']][3])
+            idx = np.searchsorted(src_ids, srcs)
+            if b['geometry_type'] == 'Point':
+                spill_store[b['name']] = (srcs, (src_cx[idx], src_cy[idx]))
+                continue
+            scale, offset = grids[b['name']]
+            chunks = [idx[i : i + 50_000] for i in range(0, len(idx), 50_000)]
+            jobs = [
+                (
+                    src_wkb[c],
+                    src_cx[c],
+                    src_cy[c],
+                    [(scale, offset, np.arange(len(c)))],
+                    family,
+                    dot_cells,
+                )
+                for c in chunks
+            ]
+            spill_store[b['name']] = (srcs, _concat_parts([r[0] for r in pool.map(_render, jobs)]))
+        log(f'  straddler copies rendered, {time.time() - t0:.0f}s')
+        del src_table, src_wkb
     row_groups = 0
-    lod_bit = {b['name']: zooms.index(b['zooms'][0]) for b in lod_plan}
 
     def flush(table: pa.Table, fut):
         nonlocal row_groups
@@ -626,7 +782,24 @@ def write(
             else:
                 geom = nested_array(rendered[k], LIST_DEPTH[b['geometry_type']])
                 k += 1
-            arrays.append(lod_array(geom, attrs, mask))
+            spill = _spill_for_batch(
+                b,
+                ids,
+                attributes,
+                spill_entries,
+                spill_store,
+                spill_attr_values,
+                file_pos,
+                grids,
+                src_ids if len(spill_src) else None,
+            )
+            if spill is None:
+                spill = pa.nulls(
+                    len(ids), lod_type(b['geometry_type'], attributes).field('spill').type
+                )
+            else:
+                mask = mask | spill.is_valid().to_numpy(zero_copy_only=False)
+            arrays.append(lod_array(geom, attrs, mask, spill))
         lod = pa.StructArray.from_arrays(arrays, [b['name'] for b in lod_plan])
         cols = {name: table.column(name) for name in table.column_names}
         out_table = pa.table(

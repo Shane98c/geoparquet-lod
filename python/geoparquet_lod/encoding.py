@@ -39,8 +39,30 @@ def geometry_type(name: str) -> pa.DataType:
     return t
 
 
+def spill_type(name: str, attributes: list[pa.Field]) -> pa.DataType:
+    """Copies of other rows' geometry hosted here for the tiles they reach
+    into: the zoom and tile (x * 2^zoom + y) each copy serves, the file row
+    index of the feature, its geometry on this LOD's grid, and its attributes."""
+    entry = pa.struct(
+        [
+            pa.field('zoom', pa.int8(), nullable=False),
+            pa.field('tile', pa.int64(), nullable=False),
+            pa.field('id', pa.int64(), nullable=False),
+            pa.field('geometry', geometry_type(name), nullable=False),
+            *attributes,
+        ]
+    )
+    return pa.list_(pa.field('element', entry, nullable=False))
+
+
 def lod_type(name: str, attributes: list[pa.Field]) -> pa.DataType:
-    return pa.struct([pa.field('geometry', geometry_type(name), nullable=False), *attributes])
+    return pa.struct(
+        [
+            pa.field('geometry', geometry_type(name), nullable=False),
+            *attributes,
+            pa.field('spill', spill_type(name, attributes), nullable=True),
+        ]
+    )
 
 
 def infer_attributes(schema: pa.Schema, carry) -> list[pa.Field]:
@@ -117,14 +139,44 @@ def nested_array(parts, depth: int) -> pa.Array:
     return arr.cast(t)
 
 
-def lod_array(geometry: pa.Array, attributes: dict[str, pa.Array], mask: np.ndarray) -> pa.Array:
+def lod_array(
+    geometry: pa.Array, attributes: dict[str, pa.Array], mask: np.ndarray, spill: pa.Array
+) -> pa.Array:
     """One LOD column: the struct is null where `mask` is False."""
     fields = [pa.field('geometry', geometry.type, nullable=False)]
     arrays = [geometry]
     for name, arr in attributes.items():
         fields.append(pa.field(name, arr.type, nullable=True))
         arrays.append(arr)
+    fields.append(pa.field('spill', spill.type, nullable=True))
+    arrays.append(spill)
     return pa.StructArray.from_arrays(arrays, fields=fields, mask=pa.array(~np.asarray(mask)))
+
+
+def spill_array(
+    name: str,
+    attributes: list[pa.Field],
+    counts: np.ndarray,
+    zoom: np.ndarray,
+    tile: np.ndarray,
+    ids: np.ndarray,
+    geometry: pa.Array,
+    attrs: dict[str, pa.Array],
+) -> pa.Array:
+    """The `spill` list of one batch: `counts` entries per row, null where none."""
+    t = spill_type(name, attributes)
+    entry = pa.StructArray.from_arrays(
+        [
+            pa.array(zoom, pa.int8()),
+            pa.array(tile, pa.int64()),
+            pa.array(ids, pa.int64()),
+            geometry,
+            *[attrs[a.name].cast(a.type) for a in attributes],
+        ],
+        fields=list(t.value_type),
+    )
+    offsets = np.concatenate([[0], np.cumsum(counts)]).astype(np.int32)
+    return pa.ListArray.from_arrays(pa.array(offsets), entry, mask=pa.array(counts == 0)).cast(t)
 
 
 def geometry_rows(column: pa.Array) -> list:

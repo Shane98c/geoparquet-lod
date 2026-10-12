@@ -86,7 +86,7 @@ def test_polygons_roundtrip(buildings, tmp_path):
     assert meta['lods'][shape]['geometry_type'] == 'MultiPolygon'
     values = shown(out, shape)
     assert len(values) == 3000, 'every polygon is present from the complete zoom'
-    assert set(values.type.names) == {'geometry', 'risk', 'floors', 'name'}
+    assert set(values.type.names) == {'geometry', 'risk', 'floors', 'name', 'spill'}
     assert values.field('floors').type == pa.int32()
     rg = pq.ParquetFile(out).metadata.row_group(0)
     coordinate_chunks = [
@@ -310,3 +310,79 @@ def test_tile_directory_sidecar(buildings, tmp_path):
         validate(out)
     sidecar.unlink()
     assert validate(out)['tile_directory'] is None
+
+
+def test_straddlers_are_copied_into_the_tiles_they_reach(buildings, tmp_path):
+    from geoparquet_lod.spill import straddlers
+    from geoparquet_lod.writer import hilbert_key
+
+    out = write(buildings, tmp_path / 'spill.parquet', workers=1, log=lambda *_: None)
+    validate(out)
+    meta = json.loads(pq.read_schema(out).metadata[b'geo'])['lod_columns']
+    depth = meta['key']['depth']
+    t = pq.read_table(out, columns=['geometry', 'hilbert', 'lod'])
+    # exact bounds, as the writer saw them; the stored covering is float32 and rounded outward
+    bounds = shapely.bounds(shapely.from_wkb(t.column('geometry').to_numpy(zero_copy_only=False)))
+    b = dict(zip(('xmin', 'ymin', 'xmax', 'ymax'), bounds.T, strict=True))
+    keys = t.column('hilbert').to_numpy()
+    lod = t.column('lod').combine_chunks()
+    finest = max(meta['zooms'])
+    name = next(n for n, c in meta['lods'].items() if finest in c['zooms'])
+    column = lod.field(name)
+    src, tiles = straddlers(b['xmin'], b['ymin'], b['xmax'], b['ymax'], finest)
+    assert len(src) > 0, 'the fixture has buildings crossing tile edges at the finest zoom'
+    n = 2**finest
+    span = 4 ** (depth - finest)
+    spill = column.field('spill').to_pylist()
+    f = pq.ParquetFile(out)
+    prefix = meta['prefix']
+    main_start = (
+        sum(f.metadata.row_group(g).num_rows for g in range(prefix['row_group_end'] + 1))
+        if prefix
+        else 0
+    )
+    main_keys = keys[main_start:]
+    for row, tile in list(zip(src, tiles, strict=True))[:50]:
+        start = int(hilbert_key(np.array([tile // n]), np.array([tile % n]), finest)[0]) * span
+        # the tile's own rows, plus the first main-section row at or past its interval
+        inside = np.flatnonzero((keys >= start) & (keys < start + span))
+        host = main_start + min(int(np.searchsorted(main_keys, start)), len(main_keys) - 1)
+        inside = np.unique(np.concatenate([inside, [host]]))
+        copies = [
+            e
+            for host in inside
+            for e in (spill[host] or [])
+            if e['zoom'] == finest and e['tile'] == tile
+        ]
+        assert any(e['id'] == row for e in copies), f'row {row} not copied into tile {tile}'
+        assert all(column[host].is_valid for host in inside if spill[host])
+
+
+def test_reader_finds_straddler_copies(buildings, tmp_path):
+    """The JS reader, reading a tile as its key interval, returns the copies."""
+    import subprocess
+
+    from geoparquet_lod.spill import straddlers
+
+    out = write(
+        buildings, tmp_path / 'spill.parquet', carry=['floors'], workers=1, log=lambda *_: None
+    )
+    meta = json.loads(pq.read_schema(out).metadata[b'geo'])['lod_columns']
+    finest = max(meta['zooms'])
+    t = pq.read_table(out, columns=['geometry'])
+    bounds = shapely.bounds(shapely.from_wkb(t.column('geometry').to_numpy(zero_copy_only=False)))
+    rows, tiles = straddlers(bounds[:, 0], bounds[:, 1], bounds[:, 2], bounds[:, 3], finest)
+    n = 2**finest
+    cases = [
+        {'z': finest, 'x': int(tl // n), 'y': int(tl % n), 'id': int(r), 'attribute': 'floors'}
+        for r, tl in zip(rows[:20], tiles[:20], strict=True)
+    ]
+    (tmp_path / 'cases.json').write_text(json.dumps(cases))
+    script = Path(__file__).resolve().parents[1] / 'js' / 'test' / 'spill.test.mjs'
+    result = subprocess.run(
+        ['node', str(script), str(out), str(tmp_path / 'cases.json')],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert 'spill tests passed' in result.stdout

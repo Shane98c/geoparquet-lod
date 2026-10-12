@@ -52,8 +52,17 @@ A conforming file MUST satisfy:
    with row group statistics and a page index; a reader finds a tile's row
    groups from the footer, its key pages from the page index, and its exact
    rows by reading the two boundary key pages, then reads only those rows of
-   the LOD leaves, taking a one-cell ring at a finer depth around the tile for
-   features centred outside it that reach into its buffer. The per-row
+   the LOD leaves. A feature centred outside a tile whose geometry reaches
+   into the tile or its buffer (64/4096 of the tile) is a _straddler_; its
+   row is in another interval, so each LOD struct carries a nullable `spill`
+   list of copies: `{zoom, tile, id, geometry, attributes...}`, where
+   `tile` is `x * 2^zoom + y`, `id` the feature's file row index and
+   `geometry` its geometry on that LOD's grid. The writer MUST place every
+   copy a tile needs on the tile's _host_: the first row of the main section
+   whose key is at or past the tile's interval start, or the last row when
+   none is, and a row shown only to host copies has an empty geometry. A
+   reader therefore reads the interval's rows plus the host row and keeps the
+   copies whose `zoom` and `tile` are the tile's. The per-row
    uniform `u` the reference writer hands thinnings is a hash of the
    geometry bytes, so it does not depend on sort order.
 2. **Prefix.** When `prefix` is present, every row whose coarsest zoom is at
@@ -71,8 +80,9 @@ A conforming file MUST satisfy:
    since zooms sharing an LOD agree on row selection, that is one condition
    per LOD. Each child has a required `geometry` field in the encoding
    below and one nullable field per carried attribute, in `attributes`
-   order, each a scalar Arrow type stored as one Parquet leaf. A row whose
-   primary geometry is null or empty is shown at no LOD.
+   order, each a scalar Arrow type stored as one Parquet leaf, and a nullable
+   `spill` list of straddler copies, see Layout 1. A row whose primary
+   geometry is null or empty is shown at no LOD.
 
 The validator checks the metadata, the schema shapes, covering statistics,
 page indexes, that prefix row groups hold only prefix rows, and a sample

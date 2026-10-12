@@ -13,7 +13,7 @@ import { DEFAULT_PARSERS } from 'hyparquet/src/convert.js'
 import { getSchemaPath } from 'hyparquet/src/schema.js'
 import { compressors } from 'hyparquet-compressors'
 import { LIST_DEPTH, type GeometryType } from './geometry.js'
-import { tileIntervals, type Interval } from './key.js'
+import { tileInterval, type Interval } from './key.js'
 
 export type Bbox = [number, number, number, number]
 
@@ -218,10 +218,11 @@ export class LodReader {
   }
 
   /**
-   * Every row shown at `lod` in tile z/x/y or the one-cell ring around it,
-   * located through the stored Hilbert key: row groups by the key's footer
-   * statistics, pages by its page index, exact rows by the boundary key
-   * pages. No bbox read is made; the tile encoder clips what the ring adds.
+   * Every row shown at `lod` in tile z/x/y, located through the stored
+   * Hilbert key: row groups by the key's footer statistics, pages by its page
+   * index, exact rows by the boundary key pages. Features centred outside the
+   * tile that reach into it come as copies in the `spill` of a row inside the
+   * interval or of the first row past it, so no bbox is read.
    */
   async readLodByTile(
     lod: Lod,
@@ -240,35 +241,78 @@ export class LodReader {
     }
     const prefix = this.lod.prefix
     const coarse = prefix && Math.max(...lod.zooms) <= prefix.zoom
-    const intervals = tileIntervals(key.depth, z, x, y)
-    const overlaps = (lo: number, hi: number) => intervals.some(([a, b]) => lo < b && hi >= a)
-    const groups = this.metadata.row_groups
-      .map((_, g) => g)
-      .filter((g) => {
-        if (coarse && g > prefix!.row_group_end) return false
-        const stat = this.chunk(g, key.column).meta_data!.statistics
-        if (!stat || stat.min_value == null || stat.max_value == null) return true
-        return overlaps(unsigned(stat.min_value), unsigned(stat.max_value))
-      })
+    const interval = tileInterval(key.depth, z, x, y)
+    const [start, end] = interval
+    const stats = (g: number) => {
+      const s = this.chunk(g, key.column).meta_data!.statistics
+      return s && s.min_value != null && s.max_value != null
+        ? [unsigned(s.min_value), unsigned(s.max_value)]
+        : [-Infinity, Infinity]
+    }
+    const mainFirst = prefix ? prefix.row_group_end + 1 : 0
+    const all = this.metadata.row_groups.map((_, g) => g)
+    const groups = all.filter((g) => {
+      if (coarse && g >= mainFirst) return false
+      const [lo, hi] = stats(g)
+      return lo < end && hi >= start
+    })
+    // the host of copies for this tile: the first main-section row with key >= start
+    const hostGroup = all.find((g) => g >= mainFirst && stats(g)[1] >= start) ?? all[all.length - 1]
+    if (hostGroup !== undefined && !groups.includes(hostGroup)) groups.push(hostGroup)
+    const base = `${this.lod.column}.${lod.name}`
+    const spillBase = `${base}.spill.list.element`
+    const geometryTail = '.list.element'.repeat(LIST_DEPTH[lod.geometry_type] + 1)
     const leaves = [
       this.geometryLeaf(lod),
-      ...attributes.map((a) => `${this.lod.column}.${lod.name}.${a}`),
+      ...attributes.map((a) => `${base}.${a}`),
+      `${spillBase}.zoom`,
+      `${spillBase}.tile`,
+      `${spillBase}.id`,
+      `${spillBase}.geometry${geometryTail}`,
+      ...attributes.map((a) => `${spillBase}.${a}`),
     ]
+    const tile = x * 2 ** z + y
     const perGroup = await Promise.all(
       groups.map(async (g) => {
-        const ranges = await this.keyRanges(g, key.column, intervals, signal)
+        const ranges = await this.keyRanges(
+          g,
+          key.column,
+          [interval],
+          g === hostGroup ? start : null,
+          signal,
+        )
         if (!ranges.length) return { g, values: leaves.map(() => new Map<number, unknown>()) }
         const values = await Promise.all(leaves.map((l) => this.readLeafRows(g, l, ranges, signal)))
         return { g, values }
       }),
     )
+    const n = attributes.length
     for (const { g, values } of perGroup) {
-      const start = this.rowGroupStarts[g]
-      const [coords, ...attrs] = values
+      const rowStart = this.rowGroupStarts[g]
+      const [coords, ...rest] = values
+      const attrs = rest.slice(0, n)
+      const [zooms, tiles, ids, geoms] = rest.slice(n, n + 4)
+      const spillAttrs = rest.slice(n + 4)
       for (const [row, c] of coords) {
-        out.rows.push(start + row)
-        out.coords.push(c)
-        attributes.forEach((a, i) => out.columns[a].push(attrs[i].get(row) ?? null))
+        if ((c as unknown[]).length) {
+          out.rows.push(rowStart + row)
+          out.coords.push(c)
+          attributes.forEach((a, i) => out.columns[a].push(attrs[i].get(row) ?? null))
+        }
+        const zs = spillList(zooms.get(row))
+        if (!zs) continue
+        const ts = spillList(tiles.get(row)) ?? []
+        const is = spillList(ids.get(row)) ?? []
+        const gs = spillList(geoms.get(row)) ?? []
+        zs.forEach((zz, k) => {
+          if (Number(zz) !== z || Number(ts[k]) !== tile) return
+          out.rows.push(Number(is[k]))
+          out.coords.push(gs[k])
+          attributes.forEach((a, i) => {
+            const v = spillList(spillAttrs[i].get(row))
+            out.columns[a].push(v?.[k] ?? null)
+          })
+        })
       }
     }
     return out
@@ -277,12 +321,14 @@ export class LodReader {
   /**
    * Row ranges of group `g` whose key lies in `intervals`: the key pages whose
    * statistics overlap, with the first and last page of each run read to find
-   * the exact rows, since a page's rows run far past a fine tile's.
+   * the exact rows, since a page's rows run far past a fine tile's. With
+   * `host`, also the first row whose key is at or past it.
    */
   private async keyRanges(
     g: number,
     column: string,
     intervals: Interval[],
+    host: number | null,
     signal?: AbortSignal,
   ): Promise<[number, number][]> {
     const [pages, index] = await Promise.all([
@@ -296,6 +342,12 @@ export class LodReader {
       const hi = unsigned(index.max_values[p] as unknown as number)
       return intervals.some(([a, b]) => lo < b && hi >= a)
     })
+    const hostPage =
+      host === null
+        ? -1
+        : pages.findIndex((_, p) => unsigned(index.max_values[p] as unknown as number) >= host)
+    if (hostPage >= 0) hit[hostPage] = true
+    else if (host !== null && pages.length) hit[pages.length - 1] = true
     const runs: [number, number][] = []
     for (let p = 0; p < pages.length; p++) {
       if (!hit[p]) continue
@@ -308,17 +360,27 @@ export class LodReader {
       edges.add(a)
       edges.add(b - 1)
     }
+    if (hostPage >= 0) edges.add(hostPage)
+    else if (host !== null && pages.length) edges.add(pages.length - 1)
     const edgePages = [...edges].sort((a, b) => a - b).map((p) => pages[p])
     const decoded = await this.pageValues(g, column, edgePages, signal)
     const exact = new Map<number, [number, number][]>()
+    let hostRow = -1
     edgePages.forEach((page, i) => {
       const rows: [number, number][] = []
+      let lastRow = -1
       for (const [row, value] of decoded[i]) {
-        if (!inside(unsigned(value as number))) continue
+        const k = unsigned(value as number)
+        lastRow = row
+        if (host !== null && hostRow < 0 && k >= host) hostRow = row
+        if (!inside(k)) continue
         const last = rows[rows.length - 1]
         if (last && last[1] === row) last[1] = row + 1
         else rows.push([row, row + 1])
       }
+      // past every key: the last row stands in as host
+      if (host !== null && hostRow < 0 && i === edgePages.length - 1 && hostPage < 0)
+        hostRow = lastRow
       exact.set(page.rowStart, rows)
     })
     const out: [number, number][] = []
@@ -330,6 +392,7 @@ export class LodReader {
         else out.push([page.rowStart, page.rowEnd])
       }
     }
+    if (hostRow >= 0) out.push([hostRow, hostRow + 1])
     return mergeRanges(out)
   }
 
@@ -877,6 +940,10 @@ const unwrap = (v: unknown): unknown => {
   if (!Array.isArray(v)) return v === null || v === undefined ? ABSENT : v
   return v.length ? v[0] : ABSENT
 }
+
+/** The entries of a row's `spill` list leaf: hyparquet wraps the list in one more array than the struct level. */
+const spillList = (v: unknown): unknown[] | undefined =>
+  Array.isArray(v) && Array.isArray(v[0]) ? (v[0] as unknown[]) : undefined
 
 /** A uint32 key decoded as a signed int32 comes back negative above 2^31. */
 const unsigned = (v: unknown): number => {
