@@ -550,10 +550,12 @@ def write(
         '  rows shown at each zoom: '
         + ', '.join(f'z{zooms[i]}={counts[i]:,}' for i in range(len(zooms)))
     )
+    n_valid = rows.num_rows
+    del rows, kept
     # the zooms are complete from the first of the run of finest zooms that keep every row
     complete_from = None
     for i in range(len(zooms) - 1, -1, -1):
-        if counts[i] != rows.num_rows:
+        if counts[i] != n_valid:
             break
         complete_from = zooms[i]
     single = False
