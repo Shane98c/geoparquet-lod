@@ -1,53 +1,34 @@
 import assert from 'node:assert/strict'
-import { GeometryBuilder, decodeCoordinates } from '../dist/index.js'
+import { GeometryBuilder, decodeRow } from '../dist/index.js'
 
-// rings as stored: each pair is the zigzag-coded step from the previous vertex of its ring
-const zigzag = (v) => (v << 1) ^ (v >> 31)
-const stored = (ring) => {
-  let x = 0
-  let y = 0
-  return ring.map(([px, py]) => {
-    const d = [zigzag(px - x), zigzag(py - y)]
-    x = px
-    y = py
-    return d
-  })
-}
-// a MultiPolygon row as hyparquet returns the interleaved coordinate leaf: polygons > rings > [x, y]
+// a MultiPolygon row as the decoder returns it: polygons > rings > [x, y] in grid units
 const mp = [
   [
-    stored([
+    [
       [0, 0],
       [3, 0],
       [3, 3],
       [0, 0],
-    ]),
+    ],
   ],
   [
-    stored([
+    [
       [10, 10],
       [12, 10],
       [10, 12],
       [10, 10],
-    ]),
+    ],
   ],
 ]
-assert.deepEqual(mp[0][0][3], [5, 5], 'a step back of three is zigzag 5')
-assert.deepEqual(decodeCoordinates(mp, [0.5, 0.5], [100, 200])[0][0][1], [101.5, 200])
-assert.deepEqual(decodeCoordinates(mp, [0.5, 0.5], [100, 200])[1][0][2], [105, 206])
-
 const b = new GeometryBuilder()
 b.add('MultiPolygon', mp)
-b.add(
-  'MultiLineString',
+b.add('MultiLineString', [
   [
-    [
-      [0, 0],
-      [1, 1],
-    ],
-  ].map(stored),
-)
-b.add('Point', stored([[7, 8]])[0])
+    [0, 0],
+    [1, 1],
+  ],
+])
+b.add('Point', [7, 8])
 const g = b.finish([1, 1], [0, 0])
 assert.equal(g.length, 3)
 assert.deepEqual(Array.from(g.types), [6, 5, 1])
@@ -58,6 +39,65 @@ assert.deepEqual(Array.from(g.x), [0, 3, 3, 0, 10, 12, 10, 10, 0, 1, 7])
 assert.deepEqual(Array.from(g.y), [0, 0, 3, 0, 10, 10, 12, 10, 0, 1, 8])
 
 assert.throws(() => b.add('MultiPolygon', [[[[0, 1, 2]]]]), /pair/)
+
+// a packed row: one square at (5, 5) of side 2, attributes h=3 (int), name='ab' (string),
+// hosting one copy for tile zoom 12 / 7 of row 9: a unit square at (1, 1), h=4, name=null
+const zz = (v) => (v < 0 ? -2 * v - 1 : 2 * v)
+const varint = (v) => {
+  const out = []
+  while (v >= 128) {
+    out.push((v % 128) + 128)
+    v = Math.floor(v / 128)
+  }
+  out.push(v)
+  return out
+}
+const ringBytes = (pts) => {
+  const out = varint(pts.length)
+  let x = 0
+  let y = 0
+  for (const [px, py] of pts) {
+    out.push(...varint(zz(px - x)), ...varint(zz(py - y)))
+    x = px
+    y = py
+  }
+  return out
+}
+const square = (x, y, s) => [
+  [x, y],
+  [x + s, y],
+  [x + s, y + s],
+  [x, y + s],
+  [x, y],
+]
+const bytes = Uint8Array.from([
+  ...varint(1),
+  ...varint(1),
+  ...ringBytes(square(5, 5, 2)), // own geometry: one polygon, one ring
+  ...varint(0b11),
+  ...varint(zz(3)),
+  ...varint(2), // attrs: both present, h=3, name length 2
+  ...varint(1), // one copy
+  ...varint(12 * 2 ** 48 + 7),
+  ...varint(9),
+  ...varint(1),
+  ...varint(1),
+  ...ringBytes(square(1, 1, 1)),
+  ...varint(0b01),
+  ...varint(zz(4)), // copy attrs: only h present
+  ...new TextEncoder().encode('ab'),
+])
+const row = decodeRow(bytes, 'MultiPolygon', [
+  { name: 'h', kind: 'int' },
+  { name: 'name', kind: 'string' },
+])
+assert.deepEqual(row.geometry, [[square(5, 5, 2)]])
+assert.deepEqual(row.attrs, [3, 'ab'])
+assert.equal(row.spill.length, 1)
+assert.equal(row.spill[0].tile, 12 * 2 ** 48 + 7)
+assert.equal(row.spill[0].id, 9)
+assert.deepEqual(row.spill[0].geometry, [[square(1, 1, 1)]])
+assert.deepEqual(row.spill[0].attrs, [4, null])
 console.log('decode tests passed')
 
 // the stored key: a tile is one interval, its parent the union of its four children

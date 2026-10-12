@@ -6,19 +6,11 @@ import json
 from pathlib import Path
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
-from .encoding import (
-    COORDINATES,
-    DELTAS,
-    ENCODING,
-    LIST_DEPTH,
-    geometry_rows,
-    geometry_type,
-    spill_type,
-)
-from .tiledir import KEY as TILE_DIRECTORY_KEY
-from .tiledir import sidecar_path, source_binding
+from .encoding import ENCODING, PACK_VERSION
+from .pack import FAMILY_DEPTH, Unpacker
 from .writer import LOD_KEY, LOD_VERSION
 
 
@@ -40,10 +32,8 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
         raise ValidationError(f'version {lod.get("version")} is not compatible with {LOD_VERSION}')
     if lod.get('encoding') != ENCODING:
         raise ValidationError(f'geometry encoding {lod.get("encoding")!r} is not {ENCODING}')
-    if lod.get('coordinates') != COORDINATES:
-        raise ValidationError(f'coordinate layout {lod.get("coordinates")!r} is not {COORDINATES}')
-    if lod.get('deltas') != DELTAS:
-        raise ValidationError(f'coordinate deltas {lod.get("deltas")!r} are not {DELTAS}')
+    if lod.get('pack_version') != PACK_VERSION:
+        raise ValidationError(f'pack_version {lod.get("pack_version")!r} is not {PACK_VERSION}')
     if md.num_row_groups == 0 or md.num_rows == 0:
         raise ValidationError('empty file: an empty dataset carries no LOD columns')
     column = lod.get('column', 'lod')
@@ -55,7 +45,6 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
     covering = geo.get('columns', {}).get(geo.get('primary_column', 'geometry'), {}).get('covering')
     if not covering:
         raise ValidationError('geo.columns.<geometry>.covering missing')
-    attributes = [a['name'] for a in lod.get('attributes', [])]
     lods = lod.get('lods') or {}
     if not lods:
         raise ValidationError('no lods declared')
@@ -69,26 +58,11 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
         if name not in children:
             raise ValidationError(f'lod {name} declared but column {column}.{name} missing')
         gtype = child.get('geometry_type')
-        if gtype not in LIST_DEPTH:
+        if gtype not in FAMILY_DEPTH:
             raise ValidationError(f'lod {name} has unknown geometry_type {gtype!r}')
         field = children[name]
-        if not field.nullable or not pa.types.is_struct(field.type):
-            raise ValidationError(f'{column}.{name} must be a nullable struct')
-        try:
-            geom = field.type.field('geometry')
-        except KeyError:
-            raise ValidationError(f'{column}.{name} has no geometry child') from None
-        if geom.nullable or geom.type != geometry_type(gtype):
-            raise ValidationError(f'{column}.{name}.geometry is not {ENCODING} {gtype}')
-        if 'spill' not in field.type.names or field.type.field('spill').type != spill_type(
-            gtype, [field.type.field(a) for a in attributes]
-        ):
-            raise ValidationError(f'{column}.{name}.spill is missing or has the wrong shape')
-        for a in attributes:
-            if a not in field.type.names:
-                raise ValidationError(f'{column}.{name} lacks carried attribute {a}')
-            if pa.types.is_nested(field.type.field(a).type):
-                raise ValidationError(f'{column}.{name}.{a} is nested; attributes are scalars')
+        if not field.nullable or not pa.types.is_binary(field.type):
+            raise ValidationError(f'{column}.{name} must be a nullable binary column')
         for key in ('scale', 'offset'):
             v = child.get(key)
             if not (isinstance(v, list) and len(v) == 2):
@@ -101,8 +75,6 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
     prefix = lod.get('prefix')
     if prefix and not (0 <= prefix['row_group_end'] < md.num_row_groups):
         raise ValidationError('prefix row_group_end out of range')
-
-    directory = check_tile_directory(path)
 
     # statistics on the covering and page indexes on every column, in every row group
     for g in range(md.num_row_groups):
@@ -117,30 +89,34 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
             if not c.has_offset_index:
                 raise ValidationError(f'row group {g}: {c.path_in_schema} has no offset index')
     if prefix:
-        # prefix row groups hold only rows shown at the prefix zoom: every row has that LOD
-        coarsest = next(n for n, b in lods.items() if prefix['zoom'] in b['zooms'])
+        # prefix row groups hold only rows shown at some zoom at or below the prefix zoom
+        coarse = [n for n, b in lods.items() if min(b['zooms']) <= prefix['zoom']]
         for g in range(prefix['row_group_end'] + 1):
-            col = (
-                f.read_row_group(g, columns=[column])
-                .column(column)
-                .combine_chunks()
-                .field(coarsest)
-            )
-            if col.null_count:
+            col = f.read_row_group(g, columns=[column]).column(column).combine_chunks()
+            shown = None
+            for n in coarse:
+                valid = col.field(n).is_valid()
+                shown = valid if shown is None else pc.or_(shown, valid)
+            if shown is not None and not pc.all(shown).as_py():
                 raise ValidationError(
-                    f'prefix row group {g} holds rows not shown at z{prefix["zoom"]}'
+                    f'prefix row group {g} holds rows not shown by z{prefix["zoom"]}'
                 )
 
     # a sample of every LOD: non-empty parts, closed rings
     head = f.read_row_group(0, columns=[column]).slice(0, sample_rows)
+    fields = [pa.field(a['name'], pa.type_for_alias(a['type'])) for a in lod.get('attributes', [])]
     checked = {}
     for name, child in lods.items():
         values = head.column(column).combine_chunks().field(name)
         shown = values.filter(values.is_valid())
-        geoms = geometry_rows(shown.field('geometry').slice(0, 200))
-        hosting = shown.field('spill').slice(0, 200).is_valid().to_pylist()
-        for g, hosts in zip(geoms, hosting, strict=True):
-            _check_geometry(name, child['geometry_type'], g, hosts)
+        for blob in shown.slice(0, 200).to_pylist():
+            u = Unpacker(blob, child['geometry_type'], fields)
+            row = u.row()
+            if u.pos != len(blob):
+                raise ValidationError(f'lod {name}: a packed row has trailing bytes')
+            _check_geometry(name, child['geometry_type'], row['geometry'], bool(row['spill']))
+            for copy in row['spill']:
+                _check_geometry(name, child['geometry_type'], copy['geometry'])
         checked[name] = len(shown)
     return {
         'rows': md.num_rows,
@@ -149,21 +125,7 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
         'lods': list(lods),
         'prefix': prefix,
         'sampled_non_null': checked,
-        'tile_directory': directory,
     }
-
-
-def check_tile_directory(path: str | Path) -> str | None:
-    """When a tile directory sits beside the file, check that it is bound to this file.
-    Returns 'bound', or None when there is none."""
-    sidecar = sidecar_path(path)
-    if not sidecar.exists():
-        return None
-    meta = pq.ParquetFile(sidecar).metadata.metadata or {}
-    header = json.loads(meta.get(TILE_DIRECTORY_KEY.encode(), b'{}'))
-    if header.get('source') != source_binding(path):
-        raise ValidationError(f'{sidecar.name} is bound to a different write of this file')
-    return 'bound'
 
 
 def _check_geometry(name: str, gtype: str, g, hosts: bool = False) -> None:

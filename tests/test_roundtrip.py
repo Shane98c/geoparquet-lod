@@ -9,7 +9,7 @@ import pyarrow.parquet as pq
 import pytest
 import shapely
 from geoparquet_lod import cluster, drop_rate, importance, only, size_threshold, validate, write
-from geoparquet_lod.encoding import geometry_rows
+from geoparquet_lod.pack import Unpacker
 
 GEO = {
     'version': '1.1.0',
@@ -62,10 +62,16 @@ def points(tmp_path):
 
 
 def shown(path, lod_name):
-    """The LOD struct values of rows shown at `lod_name`."""
+    """The packed LOD values of rows shown at `lod_name`."""
     f = pq.ParquetFile(path)
     values = f.read(columns=['lod']).column('lod').combine_chunks().field(lod_name)
     return values.filter(values.is_valid())
+
+
+def unpacked(values, family, fields=()):
+    """Decoded rows of packed LOD values."""
+    fields = [pa.field(n, t) for n, t in fields]
+    return [Unpacker(b, family, fields).row() for b in values.to_pylist()]
 
 
 def test_polygons_roundtrip(buildings, tmp_path):
@@ -80,25 +86,23 @@ def test_polygons_roundtrip(buildings, tmp_path):
     summary = validate(out)
     assert summary['rows'] == 3000
     meta = json.loads(pq.read_schema(out).metadata[b'geo'])['lod_columns']
-    assert meta['encoding'] == 'quantized_geoarrow' and meta['coordinates'] == 'interleaved'
+    assert meta['encoding'] == 'packed' and meta['pack_version'] == 1
     finest = max(meta['zooms'])
     shape = next(n for n, lod in meta['lods'].items() if finest in lod['zooms'])
     assert meta['lods'][shape]['geometry_type'] == 'MultiPolygon'
     values = shown(out, shape)
     assert len(values) == 3000, 'every polygon is present from the complete zoom'
-    assert set(values.type.names) == {'geometry', 'risk', 'floors', 'name', 'spill'}
-    assert values.field('floors').type == pa.int32()
-    rg = pq.ParquetFile(out).metadata.row_group(0)
-    coordinate_chunks = [
-        rg.column(i)
-        for i in range(rg.num_columns)
-        if rg.column(i).path_in_schema.startswith(f'lod.{shape}.geometry')
-    ]
-    assert coordinate_chunks and all('BYTE_STREAM_SPLIT' in c.encodings for c in coordinate_chunks)
-    polygons = geometry_rows(values.field('geometry').slice(0, 5))
+    assert values.type == pa.binary()
+    assert [a['name'] for a in meta['attributes']] == ['risk', 'floors', 'name']
+    assert next(a for a in meta['attributes'] if a['name'] == 'floors')['type'] == 'int32'
+    fields = [(a['name'], pa.type_for_alias(a['type'])) for a in meta['attributes']]
+    decoded = unpacked(values.slice(0, 5), 'MultiPolygon', fields)
+    polygons = [d['geometry'] for d in decoded]
     assert polygons[0][0][0][0] == polygons[0][0][0][-1], 'rings are closed'
     # attribute nulls survive as nulls
-    assert values.field('floors').null_count > 0
+    everything = unpacked(values, 'MultiPolygon', fields)
+    assert any(d['attrs']['floors'] is None for d in everything)
+    assert all(isinstance(d['attrs']['name'], str) for d in everything)
     # a shape LOD decodes back near the source
     lod = meta['lods'][shape]
     x, y = polygons[0][0][0][0]
@@ -107,7 +111,9 @@ def test_polygons_roundtrip(buildings, tmp_path):
     thinned = [n for n, lod in meta['lods'].items() if lod['zooms'][0] < 12]
     assert all(meta['lods'][n]['geometry_type'] == 'MultiPolygon' for n in thinned)
     counts = [len(shown(out, n)) for n in thinned]
-    coarse = geometry_rows(shown(out, thinned[0]).field('geometry').slice(0, 3))
+    coarse = [
+        d['geometry'] for d in unpacked(shown(out, thinned[0]).slice(0, 3), 'MultiPolygon', fields)
+    ]
     assert all(len(g[0][0]) == 5 for g in coarse), 'collapsed buildings are squares'
     assert counts == sorted(counts)
     assert counts[-1] <= 3000 * 0.8 + 50, 'rows with risk <= 0.2 never appear at point zooms'
@@ -136,7 +142,8 @@ def test_points_importance_and_cluster(points, tmp_path):
     meta = json.loads(pq.read_schema(out2).metadata[b'geo'])['lod_columns']
     coarsest = min(meta['lods'], key=lambda n: meta['lods'][n]['zooms'][0])
     values = shown(out2, coarsest)
-    assert sum(values.field('count').to_pylist()) == 2000, 'cluster counts add up to every point'
+    decoded = unpacked(values, 'Point', [('count', pa.uint32())])
+    assert sum(d['attrs']['count'] for d in decoded) == 2000, 'cluster counts add up to every point'
     assert len(values) < 2000
 
 
@@ -180,7 +187,7 @@ def test_lines_roundtrip(tmp_path):
     assert meta['lods'][finest]['geometry_type'] == 'MultiLineString'
     values = shown(out, finest)
     assert len(values) == 400
-    rows = geometry_rows(values.field('geometry'))
+    rows = [d['geometry'] for d in unpacked(values, 'MultiLineString', [('road', pa.string())])]
     # every part keeps its vertex count: the finest grid is below the vertex spacing
     f = pq.ParquetFile(out)
     src_geoms = shapely.from_wkb(
@@ -238,7 +245,8 @@ def test_null_override_and_combined_tiny(points, tmp_path):
     )
     meta = json.loads(pq.read_schema(out).metadata[b'geo'])['lod_columns']
     coarsest = min(meta['lods'], key=lambda n: meta['lods'][n]['zooms'][0])
-    assert shown(out, coarsest).field('population').null_count == len(shown(out, coarsest)), (
+    decoded = unpacked(shown(out, coarsest), 'Point', [('population', pa.uint32())])
+    assert all(d['attrs']['population'] is None for d in decoded), (
         'an explicit null override is written'
     )
 
@@ -282,36 +290,6 @@ def test_cli_auto_thinning():
     assert parse_thinning('auto', 'risk > 0').__name__.startswith('only(')
 
 
-def test_tile_directory_sidecar(buildings, tmp_path):
-    out = write(
-        buildings,
-        tmp_path / 'td.parquet',
-        carry=['risk'],
-        workers=1,
-        tile_directory=True,
-        log=lambda *_: None,
-    )
-    sidecar = tmp_path / 'td.parquet.tiledir.parquet'
-    assert sidecar.exists()
-    meta = json.loads(pq.read_schema(out).metadata[b'geo'])['lod_columns']
-    assert 'tile_directory' not in meta
-    assert validate(out)['tile_directory'] == 'bound'
-
-    from geoparquet_lod.validate import ValidationError
-
-    table = pq.read_table(sidecar)
-    header = json.loads(pq.ParquetFile(sidecar).metadata.metadata[b'lod_tile_directory'])
-    header['source']['footer_sha256'] = '0' * 64
-    pq.write_table(
-        table.replace_schema_metadata({b'lod_tile_directory': json.dumps(header).encode()}),
-        sidecar,
-    )
-    with pytest.raises(ValidationError, match='different write'):
-        validate(out)
-    sidecar.unlink()
-    assert validate(out)['tile_directory'] is None
-
-
 def test_straddlers_are_copied_into_the_tiles_they_reach(buildings, tmp_path):
     from geoparquet_lod.spill import straddlers
     from geoparquet_lod.writer import hilbert_key
@@ -333,7 +311,10 @@ def test_straddlers_are_copied_into_the_tiles_they_reach(buildings, tmp_path):
     assert len(src) > 0, 'the fixture has buildings crossing tile edges at the finest zoom'
     n = 2**finest
     span = 4 ** (depth - finest)
-    spill = column.field('spill').to_pylist()
+    spill = [
+        Unpacker(b, 'MultiPolygon', []).row()['spill'] if b is not None else None
+        for b in column.to_pylist()
+    ]
     f = pq.ParquetFile(out)
     prefix = meta['prefix']
     main_start = (
@@ -355,7 +336,6 @@ def test_straddlers_are_copied_into_the_tiles_they_reach(buildings, tmp_path):
             if e['tile'] == (finest << 48) | int(tile)
         ]
         assert any(e['id'] == row for e in copies), f'row {row} not copied into tile {tile}'
-        assert all(column[host].is_valid for host in inside if spill[host])
 
 
 def test_reader_finds_straddler_copies(buildings, tmp_path):

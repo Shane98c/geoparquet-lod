@@ -30,22 +30,18 @@ from pathlib import Path
 import duckdb
 import numpy as np
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
-from . import tiledir
 from .encoding import (
-    COORDINATES,
-    DELTAS,
     ENCODING,
     GEOMETRY_TYPES,
-    LIST_DEPTH,
+    PACK_VERSION,
     infer_attributes,
-    lod_array,
     lod_type,
-    nested_array,
-    point_array,
-    spill_array,
+    point_parts,
 )
+from .pack import pack
 from .quantize import (
     DOT_CELLS,
     MAX_LATITUDE,
@@ -303,7 +299,7 @@ def _concat_parts(parts_list):
 def _spill_for_batch(
     b, ids, attributes, spill_entries, spill_store, attr_values, file_pos, grids, src_ids
 ):
-    """The `spill` list of one batch for LOD `b`, or None when no row hosts a copy."""
+    """The copies one batch hosts for LOD `b`, as `pack` takes them, or None."""
     entries = spill_entries.get(b['name'])
     if entries is None:
         return None
@@ -319,20 +315,24 @@ def _spill_for_batch(
     srcs, store = spill_store[b['name']]
     pos = np.searchsorted(srcs, src[pick])
     if b['geometry_type'] == 'Point':
-        geom = point_array(store[0][pos], store[1][pos], *grids[b['name']])
+        parts = point_parts(store[0][pos], store[1][pos], *grids[b['name']])
     else:
-        geom = nested_array(take_ragged(store, pos), LIST_DEPTH[b['geometry_type']])
+        parts = take_ragged(store, pos)
     at = np.searchsorted(src_ids, src[pick])
-    attrs = {a.name: attr_values[a.name].take(pa.array(at)) for a in attributes}
-    return spill_array(
-        b['geometry_type'],
-        attributes,
-        counts,
-        tile_of[pick],
-        file_pos[src[pick]],
-        geom,
-        attrs,
-    )
+    attrs = {a.name: attr_values[a.name].take(pa.array(at)).cast(a.type) for a in attributes}
+    return (counts, tile_of[pick], file_pos[src[pick]], parts, attrs)
+
+
+def is_crs84(column) -> bool:
+    """GeoParquet: an omitted `crs` is OGC:CRS84, an explicit null is unknown."""
+    if 'crs' not in column:
+        return True
+    crs = column['crs']
+    if not isinstance(crs, dict):
+        return False
+    ident = crs.get('id') or {}
+    authority, code = str(ident.get('authority', '')).upper(), str(ident.get('code', ''))
+    return (authority, code) in (('OGC', 'CRS84'), ('EPSG', '4326'))
 
 
 def _render(args):
@@ -372,7 +372,6 @@ def write(
     workers: int | None = None,
     memory_limit: str | None = None,
     temp_dir: str | None = None,
-    tile_directory: bool = False,
     log=print,
 ) -> Path:
     """Write `src` (any GeoParquet with a WKB geometry column) to `out` in the
@@ -381,8 +380,7 @@ def write(
     thinning says, and the base zoom a rate-based thinning counts from; `'auto'`
     guesses the base and records which zooms the thinning leaves complete.
     `compression_level` is zstd's;
-    decoding speed does not depend on it. `tile_directory` also builds the
-    tile directory `out.tiledir.parquet` beside the file. Returns the output path."""
+    decoding speed does not depend on it. Returns the output path."""
     src = str(src)
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -476,8 +474,6 @@ def write(
     del keys, cells_table
     n_rows = con.execute(f"SELECT count(*) FROM '{sorted_path}'").fetchone()[0]
     log(f'  {n_rows:,} rows sorted, {time.time() - t0:.0f}s')
-    from .tiledir import is_crs84
-
     degrees = is_crs84(geo.get('columns', {}).get(geometry, {}))
     if not degrees:
         raise NotImplementedError(
@@ -647,12 +643,7 @@ def write(
     del bounds, keys, by_key
     lod_field = pa.field(
         'lod',
-        pa.struct(
-            [
-                pa.field(b['name'], lod_type(b['geometry_type'], attributes), nullable=True)
-                for b in lod_plan
-            ]
-        ),
+        pa.struct([pa.field(b['name'], lod_type(), nullable=True) for b in lod_plan]),
         nullable=False,
     )
     rest = [f for f in source_schema if f.name not in ('bbox', geometry)]
@@ -674,8 +665,7 @@ def write(
         if prefix_end < 0
         else {'zoom': zooms[prefix_level], 'row_group_end': prefix_end},
         'encoding': ENCODING,
-        'coordinates': COORDINATES,
-        'deltas': DELTAS,
+        'pack_version': PACK_VERSION,
         'attributes': [{'name': a.name, 'type': str(a.type)} for a in attributes],
         'thinning': describe(thinning),
         'lods': {
@@ -709,18 +699,11 @@ def write(
         else:
             avg = 8.0
         batch_rows = int(min(1024, max(32, page_bytes // avg * 2)))
-    coordinate_leaves = [
-        '.'.join(p) for p in _leaf_paths(schema) if p[0] == 'lod' and p[2] == 'geometry'
-    ]
-    # interleaved x, y defeats delta coding; splitting byte streams lets zstd see the shared high bytes
     options = dict(
         compression='zstd',
         compression_level=compression_level,
         use_dictionary=False,
-        column_encoding={
-            **{leaf: 'BYTE_STREAM_SPLIT' for leaf in coordinate_leaves},
-            KEY_COLUMN: 'DELTA_BINARY_PACKED',
-        },
+        column_encoding={KEY_COLUMN: 'DELTA_BINARY_PACKED'},
         write_statistics=['bbox.xmin', 'bbox.ymin', 'bbox.xmax', 'bbox.ymax', KEY_COLUMN],
         write_page_index=True,
         write_batch_size=batch_rows,
@@ -800,9 +783,9 @@ def write(
                 a.name: source.column(a.name).combine_chunks().cast(a.type) for a in attributes
             }
             if b['geometry_type'] == 'Point':
-                geom = point_array(np.nan_to_num(cx), np.nan_to_num(cy), *grids[b['name']])
+                parts = point_parts(np.nan_to_num(cx), np.nan_to_num(cy), *grids[b['name']])
             else:
-                geom = nested_array(rendered[k], LIST_DEPTH[b['geometry_type']])
+                parts = rendered[k]
                 k += 1
             spill = _spill_for_batch(
                 b,
@@ -815,13 +798,10 @@ def write(
                 grids,
                 src_ids if len(spill_src) else None,
             )
-            if spill is None:
-                spill = pa.nulls(
-                    len(ids), lod_type(b['geometry_type'], attributes).field('spill').type
-                )
-            else:
-                mask = mask | spill.is_valid().to_numpy(zero_copy_only=False)
-            arrays.append(lod_array(geom, attrs, mask, spill))
+            if spill is not None:
+                mask = mask | (spill[0] > 0)
+            blobs = pack(b['geometry_type'], parts, attributes, attrs, spill)
+            arrays.append(pc.if_else(pa.array(mask), blobs, pa.scalar(None, pa.binary())))
         lod = pa.StructArray.from_arrays(arrays, [b['name'] for b in lod_plan])
         cols = {name: table.column(name) for name in table.column_names}
         out_table = pa.table(
@@ -880,9 +860,6 @@ def write(
     writer.close()
     pool.shutdown()
     sorted_path.unlink()
-    if tile_directory:
-        info = tiledir.build(out)
-        log(f'  tile directory {info["path"]}, {info["size"] / 1e6:.1f} MB')
     log(
         f'{n_rows:,} rows, {row_groups} row groups, {out.stat().st_size / 1e9:.2f} GB, {time.time() - t0:.0f}s -> {out}'
     )

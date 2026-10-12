@@ -69,7 +69,6 @@ scope.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
               layer: request.config.layer,
               pointLayer: request.config.pointLayer,
               properties: request.config.properties,
-              tiledir: request.config.tiledir,
               signal: controller.signal,
             }),
           )

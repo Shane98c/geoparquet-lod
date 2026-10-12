@@ -96,11 +96,6 @@ def cli():
 @click.option('--workers', default=None, type=int)
 @click.option('--memory-limit', default=None)
 @click.option('--temp-dir', default=None)
-@click.option(
-    '--tile-directory',
-    is_flag=True,
-    help='also build the tile directory OUT.tiledir.parquet beside OUT; nothing is declared in OUT',
-)
 def write_cmd(
     src,
     out,
@@ -119,7 +114,6 @@ def write_cmd(
     workers,
     memory_limit,
     temp_dir,
-    tile_directory,
 ):
     """Write SRC (GeoParquet with WKB geometry) to OUT in the LOD columns layout."""
     if zooms != 'auto':
@@ -145,7 +139,6 @@ def write_cmd(
         workers=workers,
         memory_limit=memory_limit,
         temp_dir=temp_dir,
-        tile_directory=tile_directory,
         log=click.echo,
     )
 
@@ -173,14 +166,3 @@ def inspect_cmd(path):
     click.echo(f'bytes per row in row group {info["row_group_sampled"]}:')
     for col, nbytes in info['compressed_bytes_by_column'].items():
         click.echo(f'  {col:40s} {nbytes / max(rows, 1):8.2f}')
-
-
-@cli.command('tiledir')
-@click.argument('path', type=click.Path(exists=True, dir_okay=False))
-@click.option('--out', type=click.Path(dir_okay=False), default=None)
-def tiledir_cmd(path, out):
-    """Build the tile directory PATH.tiledir.parquet beside PATH, bound to PATH by size,
-    footer length and footer SHA-256. Nothing is declared in PATH."""
-    from .tiledir import build
-
-    click.echo(json.dumps(build(path, out), indent=2))

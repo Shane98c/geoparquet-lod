@@ -13,8 +13,6 @@ export interface SourceConfig {
   layer?: string
   pointLayer?: string
   properties?: string[]
-  /** Tile directory sidecar URL, e.g. `<url>.tiledir.parquet`; see TileOptions. */
-  tiledir?: string
 }
 
 export const tileUrl = (config: SourceConfig): string =>

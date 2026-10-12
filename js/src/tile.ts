@@ -1,13 +1,11 @@
 import { MVT_BUFFER, MVT_EXTENT, geometryColumnFromWkb, toMvt } from '@cogp/reader'
 import { GeometryBuilder } from './geometry.js'
-import type { Bbox, LodReader, LodRows } from './reader.js'
-import { openTileDirectory, TileDirectory } from './tiledir.js'
+import type { Bbox, LodReader } from './reader.js'
 
 const VECTOR_TILE_SIZE = 512
 
 export interface TileOptions {
   /** Tile directory sidecar URL or instance; a missing or mismatched one falls back to page indexes. */
-  tiledir?: string | TileDirectory
   /** MVT layer name for shape LODs (default `features`). */
   layer?: string
   /** MVT layer name for point LODs (default: same as `layer`). */
@@ -61,26 +59,7 @@ export const renderTile = async (
       { z, x, y, layer, signal },
     )
   }
-  let located: LodRows | undefined
-  if (options.tiledir) {
-    try {
-      const directory =
-        typeof options.tiledir === 'string'
-          ? await openTileDirectory(reader, options.tiledir)
-          : options.tiledir
-      if (directory.reader !== reader) throw new Error('tile directory belongs to another reader')
-      if (directory.covers(lod, z))
-        located = await directory.readLodByTile(lod, z, x, y, names, signal)
-    } catch (error) {
-      signal?.throwIfAborted()
-      console.warn('Tile directory unavailable; using page indexes:', error)
-    }
-  }
-  const { rows, coords, columns } =
-    located ??
-    (reader.lod.key
-      ? await reader.readLodByTile(lod, z, x, y, names, signal)
-      : await reader.readLod(lod, bbox, names, signal, { refine: options.refine ?? true }))
+  const { rows, coords, columns } = await reader.readLodByTile(lod, z, x, y, names, signal)
   signal?.throwIfAborted()
   if (pointFamily) {
     const px: number[] = []
