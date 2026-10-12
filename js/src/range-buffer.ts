@@ -5,35 +5,32 @@ import type { RangeSource } from './reader.js'
  * Browsers allow six HTTP/1.1 connections per host, so spreading a tile's
  * requests over several hosts lets them run in fewer waves.
  *
- * Opening asks for the file's last `tail` bytes and, alongside, its size, so a
- * footer that fits the tail costs one round trip. The size comes from the tail
- * response's Content-Range when CORS exposes it, and from the HEAD otherwise
- * or when the server refuses suffix ranges.
+ * Opening asks for the file's size with a HEAD and then its last `tail` bytes
+ * as an explicit range, so a footer that fits the tail costs two round trips
+ * and works across origins wherever plain ranged GETs are allowed.
  */
 export const httpSource = async (
   urls: string[],
   { tail = 1024 * 1024, signal }: { tail?: number; signal?: AbortSignal } = {},
 ): Promise<RangeSource> => {
-  const head = fetch(urls[0], { method: 'HEAD', cache: 'no-store', signal })
-  head.catch(() => undefined)
-  const response = await fetch(urls[0], {
-    headers: { Range: `bytes=-${tail}` },
-    cache: 'no-store',
-    signal,
-  })
-  let byteLength = NaN
+  // HEAD for the size, then the tail as an explicit range: a suffix range (`bytes=-N`) is not a
+  // CORS-safelisted header value, so a bucket whose rule allows only plain ranged GETs, as one
+  // serving PMTiles does, would refuse its preflight
+  const head = await fetch(urls[0], { method: 'HEAD', cache: 'no-store', signal })
+  const byteLength = Number(head.headers.get('Content-Length'))
+  if (!head.ok || !Number.isSafeInteger(byteLength))
+    throw new Error(`cannot size ${urls[0]}: ${head.status}`)
+  const tailStart = Math.max(0, byteLength - tail)
   let tailBuffer = new ArrayBuffer(0)
-  if (response.status === 206) {
-    byteLength = Number(/\/(\d+)\s*$/.exec(response.headers.get('Content-Range') ?? '')?.[1])
-    tailBuffer = await response.arrayBuffer()
-  } else await response.body?.cancel()
-  if (!Number.isSafeInteger(byteLength)) {
-    const h = await head
-    byteLength = Number(h.headers.get('Content-Length'))
-    if (!h.ok || !Number.isSafeInteger(byteLength))
-      throw new Error(`cannot size ${urls[0]}: ${h.status}`)
+  if (byteLength > 0) {
+    const response = await fetch(urls[0], {
+      headers: { Range: `bytes=${tailStart}-${byteLength - 1}` },
+      cache: 'no-store',
+      signal,
+    })
+    if (response.status === 206) tailBuffer = await response.arrayBuffer()
+    else await response.body?.cancel()
   }
-  const tailStart = byteLength - tailBuffer.byteLength
   let next = 0
   return {
     byteLength,
