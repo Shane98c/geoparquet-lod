@@ -196,33 +196,34 @@ scripts do not load from `file://`.
 
 ## Measured
 
-The full method and tables are in [docs/benchmarks.md](docs/benchmarks.md):
-the same 155.6 million US building footprints served as this layout, as
-Kanahiro's COGP, as the production PMTiles archive, and as plain sorted
-GeoParquet. From a cold reader on the 24.2 GB national file:
+The method and tables are in [docs/benchmarks.md](docs/benchmarks.md). On
+Esri's 53.7 million Japan building footprints, written as this layout, as
+Kanahiro's COGP, as a tippecanoe PMTiles archive and as Esri's Spatially
+Optimized Parquet, with every reader cold on each tile and feature counts
+beside the bytes, since the four thin so differently that bytes alone
+mislead:
 
-- A national view (z3) is 0.22 MB in one request; the PMTiles archive has no
-  tiles below z6.
-- Street tiles (z15 to z16) are 0.3 to 0.4 MB in 16 to 18 requests through
-  the page indexes, 0.13 to 0.21 MB in 4 or 5 through the tile directory,
-  against 0.06 to 0.13 MB in 2 for PMTiles.
-- City tiles (z13) are 1.1 to 1.4 MB; COGP reads 1.3 to 1.5 MB there in four
-  to five times the requests, and more everywhere else.
-- Opening costs 0.94 MB, nearly all footer, against 16 KB for PMTiles.
-- A plain sorted GeoParquet would read 8 MB to 5 GB per tile.
+- The thinning is calibrated against the archive: within 15% of
+  tippecanoe's feature count at every zoom from 6 to 12, and the share of
+  a city tile the buildings paint agrees within a point.
+- A z8 metro tile is 0.43 MB in 13 requests against the archive's 0.48 MB
+  in 2; a z11 city tile 0.47 MB against 0.30; z13 downtown 0.43 against
+  0.37; street tiles 0.19 to 0.23 MB against 0.04 to 0.13.
+- Opening costs 0.29 MB, nearly all footer, against 20 KB for PMTiles.
+- COGP and the Esri reference reader cost more than either at every zoom
+  measured, and COGP draws a small fraction of the buildings.
 
-A second comparison in the same document puts this layout, COGP, PMTiles and
-Esri's Spatially Optimized Parquet side by side on Esri's own 53.7 million
-Japan buildings, with feature counts beside the bytes, since the four thin
-so differently that bytes alone mislead. `demo/compare.html` draws any of
-the four from URLs with a byte and request tally per pane.
+The earlier section of that document, on 155.6 million US buildings, was
+measured on the previous layout of this format (nested Arrow geometry read
+through the bbox page indexes) and is kept for the record until the
+national file is rewritten.
 
-The floor is one data read per leaf per row group a tile touches, so request
-parity with a format that stores each tile as one blob is out of reach. If
-the map is the product and the data is secondary, build PMTiles. This layout
-is for the case where the file is also the dataset: one upload that DuckDB,
-GeoPandas and a map read alike, attributes that stay queryable, thinning
-that can see the attributes, and exact geometry past the finest zoom.
+A tile is one range read of its LOD column plus the key pages at the ends
+of its interval and, cold, the row group's indexes; the floor is therefore
+a few requests, not the one a tile archive makes. If the map is the product
+and the data is secondary, build PMTiles. This layout is for the case where
+the file is also the dataset: one upload, one URL, the thinned map and the
+exact rows behind it.
 
 ## Limitations
 

@@ -27,7 +27,7 @@ const features = (buf) => {
 
 const base = process.env.BASE ?? 'http://localhost:8099/'
 const cogpFile = process.env.COGP ?? base + 'japan_buildings.cogp.parquet'
-const lodFile = process.env.LOD ?? base + 'japan_buildings.lod6.parquet'
+const lodFile = process.env.LOD ?? base + 'japan_buildings.lod12.parquet'
 const stats = {}
 const real = globalThis.fetch
 globalThis.fetch = async (input, init) => {
