@@ -202,9 +202,12 @@ def tile_cost(rows: pa.Table, zoom: int, ctx: Context, tiny: float = TINY_PIXELS
     return np.where(px < square, FEATURE_BYTES * px / square, cost)
 
 
-def drop_smallest(bytes: int = 600_000, features: int = 200_000, tiny: float = TINY_PIXELS) -> Thin:
+def drop_smallest(
+    bytes: int | Callable[[int], int] = 600_000, features: int = 200_000, tiny: float = TINY_PIXELS
+) -> Thin:
     """Tippecanoe's `--drop-smallest-as-needed`: one area threshold per zoom,
-    raised until the busiest tile's estimated tile fits `bytes` and `features`,
+    raised until the busiest tile's estimated tile fits `bytes` (an int, or a
+    function of the zoom) and `features`,
     then applied to every tile, so a town keeps every building the city keeps
     and the map shows where the large buildings are. After `tiny_polygons`
     the area is the carried sum, so a square standing for a block outranks
@@ -212,6 +215,7 @@ def drop_smallest(bytes: int = 600_000, features: int = 200_000, tiny: float = T
     tippecanoe does."""
 
     def thin(rows, zoom, ctx):
+        budget = bytes(zoom) if callable(bytes) else bytes
         px = ctx.pixel_area(rows, zoom)
         tiles = ctx.tile_of(rows, zoom)
         cost = tile_cost(rows, zoom, ctx, tiny)
@@ -223,7 +227,7 @@ def drop_smallest(bytes: int = 600_000, features: int = 200_000, tiny: float = T
             if not len(ids):
                 break
             load = np.maximum(
-                np.bincount(inverse, weights=cost[keep]) / bytes,
+                np.bincount(inverse, weights=cost[keep]) / budget,
                 np.bincount(inverse, weights=share[keep]) / features,
             )
             busiest = np.argmax(load)
@@ -232,14 +236,14 @@ def drop_smallest(bytes: int = 600_000, features: int = 200_000, tiny: float = T
             # keep the busiest tile's largest rows until it fills; the first to overflow sets the bar
             idx = np.flatnonzero(keep & (tiles == ids[busiest]))
             idx = idx[np.argsort(-px[idx], kind='stable')]
-            over = np.maximum(np.cumsum(cost[idx]) / bytes, np.cumsum(share[idx]) / features) > 1.0
+            over = np.maximum(np.cumsum(cost[idx]) / budget, np.cumsum(share[idx]) / features) > 1.0
             bar = px[idx[np.argmax(over)]]
             if not bar > threshold:
                 break
             threshold = bar
         return _mask(rows, keep)
 
-    thin.__name__ = f'drop_smallest({bytes}, {features})'
+    thin.__name__ = f'drop_smallest({getattr(bytes, "__name__", bytes)}, {features})'
     return thin
 
 
