@@ -60,6 +60,26 @@ The open includes what opening starts in the background: the key and
 coarse LOD indexes of the prefix row groups, so a map opening at a coarse
 zoom reads them once.
 
+The same two files on S3 (us-west-2), read cold from a laptop in the US
+with wall-clock per tile, since over a network the requests cost round
+trips as well as bytes:
+
+| tile, over S3             | LOD columns             | PMTiles                |
+| ------------------------- | ----------------------- | ---------------------- |
+| open                      | 1.23 MB, 6 req          | 0.02 MB, 1 req         |
+| z8 metro, Tokyo           | 0.68 MB, 5 req, 589 ms  | 0.50 MB, 2 req, 463 ms |
+| z11 city, Tokyo           | 0.50 MB, 14 req, 835 ms | 0.31 MB, 2 req, 329 ms |
+| z13 downtown, Shibuya     | 0.47 MB, 9 req, 655 ms  | 0.35 MB, 2 req, 312 ms |
+| z13 suburbs, Chiba        | 0.16 MB, 9 req, 444 ms  | 0.06 MB, 2 req, 345 ms |
+| z15 street, Tokyo station | 0.15 MB, 8 req, 396 ms  | 0.03 MB, 2 req, 295 ms |
+| z15 street, Osaka         | 0.14 MB, 8 req, 581 ms  | 0.11 MB, 2 req, 357 ms |
+
+A cold tile here is three dependent stages after the footer (the key
+index, the boundary key pages, the LOD run) against the archive's one
+after its directory, which is what the 1.3 to 2.5 times longer wait is.
+The open over S3 reads the file's last megabyte speculatively, hence its
+size.
+
 Those are cold reads, each on a fresh reader. The tile beside each, read
 next on the same reader, is what a session pays once a row group's indexes
 are in:
