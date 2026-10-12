@@ -265,13 +265,12 @@ export class LodReader {
     const leaves = [
       this.geometryLeaf(lod),
       ...attributes.map((a) => `${base}.${a}`),
-      `${spillBase}.zoom`,
       `${spillBase}.tile`,
       `${spillBase}.id`,
       `${spillBase}.geometry${geometryTail}`,
       ...attributes.map((a) => `${spillBase}.${a}`),
     ]
-    const tile = x * 2 ** z + y
+    const tile = BigInt(z) * 2n ** 48n + BigInt(x * 2 ** z + y)
     const perGroup = await Promise.all(
       groups.map(async (g) => {
         const ranges = await this.keyRanges(
@@ -291,21 +290,20 @@ export class LodReader {
       const rowStart = this.rowGroupStarts[g]
       const [coords, ...rest] = values
       const attrs = rest.slice(0, n)
-      const [zooms, tiles, ids, geoms] = rest.slice(n, n + 4)
-      const spillAttrs = rest.slice(n + 4)
+      const [tiles, ids, geoms] = rest.slice(n, n + 3)
+      const spillAttrs = rest.slice(n + 3)
       for (const [row, c] of coords) {
         if ((c as unknown[]).length) {
           out.rows.push(rowStart + row)
           out.coords.push(c)
           attributes.forEach((a, i) => out.columns[a].push(attrs[i].get(row) ?? null))
         }
-        const zs = spillList(zooms.get(row))
-        if (!zs) continue
-        const ts = spillList(tiles.get(row)) ?? []
+        const ts = spillList(tiles.get(row))
+        if (!ts) continue
         const is = spillList(ids.get(row)) ?? []
         const gs = spillList(geoms.get(row)) ?? []
-        zs.forEach((zz, k) => {
-          if (Number(zz) !== z || Number(ts[k]) !== tile) return
+        ts.forEach((t, k) => {
+          if (BigInt(t as bigint) !== tile) return
           out.rows.push(Number(is[k]))
           out.coords.push(gs[k])
           attributes.forEach((a, i) => {

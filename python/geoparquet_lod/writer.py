@@ -46,7 +46,15 @@ from .encoding import (
     point_array,
     spill_array,
 )
-from .quantize import DOT_CELLS, MAX_LATITUDE, SUBPIXELS, grid, render_lines, render_polygons
+from .quantize import (
+    DOT_CELLS,
+    MAX_LATITUDE,
+    SUBPIXELS,
+    grid,
+    render_lines,
+    render_polygons,
+    resolution,
+)
 from .spill import hosts, straddlers, take_ragged
 from .thinning import Context, Thin, default_thinning, describe
 
@@ -299,7 +307,7 @@ def _spill_for_batch(
     entries = spill_entries.get(b['name'])
     if entries is None:
         return None
-    host, zoom_of, tile_of, src = entries
+    host, tile_of, src = entries
     lo = np.searchsorted(host, ids - 1, side='left')
     hi = np.searchsorted(host, ids - 1, side='right')
     counts = hi - lo
@@ -320,7 +328,6 @@ def _spill_for_batch(
         b['geometry_type'],
         attributes,
         counts,
-        zoom_of[pick],
         tile_of[pick],
         file_pos[src[pick]],
         geom,
@@ -604,22 +611,37 @@ def write(
         shown = np.flatnonzero((levels >> lod_bit[b['name']]) & 1)
         parts = []
         for z in b['zooms']:
+            # a shape under a pixel draws as a placeholder square its own tile shows whole
+            res = resolution(z, degrees=degrees)
+            lat = np.radians(
+                np.clip(
+                    (bounds['ymin'][shown] + bounds['ymax'][shown]) / 2, -MAX_LATITUDE, MAX_LATITUDE
+                )
+            )
+            wide = (
+                np.maximum(
+                    (bounds['xmax'][shown] - bounds['xmin'][shown]) / res,
+                    (bounds['ymax'][shown] - bounds['ymin'][shown]) / (res * np.cos(lat)),
+                )
+                >= 1
+            )
+            large = shown[wide]
             src, tiles = straddlers(
-                bounds['xmin'][shown],
-                bounds['ymin'][shown],
-                bounds['xmax'][shown],
-                bounds['ymax'][shown],
+                bounds['xmin'][large],
+                bounds['ymin'][large],
+                bounds['xmax'][large],
+                bounds['ymax'][large],
                 z,
             )
-            src = shown[src]
+            src = large[src]
             # hosts live in the main section, which a reader always searches
             rows_in = section_rows[False] if len(section_rows[False]) else section_rows[True]
             host = hosts(tiles, z, KEY_DEPTH, keys[rows_in], rows_in)
-            parts.append((host, np.full(len(tiles), z, np.int8), tiles, src))
+            parts.append((host, (z << 48) | tiles, src))
         if parts:
-            host, zoom_of, tile_of, src = (np.concatenate(c) for c in zip(*parts, strict=True))
+            host, tile_of, src = (np.concatenate(c) for c in zip(*parts, strict=True))
             order = np.argsort(host, kind='stable')
-            spill_entries[b['name']] = (host[order], zoom_of[order], tile_of[order], src[order])
+            spill_entries[b['name']] = (host[order], tile_of[order], src[order])
     spill_total = sum(len(v[0]) for v in spill_entries.values())
     log(f'  {spill_total:,} straddler copies across {len(spill_entries)} LODs')
     del bounds, keys, by_key
@@ -715,7 +737,7 @@ def write(
     # the straddlers' copies, rendered once per LOD, and their attributes
     spill_store: dict[str, tuple] = {}
     spill_src = (
-        np.unique(np.concatenate([v[3] for v in spill_entries.values()]))
+        np.unique(np.concatenate([v[2] for v in spill_entries.values()]))
         if spill_entries
         else np.zeros(0, np.int64)
     )
@@ -736,7 +758,7 @@ def write(
         for b in lod_plan:
             if b['name'] not in spill_entries:
                 continue
-            srcs = np.unique(spill_entries[b['name']][3])
+            srcs = np.unique(spill_entries[b['name']][2])
             idx = np.searchsorted(src_ids, srcs)
             if b['geometry_type'] == 'Point':
                 spill_store[b['name']] = (srcs, (src_cx[idx], src_cy[idx]))

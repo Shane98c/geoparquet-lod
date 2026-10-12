@@ -352,7 +352,7 @@ def test_straddlers_are_copied_into_the_tiles_they_reach(buildings, tmp_path):
             e
             for host in inside
             for e in (spill[host] or [])
-            if e['zoom'] == finest and e['tile'] == tile
+            if e['tile'] == (finest << 48) | int(tile)
         ]
         assert any(e['id'] == row for e in copies), f'row {row} not copied into tile {tile}'
         assert all(column[host].is_valid for host in inside if spill[host])

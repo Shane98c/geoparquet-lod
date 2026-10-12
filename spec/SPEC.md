@@ -55,14 +55,16 @@ A conforming file MUST satisfy:
    the LOD leaves. A feature centred outside a tile whose geometry reaches
    into the tile or its buffer (64/4096 of the tile) is a _straddler_; its
    row is in another interval, so each LOD struct carries a nullable `spill`
-   list of copies: `{zoom, tile, id, geometry, attributes...}`, where
-   `tile` is `x * 2^zoom + y`, `id` the feature's file row index and
+   list of copies: `{tile, id, geometry, attributes...}`, where `tile` is
+   `zoom << 48 | x * 2^zoom + y`, `id` the feature's file row index and
    `geometry` its geometry on that LOD's grid. The writer MUST place every
    copy a tile needs on the tile's _host_: the first row of the main section
    whose key is at or past the tile's interval start, or the last row when
    none is, and a row shown only to host copies has an empty geometry. A
-   reader therefore reads the interval's rows plus the host row and keeps the
-   copies whose `zoom` and `tile` are the tile's. The per-row
+   shape under a pixel at the zoom draws as a placeholder square its own
+   tile shows whole, so the reference writer copies only shapes a pixel or
+   larger. A reader therefore reads the interval's rows plus the host row
+   and keeps the copies whose `tile` is the tile's. The per-row
    uniform `u` the reference writer hands thinnings is a hash of the
    geometry bytes, so it does not depend on sort order.
 2. **Prefix.** When `prefix` is present, every row whose coarsest zoom is at

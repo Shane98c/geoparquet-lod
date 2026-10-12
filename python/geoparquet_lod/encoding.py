@@ -41,11 +41,11 @@ def geometry_type(name: str) -> pa.DataType:
 
 def spill_type(name: str, attributes: list[pa.Field]) -> pa.DataType:
     """Copies of other rows' geometry hosted here for the tiles they reach
-    into: the zoom and tile (x * 2^zoom + y) each copy serves, the file row
-    index of the feature, its geometry on this LOD's grid, and its attributes."""
+    into: the tile each copy serves as `zoom << 48 | x * 2^zoom + y`, the file
+    row index of the feature, its geometry on this LOD's grid, and its
+    attributes."""
     entry = pa.struct(
         [
-            pa.field('zoom', pa.int8(), nullable=False),
             pa.field('tile', pa.int64(), nullable=False),
             pa.field('id', pa.int64(), nullable=False),
             pa.field('geometry', geometry_type(name), nullable=False),
@@ -157,7 +157,6 @@ def spill_array(
     name: str,
     attributes: list[pa.Field],
     counts: np.ndarray,
-    zoom: np.ndarray,
     tile: np.ndarray,
     ids: np.ndarray,
     geometry: pa.Array,
@@ -167,7 +166,6 @@ def spill_array(
     t = spill_type(name, attributes)
     entry = pa.StructArray.from_arrays(
         [
-            pa.array(zoom, pa.int8()),
             pa.array(tile, pa.int64()),
             pa.array(ids, pa.int64()),
             geometry,
