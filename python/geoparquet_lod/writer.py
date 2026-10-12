@@ -715,7 +715,8 @@ def write(
 
     # 5. write: prefix rows first, then everything else, each in Hilbert order
     writer = pq.ParquetWriter(out, schema, **options)
-    pool = ProcessPoolExecutor(max_workers=workers)
+    # workers keep the largest batch they rendered; recycling them bounds the pool's memory
+    pool = ProcessPoolExecutor(max_workers=workers, max_tasks_per_child=16)
 
     # the straddlers' copies, rendered once per LOD, and their attributes
     spill_store: dict[str, tuple] = {}

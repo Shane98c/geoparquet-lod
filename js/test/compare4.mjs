@@ -27,7 +27,8 @@ const features = (buf) => {
 
 const base = process.env.BASE ?? 'http://localhost:8099/'
 const cogpFile = process.env.COGP ?? base + 'japan_buildings.cogp.parquet'
-const lodFile = process.env.LOD ?? base + 'japan_buildings.lod13.parquet'
+const lodFile = process.env.LOD ?? base + 'japan_buildings.lod14.parquet'
+const pmFile = process.env.PMTILES ?? 'japan_buildings_z0.pmtiles'
 const stats = {}
 const real = globalThis.fetch
 globalThis.fetch = async (input, init) => {
@@ -61,12 +62,14 @@ const xy = (z, lon, lat) => [
 const open = async (name, fn) => {
   const a = snap(name)
   const r = await fn()
+  // let what opening starts in the background (index prefetch) land before counting it as open
+  await new Promise((resolve) => setTimeout(resolve, 1500))
   return { r, open: delta(a, snap(name)) }
 }
 const lodOpen = async () => LodReader.open(coalescing(await httpSource([lodFile])))
 const cogpOpen = () => CogpReader.open(cogpFile)
 const pmOpen = async () => {
-  const p = new PMTiles(base + 'japan_buildings.pmtiles')
+  const p = new PMTiles(base + pmFile)
   await p.getHeader()
   return p
 }
@@ -90,7 +93,7 @@ for (const [name, fn] of [
         : name === 'cogp'
           ? cogpFile
           : name === 'pmtiles'
-            ? 'japan_buildings.pmtiles'
+            ? pmFile
             : 'japan_buildings.sop.parquet',
       fn,
     )
@@ -107,6 +110,7 @@ for (const [z, lon, lat, label] of tiles) {
   {
     const key = lodFile
     const r = await lodOpen()
+    await new Promise((resolve) => setTimeout(resolve, 1500))
     const a = snap(key)
     const mvt = await renderTile(r, z, x, y, { properties: [] })
     const cold = delta(a, snap(key))
@@ -153,7 +157,7 @@ for (const [z, lon, lat, label] of tiles) {
   }
   // pmtiles: fresh archive handle; parent tile beyond maxzoom
   {
-    const key = 'japan_buildings.pmtiles'
+    const key = pmFile
     const p = await pmOpen()
     const a = snap(key)
     const zz = Math.min(z, 14)
