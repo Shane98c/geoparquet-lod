@@ -313,13 +313,14 @@ def _spill_for_batch(
     pick = np.concatenate(
         [np.arange(a, c) for a, c in zip(lo[counts > 0], hi[counts > 0], strict=True)]
     )
-    srcs, store = spill_store[b['name']]
-    pos = np.searchsorted(srcs, src[pick])
+    (ids_sorted, perm), store = spill_store[b['name']]
+    pos = perm[np.searchsorted(ids_sorted, src[pick])]
     if b['geometry_type'] == 'Point':
         parts = point_parts(store[0][pos], store[1][pos], *grids[b['name']])
     else:
         parts = take_ragged(store, pos)
-    at = np.searchsorted(src_ids, src[pick])
+    attr_sorted, attr_perm = src_ids
+    at = attr_perm[np.searchsorted(attr_sorted, src[pick])]
     attrs = {a.name: attr_values[a.name].take(pa.array(at)).cast(a.type) for a in attributes}
     return (counts, tile_of[pick], file_pos[src[pick]], parts, attrs)
 
@@ -649,8 +650,9 @@ def write(
             parts.append((host, (z << 48) | tiles, src))
         if parts:
             host, tile_of, src = (np.concatenate(c) for c in zip(*parts, strict=True))
-            order = np.argsort(host, kind='stable')
-            spill_entries[b['name']] = (host[order], tile_of[order], src[order])
+            if len(host):
+                order = np.argsort(host, kind='stable')
+                spill_entries[b['name']] = (host[order], tile_of[order], src[order])
     spill_total = sum(len(v[0]) for v in spill_entries.values())
     log(f'  {spill_total:,} straddler copies across {len(spill_entries)} LODs')
     del bounds, keys, by_key
@@ -747,9 +749,10 @@ def write(
     )
     spill_attr_values: dict[str, np.ndarray] = {}
     if len(spill_src):
-        # fetched and rendered in slices of ids, so a national file's tens of millions of copies
-        # never sit in memory as WKB at once; each LOD's store grows in ascending id order
-        attr_select = ''.join(f', s.{a.name}' for a in attributes)
+        # one pass over the sorted copy picks the straddlers out as it goes, so a national file's
+        # tens of millions of copies cost one scan and never sit in memory as WKB at once; each
+        # LOD's store is in file order with a permutation for lookup by id
+        attr_select = ''.join(f', {a.name}' for a in attributes)
         lod_srcs = {
             b['name']: np.unique(spill_entries[b['name']][2])
             for b in lod_plan
@@ -757,30 +760,38 @@ def write(
         }
         rendered_parts: dict[str, list] = {name: [] for name in lod_srcs}
         point_parts_of: dict[str, list] = {name: [] for name in lod_srcs}
+        store_ids: dict[str, list] = {name: [] for name in lod_srcs}
         attr_chunks: dict[str, list] = {a.name: [] for a in attributes}
-        step = 2_000_000
-        for start in range(0, len(spill_src), step):
-            ids_chunk = spill_src[start : start + step]
-            con.register('spill_ids', pa.table({'__id': ids_chunk + 1}))
-            src_table = con.execute(
-                f'SELECT s.__id, s.{geometry} AS g, s.__cx AS cx, s.__cy AS cy{attr_select} '
-                f"FROM '{sorted_path}' s JOIN spill_ids USING (__id) ORDER BY s.__id"
-            ).to_arrow_table()
-            chunk_ids = src_table.column('__id').to_numpy() - 1
-            cx_c = src_table.column('cx').to_numpy(zero_copy_only=False)
-            cy_c = src_table.column('cy').to_numpy(zero_copy_only=False)
-            wkb_c = src_table.column('g').to_numpy(zero_copy_only=False)
+        attr_ids: list = []
+        scanned = 0
+        reader = con.execute(
+            f'SELECT __id, {geometry} AS g, __cx AS cx, __cy AS cy{attr_select} '
+            f"FROM '{sorted_path}' WHERE __cx IS NOT NULL"
+        ).to_arrow_reader(1_000_000)
+        for batch in reader:
+            ids_b = batch.column('__id').to_numpy() - 1
+            hit = np.flatnonzero(np.isin(ids_b, spill_src, assume_unique=True))
+            scanned += len(ids_b)
+            if scanned % 20_000_000 < 1_000_000:
+                log(f'  scanned {scanned:,} rows for straddler copies, {time.time() - t0:.0f}s')
+            if not len(hit):
+                continue
+            table = pa.Table.from_batches([batch]).take(pa.array(hit))
+            chunk_ids = ids_b[hit]
+            cx_c = table.column('cx').to_numpy(zero_copy_only=False)
+            cy_c = table.column('cy').to_numpy(zero_copy_only=False)
+            wkb_c = table.column('g').to_numpy(zero_copy_only=False)
+            attr_ids.append(chunk_ids)
             for a in attributes:
-                attr_chunks[a.name].append(src_table.column(a.name).combine_chunks())
+                attr_chunks[a.name].append(table.column(a.name).combine_chunks())
             for b in lod_plan:
                 name = b['name']
                 if name not in lod_srcs:
                     continue
-                srcs = lod_srcs[name]
-                mine = srcs[(srcs >= ids_chunk[0]) & (srcs <= ids_chunk[-1])]
-                if not len(mine):
+                idx = np.flatnonzero(np.isin(chunk_ids, lod_srcs[name], assume_unique=True))
+                if not len(idx):
                     continue
-                idx = np.searchsorted(chunk_ids, mine)
+                store_ids[name].append(chunk_ids[idx])
                 if b['geometry_type'] == 'Point':
                     point_parts_of[name].append((cx_c[idx], cy_c[idx]))
                     continue
@@ -797,21 +808,24 @@ def write(
                     for c in (idx[i : i + 50_000] for i in range(0, len(idx), 50_000))
                 ]
                 rendered_parts[name].extend(r[0] for r in pool.map(_render, jobs))
-            del src_table, wkb_c
-        src_ids = spill_src
+        ids_all = np.concatenate(attr_ids) if attr_ids else np.zeros(0, np.int64)
+        perm = np.argsort(ids_all)
+        src_ids = (ids_all[perm], perm)
         for a in attributes:
             spill_attr_values[a.name] = pa.concat_arrays(attr_chunks[a.name])
         for b in lod_plan:
             name = b['name']
             if name not in lod_srcs:
                 continue
+            ids_l = np.concatenate(store_ids[name])
+            perm_l = np.argsort(ids_l)
             if b['geometry_type'] == 'Point':
                 xs = np.concatenate([p[0] for p in point_parts_of[name]])
                 ys = np.concatenate([p[1] for p in point_parts_of[name]])
-                spill_store[name] = (lod_srcs[name], (xs, ys))
+                spill_store[name] = ((ids_l[perm_l], perm_l), (xs, ys))
             else:
-                spill_store[name] = (lod_srcs[name], _concat_parts(rendered_parts[name]))
-        del rendered_parts, point_parts_of, attr_chunks
+                spill_store[name] = ((ids_l[perm_l], perm_l), _concat_parts(rendered_parts[name]))
+        del rendered_parts, point_parts_of, attr_chunks, store_ids, attr_ids
         log(f'  straddler copies rendered, {time.time() - t0:.0f}s')
     row_groups = 0
 
