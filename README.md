@@ -13,7 +13,7 @@ archive from one file that stays queryable; see [Measured](#measured) for
 how close it is today.
 
 - `spec/SPEC.md`: the layout and metadata contract
-- `python/`: writer, validator and CLI (`geoparquet-lod write | validate | inspect | tiledir`)
+- `python/`: writer, validator and CLI (`geoparquet-lod write | validate | inspect`)
 - `js/`: a browser reader and a MapLibre tile protocol
 - `examples/`: thinning functions for common datasets
 - `docs/benchmarks.md`: measurements against PMTiles, COGP and plain GeoParquet
@@ -93,13 +93,13 @@ without carrying it.
 Points, lines and polygons, one family per file, and a family keeps its
 geometry type at every zoom, as tippecanoe does. Lines and polygons carry a
 quantized copy per LOD: one per zoom below the complete zoom, where the
-thinning changes the row set, and one per two zooms above it. Each copy is
-nested lists of interleaved int32 `[x, y]` pairs on the LOD's pixel grid,
-decoded as `offset + scale * integer`. The transform and grid are COGP's
-`quantized_geoarrow`; the physical layout is not, since COGP stores a
-`struct<x, y>` per vertex, has no point family and no attribute fields, so a
-COGP overview reader cannot decode these columns. Nothing in the file is a
-private byte format. When the full-detail shapes of the whole dataset are
+thinning changes the row set, and one per two zooms above it. Each LOD is
+one binary column: a row's value packs its geometry on the LOD's pixel grid
+as varint ring steps, its carried attributes, and copies of neighbouring
+features that reach into its tile, so a tile is one range read of that
+column. Grid coordinates decode as `offset + scale * integer`; the
+transform and grid are COGP's `quantized_geoarrow`, the byte format is this
+layout's own, a page of spec. When the full-detail shapes of the whole dataset are
 small (16 MB by default) a single LOD serves every zoom instead of copies,
 which is what happens for things like counties. Finer than the finest zoom
 the reader draws the exact primary geometry, so full detail is always
@@ -175,7 +175,7 @@ const row = await readRow(url, feature.id, ['name', 'risk'])
 
 Tiles are read and encoded in a Web Worker. The server must answer HTTP
 range requests with CORS, which plain S3 does. `tileUrl` also takes
-`pointLayer` for point datasets and `tiledir` for a tile directory sidecar.
+`pointLayer` for point datasets.
 Opening a file reads its last 1 MB in one request, which holds the footer
 of files up to a few hundred row groups, alongside a HEAD for the size.
 
@@ -193,34 +193,6 @@ That bundles the reader into `demo/dist`, serves the repo at
 in the repo root; pass `?url=` for another file, such as the
 `overture_denver.lod.parquet` written above. The page must be served; module
 scripts do not load from `file://`.
-
-## Tile directory
-
-An optional sidecar, `<file>.tiledir.parquet`, maps each tile at every zoom
-above the prefix to the page byte ranges it needs, so a tile skips the bbox
-statistics, page indexes and refinement reads. Build it with the file or
-beside an existing one, then give the reader its URL:
-
-```sh
-uv run geoparquet-lod write src.parquet out.parquet --tile-directory
-uv run geoparquet-lod tiledir out.parquet
-```
-
-```js
-tileUrl({ url, tiledir: url + '.tiledir.parquet' })
-```
-
-It is bound to one write of the file by size, footer length and footer hash,
-and nothing in the file refers to it; without it, or with a stale one, the
-reader warns and reads through the page indexes, drawing the same features.
-The builder reads the bbox values and each LOD struct of every row group to
-decide tile membership, holds one LOD's entries in memory and loops in
-Python, so it is slow on large files (40 minutes for the national file) and
-large polygons cost in proportion to their extent in tiles. The table has one
-row per tile with entries, sorted by `(zoom, tile)`: `zoom` int8, `tile` int64
-(Morton id on the zoom's grid) and `pages`, a list of int64 sextuples
-`[row group, leaf, row start, row count, byte start, byte length]`, in row
-groups of about 64 KB that never span a zoom.
 
 ## Measured
 
@@ -270,7 +242,7 @@ that can see the attributes, and exact geometry past the finest zoom.
   and [cloud-optimized-geoparquet](https://github.com/Kanahiro/cloud-optimized-geoparquet)
   by Kanahiro: levels as row-group prefixes, geometry stored once, analysis
   readers unaffected. Our `prefix` is one such level, the LOD geometry
-  transform is its `quantized_geoarrow`, and the tile encoder uses
+  transform and grid are its `quantized_geoarrow`, and the tile encoder uses
   `@cogp/reader`'s MVT writer.
 - [GeoParquet PR 299](https://github.com/opengeospatial/geoparquet/pull/299)
   by mmgeorge: per-resolution geometry columns declared in metadata. Our LOD
