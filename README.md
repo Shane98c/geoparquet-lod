@@ -20,8 +20,9 @@ how close it is today.
 
 ## How it works
 
-Rows are sorted once along a Hilbert curve in large row groups, so a city
-tile touches one or two of them. The rows shown at the coarsest zooms come
+Rows are sorted once along a Hilbert curve over the Web Mercator world
+square in large row groups, so a tile's rows are one contiguous run and a
+city tile touches one or two row groups. The rows shown at the coarsest zooms come
 first in their own order, so a view of the whole dataset reads one row group.
 A float32 bbox covering with page statistics lets a reader pick pages without
 reading data. One nullable struct per LOD, a zoom or a run of zooms, holds for

@@ -41,8 +41,11 @@ extension sees ordinary GeoParquet with two extra columns.
 A conforming file MUST satisfy:
 
 1. **Order.** Rows sorted by a space-filling curve over the primary
-   geometry, within each of the two sections below. `order` names the curve
-   (`hilbert`). The per-row uniform `u` the reference writer hands thinnings is
+   geometry, within each of the two sections below. `order` names the curve:
+   `hilbert_webmercator` is a Hilbert curve over the Web Mercator world
+   square on the bbox centre, latitude clamped to the Mercator limit, so a
+   Web Mercator tile's rows are one contiguous run at every zoom the curve
+   resolves. The per-row uniform `u` the reference writer hands thinnings is
    a hash of the geometry bytes, so it does not depend on sort order.
 2. **Prefix.** When `prefix` is present, every row whose coarsest zoom is at
    or below `prefix.zoom` is stored in row groups `0..prefix.row_group_end`,
@@ -87,12 +90,13 @@ Under the `geo` key, a `lod_columns` object:
 | ------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `version`     | string         | `0.1.0`; readers reject a different major version, and while the major is 0 a different minor as well, since minors may change the layout                                                                          |
 | `column`      | string         | name of the LOD struct column                                                                                                                                                                                      |
-| `order`       | string         | `hilbert`                                                                                                                                                                                                          |
+| `order`       | string         | `hilbert_webmercator`, see Layout 1                                                                                                                                                                                |
 | `zooms`       | int[]          | every zoom the file serves, ascending                                                                                                                                                                              |
 | `tile_size`   | int            | pixels per tile the zooms assume (512)                                                                                                                                                                             |
 | `prefix`      | object or null | `{zoom, row_group_end}`, see Layout 2                                                                                                                                                                              |
 | `encoding`    | string         | `quantized_geoarrow`, see Geometry                                                                                                                                                                                 |
 | `coordinates` | string         | `interleaved`: each vertex is one list of two int32, x then y                                                                                                                                                      |
+| `deltas`      | string         | `ring`: each pair is the zigzag-coded step from the previous vertex of its ring                                                                                                                                    |
 | `attributes`  | object[]       | `{name, type}` of the carried attributes; `type` is the Arrow type name, informational since the schema carries it                                                                                                 |
 | `thinning`    | object         | description of the rule used; informational                                                                                                                                                                        |
 | `lods`        | object         | LOD name to `{zooms, geometry_type, scale, offset, placeholder}`; `scale` and `offset` are `[x, y]` pairs in degrees, `placeholder` the width in grid cells of the square drawn for a shape too small for the grid |
@@ -118,7 +122,7 @@ the usual GeoParquet fields:
 "lod_columns": {
   "version": "0.1.0",
   "column": "lod",
-  "order": "hilbert",
+  "order": "hilbert_webmercator",
   "zooms": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
   "tile_size": 512,
   "prefix": { "zoom": 6, "row_group_end": 0 },
@@ -161,15 +165,19 @@ under `lod_columns`, not under COGP's `lod.overviews`. Physically: nested Parque
 whose innermost element is a required list of exactly two int32, x then y;
 `MultiPolygon` three lists deep above that (polygons, rings, vertices) and
 `MultiLineString` two (lines, vertices), with every nested list non-null and
-non-empty and every ring closed. COGP stores a `struct<x, y>` instead; the
-interleaved pair makes a geometry one Parquet leaf, so a tile reads one page
-run and one offset index for it rather than two, at about 6 percent more
-bytes on buildings since the pair cannot be delta coded (the leaf uses
-`BYTE_STREAM_SPLIT`). A decoded coordinate is `offset + scale *
-integer` in degrees, with `scale` and `offset` per LOD; the reference
-writer uses a quarter of the LOD's finest zoom pixel as `scale` and the
-dataset's minimum corner as the origin. Quantization rounds half away from
-zero.
+non-empty and every ring closed. Each stored pair is the step from the
+ring's previous vertex, zigzag coded (`(v << 1) ^ (v >> 31)`), the ring's
+first vertex being its grid coordinate from the origin and a `Point` a ring
+of one (`deltas: "ring"`); summing a ring as it is read gives the grid
+coordinates, and a decoded coordinate is `offset + scale * integer` in
+degrees, with `scale` and `offset` per LOD. COGP stores absolute values in
+a `struct<x, y>` instead; the interleaved pair makes a geometry one Parquet
+leaf, so a tile reads one page run and one offset index for it rather than
+two, and ring steps make a building a handful of small integers, about half
+the bytes of absolute pairs on squares and a fifth less on footprints (the
+leaf uses `BYTE_STREAM_SPLIT`). The reference writer uses a quarter of the
+LOD's finest zoom pixel as `scale` and the dataset's minimum corner as the
+origin. Quantization rounds half away from zero.
 
 `Point` is the bare coordinate pair with the same transform, used only for
 point datasets. COGP does not define a point family; this is our extension,

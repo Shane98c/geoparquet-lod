@@ -1,10 +1,14 @@
 /**
  * Assembles interleaved `quantized_geoarrow` rows, as hyparquet returns the
  * one coordinate leaf (nested arrays ending in `[x, y]` pairs of int32), into
- * the columnar GeometryColumn that @cogp/reader's `toMvt` consumes.
- * Coordinates stay in grid units; `finish` records the LOD's scale and offset
- * so `offset + scale * value` is a CRS coordinate.
+ * the columnar GeometryColumn that @cogp/reader's `toMvt` consumes. Each
+ * stored pair is the zigzag-coded step from the ring's previous vertex, so
+ * rings are summed as they are read. Coordinates stay in grid units;
+ * `finish` records the LOD's scale and offset so `offset + scale * value` is
+ * a CRS coordinate.
  */
+
+const unzigzag = (v: number) => (v >>> 1) ^ -(v & 1)
 
 export type GeometryType = 'Point' | 'MultiLineString' | 'MultiPolygon'
 
@@ -75,10 +79,14 @@ export class GeometryBuilder {
   private push(ring: [number, number][]) {
     this.x = ensure(this.x, this.coords + ring.length)
     this.y = ensure(this.y, this.coords + ring.length)
+    let x = 0
+    let y = 0
     for (const pair of ring) {
       if (pair.length !== 2) throw new Error('coordinate is not an [x, y] pair')
-      this.x[this.coords] = pair[0]
-      this.y[this.coords] = pair[1]
+      x += unzigzag(pair[0])
+      y += unzigzag(pair[1])
+      this.x[this.coords] = x
+      this.y[this.coords] = y
       this.coords++
     }
   }
@@ -108,8 +116,19 @@ export const decodeCoordinates = (
   offset: readonly [number, number],
 ): unknown => {
   const a = coords as unknown[]
-  if (a.length === 2 && typeof a[0] === 'number') {
-    return [offset[0] + scale[0] * (a[0] as number), offset[1] + scale[1] * (a[1] as number)]
+  const isPair = (v: unknown) => Array.isArray(v) && v.length === 2 && typeof v[0] === 'number'
+  if (isPair(a)) {
+    const p = a as [number, number]
+    return [offset[0] + scale[0] * unzigzag(p[0]), offset[1] + scale[1] * unzigzag(p[1])]
+  }
+  if (a.length && isPair(a[0])) {
+    let x = 0
+    let y = 0
+    return (a as [number, number][]).map((p) => {
+      x += unzigzag(p[0])
+      y += unzigzag(p[1])
+      return [offset[0] + scale[0] * x, offset[1] + scale[1] * y]
+    })
   }
   return a.map((v) => decodeCoordinates(v, scale, offset))
 }

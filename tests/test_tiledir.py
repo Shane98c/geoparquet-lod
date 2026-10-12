@@ -10,7 +10,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
-from geoparquet_lod.encoding import lod_type
+from geoparquet_lod.encoding import lod_type, zigzag
 from geoparquet_lod.tiledir import BUFFER, KEY, Compact, build, is_crs84, morton, tile_span
 
 
@@ -36,6 +36,15 @@ def test_crs84_detection():
     assert not is_crs84({'crs': 'PROJCRS["x"]'})
 
 
+def as_stored(ring):
+    """A ring as the file stores it: zigzag steps from the previous vertex."""
+    out, px, py = [], 0, 0
+    for x, y in ring:
+        out.append([int(zigzag(x - px)), int(zigzag(y - py))])
+        px, py = x, y
+    return out
+
+
 @pytest.mark.parametrize('family', ['Point', 'MultiPolygon'])
 def test_directory_reader(tmp_path, family):
     attributes = [pa.field('label', pa.string()), pa.field('value', pa.int32())]
@@ -47,12 +56,16 @@ def test_directory_reader(tmp_path, family):
         y = (i % 11 - 5) * 0.03
         qx, qy = round(x / scale), round(y / scale)
         if family == 'Point':
-            geometry = [qx, qy]
+            geometry = as_stored([[qx, qy]])[0]
             bound = [x, y, x, y]
         else:
             size = 100000 if i % 13 == 0 else 100
             geometry = [
-                [[[qx, qy], [qx + size, qy], [qx + size, qy + 100], [qx, qy + 100], [qx, qy]]]
+                [
+                    as_stored(
+                        [[qx, qy], [qx + size, qy], [qx + size, qy + 100], [qx, qy + 100], [qx, qy]]
+                    )
+                ]
             ]
             bound = [x, y, x + size * scale, y + 100 * scale]
         rows.append(
@@ -69,12 +82,13 @@ def test_directory_reader(tmp_path, family):
         lod_columns=dict(
             version='0.1.0',
             column='lod',
-            order='hilbert',
+            order='hilbert_webmercator',
             zooms=[4, 5, 6],
             tile_size=512,
             prefix=None,
             encoding='quantized_geoarrow',
             coordinates='interleaved',
+            deltas='ring',
             attributes=[dict(name=f.name, type=str(f.type)) for f in attributes],
             thinning={},
             lods={'f4': lod},

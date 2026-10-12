@@ -20,6 +20,7 @@ export const LOD_KEY = 'lod_columns'
 export const LOD_VERSION = '0.1.0'
 export const ENCODING = 'quantized_geoarrow'
 export const COORDINATES = 'interleaved'
+export const DELTAS = 'ring'
 
 export interface Lod {
   name: string
@@ -42,6 +43,7 @@ export interface LodMetadata {
   prefix: { zoom: number; row_group_end: number } | null
   encoding: string
   coordinates: string
+  deltas: string
   attributes: { name: string; type: string }[]
   thinning: Record<string, unknown>
   lods: Record<string, Omit<Lod, 'name'>>
@@ -125,9 +127,9 @@ export class LodReader {
     if (major !== ourMajor || (major === '0' && minor !== ourMinor)) {
       throw new Error(`${LOD_KEY} version ${lod.version} is not compatible with ${LOD_VERSION}`)
     }
-    if (lod.encoding !== ENCODING || lod.coordinates !== COORDINATES) {
+    if (lod.encoding !== ENCODING || lod.coordinates !== COORDINATES || lod.deltas !== DELTAS) {
       throw new Error(
-        `${LOD_KEY} geometry encoding ${lod.encoding}/${lod.coordinates} is not ${ENCODING}/${COORDINATES}`,
+        `${LOD_KEY} geometry encoding ${lod.encoding}/${lod.coordinates}/${lod.deltas} is not ${ENCODING}/${COORDINATES}/${DELTAS}`,
       )
     }
     for (const [name, child] of Object.entries(lod.lods)) {

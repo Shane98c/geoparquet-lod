@@ -1,10 +1,12 @@
 """Arrow shapes of an LOD column.
 
 Each LOD is a nullable struct: null means the row is not shown there. Its
-`geometry` child is COGP's `quantized_geoarrow` in GeoArrow's interleaved
-coordinate layout: nested lists of `fixed_size_list<int32>[2]` (x then y) on
-the LOD's grid as a list of exactly two, `MultiPolygon` three lists deep and
-`MultiLineString` two.
+`geometry` child is COGP's `quantized_geoarrow` grid in GeoArrow's
+interleaved coordinate layout: nested lists of `fixed_size_list<int32>[2]`
+(x then y) on the LOD's grid as a list of exactly two, `MultiPolygon` three
+lists deep and `MultiLineString` two. Each pair holds the zigzag-coded
+difference from the ring's previous vertex, the ring's first vertex being
+the difference from the origin, so a small shape is a few small integers.
 Interleaving makes a geometry one Parquet leaf, so a tile reads one page run
 and one page index for it rather than two. `Point` is the bare coordinate
 pair, our extension of that encoding to point families. Every other child is
@@ -18,6 +20,7 @@ import pyarrow as pa
 
 ENCODING = 'quantized_geoarrow'
 COORDINATES = 'interleaved'
+DELTAS = 'ring'
 # a list of exactly two, as Parquet stores a fixed-size list; a fixed-size Arrow type does not
 # survive the round trip under a null struct in pyarrow
 COORDINATE = pa.list_(pa.field('xy', pa.int32(), nullable=False))
@@ -64,22 +67,44 @@ def round_away(v: np.ndarray) -> np.ndarray:
     return (np.sign(v) * np.floor(np.abs(v) + 0.5)).astype(np.int32)
 
 
-def _pairs(x: np.ndarray, y: np.ndarray) -> pa.Array:
+def zigzag(v: np.ndarray) -> np.ndarray:
+    v = np.asarray(v, dtype=np.int32)
+    return ((v << 1) ^ (v >> 31)).astype(np.int32)
+
+
+def unzigzag(v: np.ndarray) -> np.ndarray:
+    v = np.asarray(v, dtype=np.int32)
+    return ((v >> 1) ^ -(v & 1)).astype(np.int32)
+
+
+def ring_deltas(v: np.ndarray, ring_offsets: np.ndarray) -> np.ndarray:
+    """Each value less the one before it in its ring; a ring's first value stays."""
+    v = np.asarray(v, dtype=np.int32)
+    d = np.diff(v, prepend=np.int32(0))
+    starts = np.asarray(ring_offsets)[:-1]
+    d[starts] = v[starts]
+    return d
+
+
+def _pairs(x: np.ndarray, y: np.ndarray, ring_offsets) -> pa.Array:
     xy = np.empty(2 * len(x), dtype=np.int32)
-    xy[0::2] = x
-    xy[1::2] = y
+    xy[0::2] = zigzag(ring_deltas(x, ring_offsets))
+    xy[1::2] = zigzag(ring_deltas(y, ring_offsets))
     offsets = pa.array(np.arange(0, 2 * len(x) + 1, 2, dtype=np.int32))
     return pa.ListArray.from_arrays(offsets, pa.array(xy)).cast(COORDINATE)
 
 
 def point_array(cx: np.ndarray, cy: np.ndarray, scale: float, offset) -> pa.Array:
-    return _pairs(round_away((cx - offset[0]) / scale), round_away((cy - offset[1]) / scale))
+    singles = np.arange(len(cx) + 1)
+    return _pairs(
+        round_away((cx - offset[0]) / scale), round_away((cy - offset[1]) / scale), singles
+    )
 
 
 def nested_array(parts, depth: int) -> pa.Array:
     """Quantized geometry column from the ragged arrays of quantize.render_*."""
     geom_offsets, poly_offsets, ring_offsets, x, y = parts
-    arr = _pairs(x, y)
+    arr = _pairs(x, y, ring_offsets)
     # lines have one ring per part, so the part level is the geometry level
     offsets = (
         [ring_offsets, poly_offsets, geom_offsets] if depth == 3 else [ring_offsets, geom_offsets]
@@ -103,7 +128,7 @@ def lod_array(geometry: pa.Array, attributes: dict[str, pa.Array], mask: np.ndar
 
 
 def geometry_rows(column: pa.Array) -> list:
-    """Python lists of integer coordinate tuples for a sample, for validation."""
+    """Python lists of absolute integer coordinate tuples for a sample, for validation."""
     out = []
     for v in column.to_pylist():
         if v is None:
@@ -115,5 +140,12 @@ def geometry_rows(column: pa.Array) -> list:
 
 def _tuples(v):
     if len(v) == 2 and isinstance(v[0], int):
-        return (v[0], v[1])
+        return (int(unzigzag(v[0])), int(unzigzag(v[1])))
+    if v and len(v[0]) == 2 and isinstance(v[0][0], int):
+        ring, x, y = [], 0, 0
+        for pair in v:
+            x += int(unzigzag(pair[0]))
+            y += int(unzigzag(pair[1]))
+            ring.append((x, y))
+        return ring
     return [_tuples(u) for u in v]

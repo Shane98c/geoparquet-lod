@@ -35,6 +35,7 @@ import pyarrow.parquet as pq
 from . import tiledir
 from .encoding import (
     COORDINATES,
+    DELTAS,
     ENCODING,
     GEOMETRY_TYPES,
     LIST_DEPTH,
@@ -44,7 +45,7 @@ from .encoding import (
     nested_array,
     point_array,
 )
-from .quantize import DOT_CELLS, SUBPIXELS, grid, render_lines, render_polygons
+from .quantize import DOT_CELLS, MAX_LATITUDE, SUBPIXELS, grid, render_lines, render_polygons
 from .thinning import Context, Thin, default_thinning, describe
 
 LOD_KEY = 'lod_columns'
@@ -282,9 +283,10 @@ def write(
 ) -> Path:
     """Write `src` (any GeoParquet with a WKB geometry column) to `out` in the
     LOD columns layout. `thinning` chooses the rows shown at every zoom;
-    `complete_from` is the zoom it should treat as the base where every feature
-    belongs, as `drop_rate` does, and the writer records which zooms actually
-    keep every row. `compression_level` is zstd's;
+    `complete_from` is the zoom from which every feature is shown whatever the
+    thinning says, and the base zoom a rate-based thinning counts from; `'auto'`
+    guesses the base and records which zooms the thinning leaves complete.
+    `compression_level` is zstd's;
     decoding speed does not depend on it. `tile_directory` also builds the
     tile directory `out.tiledir.parquet` beside the file. Returns the output path."""
     src = str(src)
@@ -328,7 +330,14 @@ def write(
     ).fetchone()
     if xmin is None:
         raise ValueError(f'{src} has no non-empty geometries')
-    box = f'{{min_x:{xmin}, min_y:{ymin}, max_x:{xmax}, max_y:{ymax}}}::BOX_2D'
+    # Hilbert order over the Web Mercator world square on the bbox centre, so a tile's rows
+    # are a contiguous run at every zoom down to the key's depth
+    key = (
+        f'ST_Hilbert((ST_XMin({geometry}) + ST_XMax({geometry})) / 2, '
+        f'greatest(-180, least(180, degrees(ln(tan(radians(45 + '
+        f'greatest(-{MAX_LATITUDE}, least({MAX_LATITUDE}, (ST_YMin({geometry}) + ST_YMax({geometry})) / 2)) / 2)))))), '
+        f'{{min_x: -180, min_y: -180, max_x: 180, max_y: 180}}::BOX_2D)'
+    )
     sorted_path = out.with_suffix('.sorted.parquet')
     log(f'sorting {src}')
     passthrough = '* EXCLUDE (bbox)' if 'bbox' in source_schema.names else '*'
@@ -342,9 +351,9 @@ def write(
                 CASE WHEN {valid} THEN ST_Area({geometry}) END AS __area,
                 CASE WHEN {valid} THEN ST_NPoints({geometry}) END AS __nv,
                 CASE WHEN {valid} THEN {{xmin: ST_XMin({geometry}), ymin: ST_YMin({geometry}), xmax: ST_XMax({geometry}), ymax: ST_YMax({geometry})}} END AS __bbox,
-                CASE WHEN {valid} THEN ST_Hilbert({geometry}, {box}) END AS __h,
+                CASE WHEN {valid} THEN {key} END AS __h,
                 {passthrough}
-            FROM (SELECT * FROM read_parquet('{src}') ORDER BY CASE WHEN {valid} THEN ST_Hilbert({geometry}, {box}) END)
+            FROM (SELECT * FROM read_parquet('{src}') ORDER BY CASE WHEN {valid} THEN {key} END)
         ) TO '{sorted_path}' (FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE {row_group_rows})
     """
     )
@@ -357,6 +366,7 @@ def write(
         raise NotImplementedError(
             'the primary geometry must be OGC:CRS84 or EPSG:4326 (crs omitted or declared); reproject first'
         )
+    forced_complete = complete_from if isinstance(complete_from, int) else None
     zooms, complete_from = guess_zooms(
         con,
         sorted_path,
@@ -400,8 +410,12 @@ def write(
     overrides: dict[int, pa.Table] = {}
     counts = {}
     for i in range(len(zooms) - 1, -1, -1):
-        # the finest zoom shows every row, whatever the thinning says
-        kept = rows if i == len(zooms) - 1 else thinning(rows, zooms[i], ctx)
+        # the finest zoom shows every row, whatever the thinning says, as does every zoom
+        # from an explicit complete_from
+        complete = i == len(zooms) - 1 or (
+            forced_complete is not None and zooms[i] >= forced_complete
+        )
+        kept = rows if complete else thinning(rows, zooms[i], ctx)
         ids = kept.column('id').to_numpy()
         levels[ids - 1] |= 1 << i
         counts[i] = len(ids)
@@ -473,7 +487,7 @@ def write(
     geo[LOD_KEY] = {
         'version': LOD_VERSION,
         'column': 'lod',
-        'order': 'hilbert',
+        'order': 'hilbert_webmercator',
         'zooms': zooms,
         'tile_size': 512,
         'prefix': None
@@ -481,6 +495,7 @@ def write(
         else {'zoom': zooms[prefix_level], 'row_group_end': prefix_end},
         'encoding': ENCODING,
         'coordinates': COORDINATES,
+        'deltas': DELTAS,
         'attributes': [{'name': a.name, 'type': str(a.type)} for a in attributes],
         'thinning': describe(thinning),
         'lods': {

@@ -8,7 +8,7 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from .encoding import COORDINATES, ENCODING, LIST_DEPTH, geometry_rows, geometry_type
+from .encoding import COORDINATES, DELTAS, ENCODING, LIST_DEPTH, geometry_rows, geometry_type
 from .tiledir import KEY as TILE_DIRECTORY_KEY
 from .tiledir import sidecar_path, source_binding
 from .writer import LOD_KEY, LOD_VERSION
@@ -34,6 +34,8 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
         raise ValidationError(f'geometry encoding {lod.get("encoding")!r} is not {ENCODING}')
     if lod.get('coordinates') != COORDINATES:
         raise ValidationError(f'coordinate layout {lod.get("coordinates")!r} is not {COORDINATES}')
+    if lod.get('deltas') != DELTAS:
+        raise ValidationError(f'coordinate deltas {lod.get("deltas")!r} are not {DELTAS}')
     if md.num_row_groups == 0 or md.num_rows == 0:
         raise ValidationError('empty file: an empty dataset carries no LOD columns')
     column = lod.get('column', 'lod')
