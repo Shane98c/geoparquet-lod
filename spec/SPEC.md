@@ -42,11 +42,20 @@ A conforming file MUST satisfy:
 
 1. **Order.** Rows sorted by a space-filling curve over the primary
    geometry, within each of the two sections below. `order` names the curve:
-   `hilbert_webmercator` is a Hilbert curve over the Web Mercator world
-   square on the bbox centre, latitude clamped to the Mercator limit, so a
-   Web Mercator tile's rows are one contiguous run at every zoom the curve
-   resolves. The per-row uniform `u` the reference writer hands thinnings is
-   a hash of the geometry bytes, so it does not depend on sort order.
+   `hilbert_webmercator` is the standard Hilbert curve over the Web Mercator
+   world square divided into `2^depth` cells per side, numbered as XYZ tiles
+   are, on the cell holding the bbox centre with latitude clamped to the
+   Mercator limit. The curve's quadtree prefix property makes a tile at zoom
+   `z <= depth` with Hilbert index `h` the key interval
+   `[h * 4^(depth - z), (h + 1) * 4^(depth - z))`, so a tile's rows are one
+   contiguous run in each section. The key is stored in the `key` column
+   with row group statistics and a page index; a reader finds a tile's row
+   groups from the footer, its key pages from the page index, and its exact
+   rows by reading the two boundary key pages, then reads only those rows of
+   the LOD leaves, taking a one-cell ring at a finer depth around the tile for
+   features centred outside it that reach into its buffer. The per-row
+   uniform `u` the reference writer hands thinnings is a hash of the
+   geometry bytes, so it does not depend on sort order.
 2. **Prefix.** When `prefix` is present, every row whose coarsest zoom is at
    or below `prefix.zoom` is stored in row groups `0..prefix.row_group_end`,
    and no other row is. Those row groups are sorted on their own; the rest of
@@ -91,6 +100,7 @@ Under the `geo` key, a `lod_columns` object:
 | `version`     | string         | `0.1.0`; readers reject a different major version, and while the major is 0 a different minor as well, since minors may change the layout                                                                          |
 | `column`      | string         | name of the LOD struct column                                                                                                                                                                                      |
 | `order`       | string         | `hilbert_webmercator`, see Layout 1                                                                                                                                                                                |
+| `key`         | object         | `{column, depth}`: the uint32 column holding each row's Hilbert index at `depth` of its Web Mercator cell, with statistics and a page index, see Layout 1                                                          |
 | `zooms`       | int[]          | every zoom the file serves, ascending                                                                                                                                                                              |
 | `tile_size`   | int            | pixels per tile the zooms assume (512)                                                                                                                                                                             |
 | `prefix`      | object or null | `{zoom, row_group_end}`, see Layout 2                                                                                                                                                                              |

@@ -49,6 +49,9 @@ from .quantize import DOT_CELLS, MAX_LATITUDE, SUBPIXELS, grid, render_lines, re
 from .thinning import Context, Thin, default_thinning, describe
 
 LOD_KEY = 'lod_columns'
+KEY_COLUMN = 'hilbert'
+KEY_DEPTH = 16
+KEY_FIELD = pa.field(KEY_COLUMN, pa.uint32(), nullable=True)
 # columns the writer computes carry a prefix no source column uses; thinnings see them unprefixed
 THINNING_COLUMNS = ('id', 'cx', 'cy', 'diag', 'area', 'nv', 'u')
 LOD_VERSION = '0.1.0'
@@ -315,8 +318,9 @@ def write(
         )
 
     # 1. a sorted, slim copy with centroid, diagonal and Hilbert key
-    if 'lod' in source_schema.names:
-        raise ValueError("source column 'lod' clashes with the output column of that name")
+    for name in ('lod', KEY_COLUMN):
+        if name in source_schema.names:
+            raise ValueError(f'source column {name!r} clashes with the output column of that name')
     bad = [a.name for a in attributes if a.name in THINNING_COLUMNS]
     bad += [c for c in columns if c in THINNING_COLUMNS]
     if bad:
@@ -330,13 +334,15 @@ def write(
     ).fetchone()
     if xmin is None:
         raise ValueError(f'{src} has no non-empty geometries')
-    # Hilbert order over the Web Mercator world square on the bbox centre, so a tile's rows
-    # are a contiguous run at every zoom down to the key's depth
+    # Hilbert index at depth KEY_DEPTH of the Web Mercator cell holding the bbox centre, cells
+    # numbered as XYZ tiles are, so a tile at any zoom up to the depth is one key interval
+    cells = 1 << KEY_DEPTH
+    lon = f'(ST_XMin({geometry}) + ST_XMax({geometry})) / 2'
+    lat = f'radians(greatest(-{MAX_LATITUDE}, least({MAX_LATITUDE}, (ST_YMin({geometry}) + ST_YMax({geometry})) / 2)))'
     key = (
-        f'ST_Hilbert((ST_XMin({geometry}) + ST_XMax({geometry})) / 2, '
-        f'greatest(-180, least(180, degrees(ln(tan(radians(45 + '
-        f'greatest(-{MAX_LATITUDE}, least({MAX_LATITUDE}, (ST_YMin({geometry}) + ST_YMax({geometry})) / 2)) / 2)))))), '
-        f'{{min_x: -180, min_y: -180, max_x: 180, max_y: 180}}::BOX_2D)'
+        f'ST_Hilbert(least({cells - 1}, greatest(0, floor(({lon} + 180) / 360 * {cells}))), '
+        f'least({cells - 1}, greatest(0, floor((1 - ln(tan({lat}) + 1 / cos({lat})) / pi()) / 2 * {cells}))), '
+        f'{{min_x: 0, min_y: 0, max_x: {cells - 1}, max_y: {cells - 1}}}::BOX_2D)'
     )
     sorted_path = out.with_suffix('.sorted.parquet')
     log(f'sorting {src}')
@@ -477,7 +483,7 @@ def write(
         nullable=False,
     )
     rest = [f for f in source_schema if f.name not in ('bbox', geometry)]
-    schema = pa.schema([BBOX_FIELD, lod_field, *rest, source_schema.field(geometry)])
+    schema = pa.schema([BBOX_FIELD, KEY_FIELD, lod_field, *rest, source_schema.field(geometry)])
     geo.setdefault('version', '1.1.0')
     geo.setdefault('primary_column', geometry)
     geo.setdefault('columns', {}).setdefault(geometry, {'encoding': 'WKB', 'geometry_types': []})
@@ -488,6 +494,7 @@ def write(
         'version': LOD_VERSION,
         'column': 'lod',
         'order': 'hilbert_webmercator',
+        'key': {'column': KEY_COLUMN, 'depth': KEY_DEPTH},
         'zooms': zooms,
         'tile_size': 512,
         'prefix': None
@@ -538,7 +545,7 @@ def write(
         compression_level=compression_level,
         use_dictionary=False,
         column_encoding={leaf: 'BYTE_STREAM_SPLIT' for leaf in coordinate_leaves},
-        write_statistics=['bbox.xmin', 'bbox.ymin', 'bbox.xmax', 'bbox.ymax'],
+        write_statistics=['bbox.xmin', 'bbox.ymin', 'bbox.xmax', 'bbox.ymax', KEY_COLUMN],
         write_page_index=True,
         write_batch_size=batch_rows,
         data_page_size=page_bytes,
@@ -581,6 +588,7 @@ def write(
         out_table = pa.table(
             {
                 'bbox': _bbox_float32(cols['__bbox']),
+                KEY_COLUMN: cols['__h'].cast(pa.uint32()),
                 'lod': lod,
                 **{f.name: cols[f.name] for f in rest},
                 geometry: cols[geometry],

@@ -77,7 +77,10 @@ export const renderTile = async (
     }
   }
   const { rows, coords, columns } =
-    located ?? (await reader.readLod(lod, bbox, names, signal, { refine: options.refine ?? true }))
+    located ??
+    (reader.lod.key
+      ? await reader.readLodByTile(lod, z, x, y, names, signal)
+      : await reader.readLod(lod, bbox, names, signal, { refine: options.refine ?? true }))
   signal?.throwIfAborted()
   if (pointFamily) {
     const px: number[] = []

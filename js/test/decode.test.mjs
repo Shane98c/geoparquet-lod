@@ -59,3 +59,28 @@ assert.deepEqual(Array.from(g.y), [0, 0, 3, 0, 10, 10, 12, 10, 0, 1, 8])
 
 assert.throws(() => b.add('MultiPolygon', [[[[0, 1, 2]]]]), /pair/)
 console.log('decode tests passed')
+
+// the stored key: a tile is one interval, its parent the union of its four children
+import { hilbertIndex, tileIntervals, cellInterval } from '../dist/index.js'
+assert.deepEqual(
+  [0, 1, 2, 3].map((i) => hilbertIndex(1, i & 1, i >> 1)),
+  [0, 3, 1, 2],
+)
+const child = (x, y) => cellInterval(16, 12, x, y)
+const parent = cellInterval(16, 11, 7, 5)
+const kids = [child(14, 10), child(15, 10), child(14, 11), child(15, 11)].sort(
+  (a, b) => a[0] - b[0],
+)
+assert.deepEqual([kids[0][0], kids[3][1]], parent)
+assert.ok(
+  kids.every((k, i) => i === 0 || k[0] === kids[i - 1][1]),
+  'children are contiguous',
+)
+const ring = tileIntervals(16, 11, 7, 5)
+assert.ok(
+  ring.some(([a, b]) => a <= parent[0] && b >= parent[1]),
+  'the tile itself is covered',
+)
+assert.ok(ring.length > 1 && ring.length < 80, `ring is a few runs, got ${ring.length}`)
+assert.equal(tileIntervals(16, 18, 100, 100).length >= 1, true)
+console.log('key tests passed')

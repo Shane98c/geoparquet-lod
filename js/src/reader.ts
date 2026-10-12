@@ -13,6 +13,7 @@ import { DEFAULT_PARSERS } from 'hyparquet/src/convert.js'
 import { getSchemaPath } from 'hyparquet/src/schema.js'
 import { compressors } from 'hyparquet-compressors'
 import { LIST_DEPTH, type GeometryType } from './geometry.js'
+import { tileIntervals, type Interval } from './key.js'
 
 export type Bbox = [number, number, number, number]
 
@@ -41,6 +42,8 @@ export interface LodMetadata {
   zooms: number[]
   tile_size: number
   prefix: { zoom: number; row_group_end: number } | null
+  /** Stored Hilbert key column and its depth, when rows are ordered by it. */
+  key?: { column: string; depth: number }
   encoding: string
   coordinates: string
   deltas: string
@@ -212,6 +215,122 @@ export class LodReader {
   /** Parquet leaf path of an LOD's interleaved coordinates: the geometry lists, then the pair list. */
   geometryLeaf(lod: Lod): string {
     return `${this.lod.column}.${lod.name}.geometry${'.list.element'.repeat(LIST_DEPTH[lod.geometry_type] + 1)}`
+  }
+
+  /**
+   * Every row shown at `lod` in tile z/x/y or the one-cell ring around it,
+   * located through the stored Hilbert key: row groups by the key's footer
+   * statistics, pages by its page index, exact rows by the boundary key
+   * pages. No bbox read is made; the tile encoder clips what the ring adds.
+   */
+  async readLodByTile(
+    lod: Lod,
+    z: number,
+    x: number,
+    y: number,
+    attributes: string[] = [],
+    signal?: AbortSignal,
+  ): Promise<LodRows> {
+    const key = this.lod.key
+    if (!key) throw new Error('file has no stored key column')
+    const out: LodRows = {
+      rows: [],
+      coords: [],
+      columns: Object.fromEntries(attributes.map((a) => [a, []])),
+    }
+    const prefix = this.lod.prefix
+    const coarse = prefix && Math.max(...lod.zooms) <= prefix.zoom
+    const intervals = tileIntervals(key.depth, z, x, y)
+    const overlaps = (lo: number, hi: number) => intervals.some(([a, b]) => lo < b && hi >= a)
+    const groups = this.metadata.row_groups
+      .map((_, g) => g)
+      .filter((g) => {
+        if (coarse && g > prefix!.row_group_end) return false
+        const stat = this.chunk(g, key.column).meta_data!.statistics
+        if (!stat || stat.min_value == null || stat.max_value == null) return true
+        return overlaps(unsigned(stat.min_value), unsigned(stat.max_value))
+      })
+    const leaves = [
+      this.geometryLeaf(lod),
+      ...attributes.map((a) => `${this.lod.column}.${lod.name}.${a}`),
+    ]
+    const perGroup = await Promise.all(
+      groups.map(async (g) => {
+        const ranges = await this.keyRanges(g, key.column, intervals, signal)
+        if (!ranges.length) return { g, values: leaves.map(() => new Map<number, unknown>()) }
+        const values = await Promise.all(leaves.map((l) => this.readLeafRows(g, l, ranges, signal)))
+        return { g, values }
+      }),
+    )
+    for (const { g, values } of perGroup) {
+      const start = this.rowGroupStarts[g]
+      const [coords, ...attrs] = values
+      for (const [row, c] of coords) {
+        out.rows.push(start + row)
+        out.coords.push(c)
+        attributes.forEach((a, i) => out.columns[a].push(attrs[i].get(row) ?? null))
+      }
+    }
+    return out
+  }
+
+  /**
+   * Row ranges of group `g` whose key lies in `intervals`: the key pages whose
+   * statistics overlap, with the first and last page of each run read to find
+   * the exact rows, since a page's rows run far past a fine tile's.
+   */
+  private async keyRanges(
+    g: number,
+    column: string,
+    intervals: Interval[],
+    signal?: AbortSignal,
+  ): Promise<[number, number][]> {
+    const [pages, index] = await Promise.all([
+      this.offsetIndex(g, column),
+      this.columnIndex(g, column),
+    ])
+    signal?.throwIfAborted()
+    const inside = (k: number) => intervals.some(([a, b]) => k >= a && k < b)
+    const hit = pages.map((_, p) => {
+      const lo = unsigned(index.min_values[p] as unknown as number)
+      const hi = unsigned(index.max_values[p] as unknown as number)
+      return intervals.some(([a, b]) => lo < b && hi >= a)
+    })
+    const runs: [number, number][] = []
+    for (let p = 0; p < pages.length; p++) {
+      if (!hit[p]) continue
+      const last = runs[runs.length - 1]
+      if (last && last[1] === p) last[1] = p + 1
+      else runs.push([p, p + 1])
+    }
+    const edges = new Set<number>()
+    for (const [a, b] of runs) {
+      edges.add(a)
+      edges.add(b - 1)
+    }
+    const edgePages = [...edges].sort((a, b) => a - b).map((p) => pages[p])
+    const decoded = await this.pageValues(g, column, edgePages, signal)
+    const exact = new Map<number, [number, number][]>()
+    edgePages.forEach((page, i) => {
+      const rows: [number, number][] = []
+      for (const [row, value] of decoded[i]) {
+        if (!inside(unsigned(value as number))) continue
+        const last = rows[rows.length - 1]
+        if (last && last[1] === row) last[1] = row + 1
+        else rows.push([row, row + 1])
+      }
+      exact.set(page.rowStart, rows)
+    })
+    const out: [number, number][] = []
+    for (const [a, b] of runs) {
+      for (let p = a; p < b; p++) {
+        const page = pages[p]
+        const rows = exact.get(page.rowStart)
+        if (rows) out.push(...rows)
+        else out.push([page.rowStart, page.rowEnd])
+      }
+    }
+    return mergeRanges(out)
   }
 
   /** Every row shown at `lod` whose covering bbox may intersect `bbox`, with the named attributes. */
@@ -757,6 +876,12 @@ const ABSENT = Symbol('absent')
 const unwrap = (v: unknown): unknown => {
   if (!Array.isArray(v)) return v === null || v === undefined ? ABSENT : v
   return v.length ? v[0] : ABSENT
+}
+
+/** A uint32 key decoded as a signed int32 comes back negative above 2^31. */
+const unsigned = (v: unknown): number => {
+  const n = typeof v === 'bigint' ? Number(v) : (v as number)
+  return n < 0 ? n + 2 ** 32 : n
 }
 
 const intersects = (a: Bbox, b: Bbox) => !(a[0] > b[2] || a[2] < b[0] || a[1] > b[3] || a[3] < b[1])
