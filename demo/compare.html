@@ -196,6 +196,7 @@
           keys: [esriUrl],
           sources: {},
           layers: [],
+          countLayers: ['maplibre-parquet-fill'],
           attach: (map, hud) => {
             // the reader converts each view to GeoJSON on moveend and owns its layers
             const layer = new MapLibreParquetLayer(
@@ -292,13 +293,30 @@
         for (const { pane } of maps) if (pane.stats) Object.assign(stats, await pane.stats())
         return stats
       }
+      // features drawn in the view, counted once each where the tiles give them ids
+      const inView = (map, pane) => {
+        const layers = (pane.countLayers ?? pane.layers.map((l) => l.id)).filter((id) =>
+          map.getLayer(id),
+        )
+        if (!layers.length) return 0
+        const ids = new Set()
+        let anonymous = 0
+        for (const f of map.queryRenderedFeatures({ layers })) {
+          if (f.id == null) anonymous++
+          else ids.add(f.id)
+        }
+        return ids.size + anonymous
+      }
       const show = async () => {
         const stats = await current()
-        for (const { hud, pane } of maps) {
+        for (const { map, hud, pane } of maps) {
           const { requests, bytes } = tally(stats, pane.keys)
           const children = [
             Object.assign(document.createElement('b'), { textContent: pane.title }),
             document.createTextNode(`${format(bytes)} in ${requests} requests`),
+            Object.assign(document.createElement('small'), {
+              textContent: `${inView(map, pane).toLocaleString()} features in view`,
+            }),
           ]
           if (hud.dataset.status)
             children.push(
