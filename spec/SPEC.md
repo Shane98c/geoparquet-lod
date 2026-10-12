@@ -228,8 +228,9 @@ declared type, into that LOD's rows; copies carry the source row's values.
 
 ## Reader algorithm
 
-1. Read the footer; the reference HTTP source asks for the file's last 1 MB
-   and its size together, so a footer that fits costs one round trip.
+1. Read the footer. The reference HTTP source first probes for the optional
+   [spatial index profile](SPATIAL-INDEX.md), which can bypass this algorithm
+   for LOD tiles. Otherwise it reads a 64 KiB tail and any missing footer bytes.
    Validate `lod_columns`. Start fetching the prefix row groups' key and
    LOD offset indexes.
 2. For a tile at zoom z choose the LOD containing z, clamping to the

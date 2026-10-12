@@ -46,8 +46,7 @@
     </script>
     <script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
     <script type="module">
-      import { prefetch, registerProtocol, tileUrl, readRow } from './dist/maplibre.js'
-      import { LodReader, httpSource, coalescing } from './dist/index.js'
+      import { readMetadata, registerProtocol, tileUrl, readRow } from './dist/maplibre.js'
 
       const hud = document.getElementById('hud')
       const params = new URLSearchParams(location.search)
@@ -60,25 +59,9 @@
       }
       const fileUrl = new URL(url, location.href).href
 
-      const reader = await LodReader.open(coalescing(await httpSource([fileUrl])))
-      const meta = reader.lod
+      const { lod: meta, bounds, columns } = await readMetadata(fileUrl)
       const geometries = new Set(Object.values(meta.lods).map((l) => l.geometry_type))
-      const bounds = reader.metadata.row_groups.reduce(
-        (b, _, g) => {
-          const rg = reader.metadata.row_groups[g].columns
-          const stat = (leaf) =>
-            rg.find((c) => c.meta_data.path_in_schema.join('.') === leaf).meta_data.statistics
-          return [
-            Math.min(b[0], stat('bbox.xmin').min_value),
-            Math.min(b[1], stat('bbox.ymin').min_value),
-            Math.max(b[2], stat('bbox.xmax').max_value),
-            Math.max(b[3], stat('bbox.ymax').max_value),
-          ]
-        },
-        [180, 90, -180, -90],
-      )
 
-      prefetch(fileUrl)
       registerProtocol(maplibregl)
       const map = new maplibregl.Map({
         container: 'map',
@@ -149,7 +132,9 @@
         const show = () => {
           const z = Math.round(map.getZoom())
           const where =
-            z > reader.finestZoom ? 'exact primary geometry' : `LOD ${reader.lodForZoom(z).name}`
+            z > Math.max(...meta.zooms)
+              ? 'exact primary geometry'
+              : `LOD ${Object.keys(meta.lods).find((name) => meta.lods[name].zooms.includes(Math.max(z, Math.min(...meta.zooms))))}`
           // file metadata is untrusted: text nodes only
           hud.replaceChildren(
             Object.assign(document.createElement('b'), { textContent: fileUrl.split('/').pop() }),
@@ -169,7 +154,7 @@
             layers: ['dots', 'fill', 'line'].filter((l) => map.getLayer(l)),
           })[0]
           if (!f) return
-          const row = await readRow(fileUrl, f.id, reader.scalarColumns().slice(0, 12))
+          const row = await readRow(fileUrl, f.id, columns.slice(0, 12))
           const box = document.createElement('div')
           for (const [k, v] of Object.entries({ row: f.id, ...f.properties, ...row })) {
             box.append(document.createTextNode(`${k}: ${v}`), document.createElement('br'))

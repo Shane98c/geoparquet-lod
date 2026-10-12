@@ -18,6 +18,29 @@ how close it is today.
 - `examples/`: thinning functions for common datasets
 - `docs/benchmarks.md`: measurements against PMTiles, COGP and plain GeoParquet
 
+### Spatial page index experiment
+
+`geoparquet-lod optimize input.parquet output.parquet` now adds an optional
+map access path to an existing **packed** LOD file. It aligns LOD data pages
+with tile boundaries, clusters each LOD's column chunks together, and adds a
+small spatial directory. Every source and LOD value, row order, feature id,
+and analytical row group is preserved. There is no second set of tile payloads.
+
+The MapLibre worker detects these files automatically. Direct JS callers use
+`openReader(coalescing(await httpSource([url])))` instead of `LodReader.open`.
+Opening an indexed file takes one 16 KiB range; analytical row inspection and
+the exact-geometry fallback load the ordinary Parquet footer when needed.
+Expose `Content-Range` in CORS responses to avoid a separate sizing HEAD.
+`--keep-pages` isolates the effect of the directory and physical clustering;
+the default also re-encodes the LOD pages on their finest tile grid.
+
+This is experimental and remains behind PMTiles in some workloads. The Japan
+measurements, tradeoffs, and reproduction commands are in
+[the parity experiment](docs/parity-experiment.md); the physical layout is in
+[the spatial index profile](spec/SPATIAL-INDEX.md). Ordinary analytical readers
+can read the optimized file without understanding that profile. A general
+Parquet rewrite will discard the directory; run the optimizer again afterward.
+
 ## How it works
 
 Rows are sorted once along a Hilbert curve over the Web Mercator world
@@ -176,8 +199,9 @@ const row = await readRow(url, feature.id, ['name', 'risk'])
 Tiles are read and encoded in a Web Worker. The server must answer HTTP
 range requests with CORS, which plain S3 does. `tileUrl` also takes
 `pointLayer` for point datasets.
-Opening a file reads its last 1 MB in one request, which holds the footer
-of files up to a few hundred row groups, alongside a HEAD for the size.
+Opening probes the first 16 KiB for the optional spatial index. Indexed files
+need only that request; ordinary files then read a 64 KiB tail and any missing
+footer bytes. A HEAD is needed only when CORS hides `Content-Range`.
 
 ### Demo
 

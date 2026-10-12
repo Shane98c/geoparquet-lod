@@ -1,5 +1,9 @@
 # Benchmarks
 
+The newer [spatial page index experiment](parity-experiment.md) measures
+tile-aligned Parquet pages, a 16 KiB bootstrap, and direct spatial lookup on
+the same Japan source. The tables below remain the baseline measurements.
+
 Both sections were measured on 2026-10-12 against files written that day
 by the current writer; the `cogp`, `pmtiles` and `sorted` numbers in the US
 section are from 2026-10-10 against files that have not changed.

@@ -1,11 +1,11 @@
 /// <reference lib="webworker" />
 import type { Transfer, WorkerRequest, WorkerResponse } from './maplibre.js'
 import { coalescing, httpSource, s3Mirrors } from './range-buffer.js'
-import { LodReader } from './reader.js'
+import { openReader, type TileReader } from './spatial.js'
 import { renderTile } from './tile.js'
 
 const scope = self as unknown as DedicatedWorkerGlobalScope
-const readers = new Map<string, Promise<LodReader>>()
+const readers = new Map<string, Promise<TileReader>>()
 const stats: Record<string, Transfer> = {}
 
 const fetched = scope.fetch.bind(scope)
@@ -19,10 +19,10 @@ scope.fetch = async (input, init) => {
 }
 const controllers = new Map<number, AbortController>()
 
-const getReader = (url: string): Promise<LodReader> => {
+const getReader = (url: string): Promise<TileReader> => {
   let reader = readers.get(url)
   if (!reader) {
-    reader = httpSource(s3Mirrors(url)).then((file) => LodReader.open(coalescing(file)))
+    reader = httpSource(s3Mirrors(url)).then((file) => openReader(coalescing(file)))
     readers.set(url, reader)
     reader.catch(() => readers.delete(url))
   }
@@ -41,8 +41,13 @@ scope.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
   }
   if (request.type === 'open') {
     getReader(request.url)
-      .then(() =>
-        scope.postMessage({ id: request.id, ok: true, opened: true } satisfies WorkerResponse),
+      .then((reader) =>
+        scope.postMessage({
+          id: request.id,
+          ok: true,
+          opened: true,
+          metadata: { lod: reader.lod, bounds: reader.bounds, columns: reader.scalarColumns() },
+        } satisfies WorkerResponse),
       )
       .catch((error: Error) =>
         scope.postMessage({

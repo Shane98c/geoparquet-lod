@@ -1,5 +1,6 @@
 """GeoParquet with per-zoom display columns."""
 
+from .optimize import optimize
 from .thinning import (
     Context,
     Thin,
@@ -32,6 +33,7 @@ __all__ = [
     'importance',
     'inspect',
     'only',
+    'optimize',
     'size_threshold',
     'tiny_polygons',
     'validate',

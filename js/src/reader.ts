@@ -175,6 +175,20 @@ export class LodReader {
     return [...top]
   }
 
+  /** Dataset extent from the ordinary covering statistics. */
+  get bounds(): Bbox {
+    const bounds: Bbox = [180, 90, -180, -90]
+    for (let g = 0; g < this.metadata.row_groups.length; g++) {
+      const box = this.rowGroupBbox(g)
+      if (!box.every(Number.isFinite) || box[0] > box[2] || box[1] > box[3]) continue
+      bounds[0] = Math.min(bounds[0], box[0])
+      bounds[1] = Math.min(bounds[1], box[1])
+      bounds[2] = Math.max(bounds[2], box[2])
+      bounds[3] = Math.max(bounds[3], box[3])
+    }
+    return bounds[0] <= bounds[2] ? bounds : [-180, -85.051129, 180, 85.051129]
+  }
+
   static async open(file: RangeSource): Promise<LodReader> {
     let footer: ArrayBuffer | undefined
     const end = file.byteLength - 8

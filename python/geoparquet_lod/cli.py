@@ -166,3 +166,20 @@ def inspect_cmd(path):
     click.echo(f'bytes per row in row group {info["row_group_sampled"]}:')
     for col, nbytes in info['compressed_bytes_by_column'].items():
         click.echo(f'  {col:40s} {nbytes / max(rows, 1):8.2f}')
+
+
+@cli.command('optimize')
+@click.argument('src', type=click.Path(exists=True, dir_okay=False))
+@click.argument('out', type=click.Path(dir_okay=False))
+@click.option('--leaf-pages', default=1024, type=click.IntRange(min=1), show_default=True)
+@click.option(
+    '--tile-pages/--keep-pages',
+    default=True,
+    show_default=True,
+    help='Align LOD compression pages to tile boundaries, or just relocate existing pages',
+)
+def optimize_cmd(src, out, leaf_pages, tile_pages):
+    """Cluster LOD pages and add a spatial directory; preserve every table value."""
+    from .optimize import optimize
+
+    optimize(src, out, leaf_pages=leaf_pages, tile_pages=tile_pages, log=click.echo)

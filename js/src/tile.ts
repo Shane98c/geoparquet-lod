@@ -1,6 +1,7 @@
 import { MVT_BUFFER, MVT_EXTENT, geometryColumnFromWkb, toMvt } from '@cogp/reader'
 import { GeometryBuilder } from './geometry.js'
-import type { Bbox, LodReader } from './reader.js'
+import type { Bbox } from './reader.js'
+import type { TileReader } from './spatial.js'
 
 const VECTOR_TILE_SIZE = 512
 
@@ -38,7 +39,7 @@ export const tileBounds = (z: number, x: number, y: number): Bbox => {
 
 /** One MVT tile from the LOD that serves zoom `z`. Feature ids are file row indexes. */
 export const renderTile = async (
-  reader: LodReader,
+  reader: TileReader,
   z: number,
   x: number,
   y: number,
