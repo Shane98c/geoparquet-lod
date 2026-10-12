@@ -114,7 +114,9 @@ for (const [z, lon, lat, label] of tiles) {
     const r = await lodOpen()
     await new Promise((resolve) => setTimeout(resolve, 1500))
     const a = snap(key)
+    const t0 = performance.now()
     const mvt = await renderTile(r, z, x, y, { properties: [] })
+    const ms = Math.round(performance.now() - t0)
     const cold = delta(a, snap(key))
     // the neighbouring tile on the same reader: what a tile costs once the indexes are read
     const b = snap(key)
@@ -123,7 +125,7 @@ for (const [z, lon, lat, label] of tiles) {
     row.push(
       fmt(
         cold,
-        `, ${(mvt.byteLength / 1e3).toFixed(0)} KB mvt, ${features(mvt)} features; next tile ${fmt(warm)}`,
+        `, ${ms} ms, ${(mvt.byteLength / 1e3).toFixed(0)} KB mvt, ${features(mvt)} features; next tile ${fmt(warm)}`,
       ),
     )
   }
@@ -165,7 +167,9 @@ for (const [z, lon, lat, label] of tiles) {
     const a = snap(key)
     const zz = Math.min(z, 14)
     const [px, py] = xy(zz, lon, lat)
+    const t0 = performance.now()
     const t = await p.getZxy(zz, px, py)
+    const ms = Math.round(performance.now() - t0)
     const cold = delta(a, snap(key))
     const b = snap(key)
     await p.getZxy(zz, px + 1, py)
@@ -174,7 +178,7 @@ for (const [z, lon, lat, label] of tiles) {
       fmt(
         cold,
         (t
-          ? `, ${(t.data.byteLength / 1e3).toFixed(0)} KB tile, ${features(t.data)} features`
+          ? `, ${ms} ms, ${(t.data.byteLength / 1e3).toFixed(0)} KB tile, ${features(t.data)} features`
           : ', empty') + `; next tile ${fmt(warm)}`,
       ),
     )
