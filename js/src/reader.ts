@@ -86,7 +86,7 @@ export interface PrimaryRows {
 /** Compressed bytes of decoded bbox pages kept for later tiles; the oldest go first. */
 const PAGE_CACHE_BYTES = 4 * 1024 * 1024
 /** LOD bytes a tile may read past its exact rows rather than fetch key pages to trim them. */
-const LOOSE_BYTES = 256 * 1024
+const LOOSE_BYTES = 96 * 1024
 const BBOX_LEAVES = ['bbox.xmin', 'bbox.ymin', 'bbox.xmax', 'bbox.ymax'] as const
 
 /**
@@ -348,15 +348,28 @@ export class LodReader {
         .filter((p) => rows.some(([a, b]) => p.rowStart < b && p.rowEnd > a))
         .reduce((n, p) => n + p.byteEnd - p.byteStart, 0)
     const whole = runs.map(([a, b]): [number, number] => [pages[a].rowStart, pages[b - 1].rowEnd])
-    const inner = runs
-      .filter(([a, b]) => b - a > 2)
-      .map(([a, b]): [number, number] => [pages[a + 1].rowStart, pages[b - 2].rowEnd])
-    const atRisk = leafBytes(whole) - leafBytes(inner)
+    // an edge page's rows outside the interval are wasted reads; estimate them by the share of
+    // the page's key span the interval misses, so an empty or tiny tile reads its key pages
+    // rather than a run of LOD pages holding nothing of its own
+    let waste = 0
+    for (const [a, b] of runs) {
+      for (const p of new Set([a, b - 1])) {
+        const lo = unsigned(index.min_values[p] as unknown as number)
+        const hi = unsigned(index.max_values[p] as unknown as number)
+        const span = Math.max(hi - lo, 1)
+        const covered = intervals.reduce(
+          (n, [s0, e0]) => n + Math.max(0, Math.min(hi, e0 - 1) - Math.max(lo, s0)),
+          0,
+        )
+        const miss = 1 - Math.min(1, covered / span)
+        waste += leafBytes([[pages[p].rowStart, pages[p].rowEnd]]) * miss
+      }
+    }
     const keyBytes = runs.reduce((n, [a, b]) => {
       const edge = new Set([a, b - 1])
       return n + [...edge].reduce((m, p) => m + pages[p].byteEnd - pages[p].byteStart, 0)
     }, 0)
-    if (atRisk <= Math.max(keyBytes, LOOSE_BYTES)) return mergeRanges(whole)
+    if (waste <= Math.max(keyBytes, LOOSE_BYTES)) return mergeRanges(whole)
     const edges = new Set<number>()
     for (const [a, b] of runs) {
       edges.add(a)
@@ -415,7 +428,9 @@ export class LodReader {
       columns: Object.fromEntries(attributes.map((a) => [a, []])),
     }
     const finest = this.lodForZoom(this.finestZoom)
-    const leaves = attributes.map((a) => `${this.lod.column}.${finest.name}.${a}`)
+    const wanted = attributes.map((a) => this.fields.findIndex((f) => f.name === a))
+    if (wanted.includes(-1))
+      throw new Error(`attribute ${attributes[wanted.indexOf(-1)]} is not carried`)
     const groups = this.metadata.row_groups
       .map((_, g) => g)
       .filter((g) => intersects(this.rowGroupBbox(g), bbox))
@@ -428,16 +443,18 @@ export class LodReader {
             g,
             ranges,
             geometry: new Map<number, unknown>(),
-            attrs: [] as Map<number, unknown>[],
+            packed: new Map<number, unknown>(),
           }
-        const [geometry, ...attrs] = await Promise.all([
+        const [geometry, packed] = await Promise.all([
           this.readLeafValues(g, this.primary, ranges, signal),
-          ...leaves.map((leaf) => this.readLeafRows(g, leaf, ranges, signal)),
+          attributes.length
+            ? this.readLeafRows(g, this.lodLeaf(finest), ranges, signal)
+            : Promise.resolve(new Map<number, unknown>()),
         ])
-        return { g, ranges, geometry, attrs }
+        return { g, ranges, geometry, packed }
       }),
     )
-    for (const { g, ranges, geometry, attrs } of perGroup) {
+    for (const { g, ranges, geometry, packed } of perGroup) {
       const start = this.rowGroupStarts[g]
       for (const [a, b] of ranges) {
         for (let row = a; row < b; row++) {
@@ -445,7 +462,11 @@ export class LodReader {
           if (!(wkb instanceof Uint8Array)) continue
           out.rows.push(start + row)
           out.wkb.push(wkb)
-          attributes.forEach((name, i) => out.columns[name].push(attrs[i].get(row) ?? null))
+          if (!attributes.length) continue
+          const raw = packed.get(row)
+          const attrs =
+            raw instanceof Uint8Array ? decodeRow(raw, finest.geometry_type, this.fields).attrs : []
+          attributes.forEach((name, i) => out.columns[name].push(attrs[wanted[i]] ?? null))
         }
       }
     }

@@ -1,6 +1,5 @@
 // The same tiles from four files of the same 155.6 million US buildings, read with range
-// requests: this layout (through page indexes, and through its tile directory when
-// TILEDIR_URL is set), COGP, PMTiles and a plain Hilbert-sorted GeoParquet. Prints markdown
+// requests: this layout, COGP, PMTiles and a plain Hilbert-sorted GeoParquet. Prints markdown
 // tables of the open cost, each tile cold and then warm on the same reader, and short pans.
 //   node test/compare.mjs [z,lon,lat ...]     RUNS=3 by default; median time is reported
 import { parquetMetadataAsync } from 'hyparquet'
@@ -8,14 +7,7 @@ import { CogpReader, toMvt } from '@cogp/reader'
 import { PMTiles } from 'pmtiles'
 import { VectorTile } from '@mapbox/vector-tile'
 import { PbfReader } from 'pbf'
-import {
-  LodReader,
-  TileDirectory,
-  httpSource,
-  coalescing,
-  renderTile,
-  tileBounds,
-} from '../dist/index.js'
+import { LodReader, httpSource, coalescing, renderTile, tileBounds } from '../dist/index.js'
 
 const FILES = {
   // LOD_URL overrides the lod file, e.g. a local rewrite served with range support
@@ -124,9 +116,6 @@ const countFeatures = (buf, child) => {
 }
 
 const ONLY = process.env.IMPLS?.split(',')
-// TILEDIR_URL adds a `lod_tiledir` implementation: the same file read through its tile
-// directory sidecar (`<file>.tiledir.parquet`), whose open counts toward the reader's open
-const TILEDIR = process.env.TILEDIR_URL
 const impls = {
   lod: {
     open: async () => LodReader.open(coalescing(await httpSource([FILES.lod]))),
@@ -138,45 +127,6 @@ const impls = {
       }
     },
   },
-  ...(TILEDIR
-    ? {
-        lod_tiledir: {
-          async open() {
-            const r = await LodReader.open(coalescing(await httpSource([FILES.lod])))
-            // a directory that fails to open or is bypassed must fail the run, not fall back
-            const td = await TileDirectory.open(r, TILEDIR)
-            const read = td.readLodByTile.bind(td)
-            td.readLodByTile = async (...args) => {
-              const rows = await read(...args)
-              td.used = true
-              return rows
-            }
-            return { r, td }
-          },
-          async tile({ r, td }, z, x, y) {
-            td.used = false
-            const mvt = await renderTile(r, z, x, y, {
-              layer: 'b',
-              properties: ATTRS,
-              tiledir: td,
-            })
-            const covered = z <= r.finestZoom && td.covers(r.lodForZoom(z), z)
-            if (covered && !td.used)
-              throw new Error('tile directory silently fell back to page indexes')
-            const lod = `LOD ${r.lodForZoom(z).name}`
-            return {
-              mvt,
-              note:
-                z > r.finestZoom
-                  ? 'primary WKB geometry'
-                  : covered
-                    ? `directory, ${lod}`
-                    : `page indexes (zoom not in directory), ${lod}`,
-            }
-          },
-        },
-      }
-    : {}),
   cogp: {
     open: () => CogpReader.open(FILES.cogp),
     async tile(r, z, x, y) {
