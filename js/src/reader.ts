@@ -86,7 +86,7 @@ export interface PrimaryRows {
 /** Compressed bytes of decoded bbox pages kept for later tiles; the oldest go first. */
 const PAGE_CACHE_BYTES = 4 * 1024 * 1024
 /** LOD bytes a tile may read past its exact rows rather than fetch key pages to trim them. */
-const LOOSE_BYTES = 24 * 1024
+const LOOSE_BYTES = 256 * 1024
 const BBOX_LEAVES = ['bbox.xmin', 'bbox.ymin', 'bbox.xmax', 'bbox.ymax'] as const
 
 /**
@@ -257,6 +257,16 @@ export class LodReader {
     const wanted = attributes.map((a) => this.fields.findIndex((f) => f.name === a))
     if (wanted.includes(-1))
       throw new Error(`attribute ${attributes[wanted.indexOf(-1)]} is not carried`)
+    // groups adjacent in key order are spatial neighbours: warm their indexes so a pan
+    // seldom meets a group cold
+    for (const g of groups) {
+      for (const n of [g - 1, g + 1]) {
+        if (n < mainFirst || n >= all.length) continue
+        void this.offsetIndex(n, key.column).catch(() => undefined)
+        void this.columnIndex(n, key.column).catch(() => undefined)
+        void this.offsetIndex(n, leaf).catch(() => undefined)
+      }
+    }
     const perGroup = await Promise.all(
       groups.map(async (g) => {
         const ranges = await this.keyRanges(
