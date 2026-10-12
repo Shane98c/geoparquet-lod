@@ -747,42 +747,72 @@ def write(
     )
     spill_attr_values: dict[str, np.ndarray] = {}
     if len(spill_src):
-        con.register('spill_ids', pa.table({'__id': spill_src + 1}))
+        # fetched and rendered in slices of ids, so a national file's tens of millions of copies
+        # never sit in memory as WKB at once; each LOD's store grows in ascending id order
         attr_select = ''.join(f', s.{a.name}' for a in attributes)
-        src_table = con.execute(
-            f'SELECT s.__id, s.{geometry} AS g, s.__cx AS cx, s.__cy AS cy{attr_select} '
-            f"FROM '{sorted_path}' s JOIN spill_ids USING (__id) ORDER BY s.__id"
-        ).to_arrow_table()
-        src_ids = src_table.column('__id').to_numpy() - 1
-        src_cx = src_table.column('cx').to_numpy(zero_copy_only=False)
-        src_cy = src_table.column('cy').to_numpy(zero_copy_only=False)
-        src_wkb = src_table.column('g').to_numpy(zero_copy_only=False)
+        lod_srcs = {
+            b['name']: np.unique(spill_entries[b['name']][2])
+            for b in lod_plan
+            if b['name'] in spill_entries
+        }
+        rendered_parts: dict[str, list] = {name: [] for name in lod_srcs}
+        point_parts_of: dict[str, list] = {name: [] for name in lod_srcs}
+        attr_chunks: dict[str, list] = {a.name: [] for a in attributes}
+        step = 2_000_000
+        for start in range(0, len(spill_src), step):
+            ids_chunk = spill_src[start : start + step]
+            con.register('spill_ids', pa.table({'__id': ids_chunk + 1}))
+            src_table = con.execute(
+                f'SELECT s.__id, s.{geometry} AS g, s.__cx AS cx, s.__cy AS cy{attr_select} '
+                f"FROM '{sorted_path}' s JOIN spill_ids USING (__id) ORDER BY s.__id"
+            ).to_arrow_table()
+            chunk_ids = src_table.column('__id').to_numpy() - 1
+            cx_c = src_table.column('cx').to_numpy(zero_copy_only=False)
+            cy_c = src_table.column('cy').to_numpy(zero_copy_only=False)
+            wkb_c = src_table.column('g').to_numpy(zero_copy_only=False)
+            for a in attributes:
+                attr_chunks[a.name].append(src_table.column(a.name).combine_chunks())
+            for b in lod_plan:
+                name = b['name']
+                if name not in lod_srcs:
+                    continue
+                srcs = lod_srcs[name]
+                mine = srcs[(srcs >= ids_chunk[0]) & (srcs <= ids_chunk[-1])]
+                if not len(mine):
+                    continue
+                idx = np.searchsorted(chunk_ids, mine)
+                if b['geometry_type'] == 'Point':
+                    point_parts_of[name].append((cx_c[idx], cy_c[idx]))
+                    continue
+                scale, offset = grids[name]
+                jobs = [
+                    (
+                        wkb_c[c],
+                        cx_c[c],
+                        cy_c[c],
+                        [(scale, offset, np.arange(len(c)))],
+                        family,
+                        dot_cells,
+                    )
+                    for c in (idx[i : i + 50_000] for i in range(0, len(idx), 50_000))
+                ]
+                rendered_parts[name].extend(r[0] for r in pool.map(_render, jobs))
+            del src_table, wkb_c
+        src_ids = spill_src
         for a in attributes:
-            spill_attr_values[a.name] = src_table.column(a.name).combine_chunks()
+            spill_attr_values[a.name] = pa.concat_arrays(attr_chunks[a.name])
         for b in lod_plan:
-            if b['name'] not in spill_entries:
+            name = b['name']
+            if name not in lod_srcs:
                 continue
-            srcs = np.unique(spill_entries[b['name']][2])
-            idx = np.searchsorted(src_ids, srcs)
             if b['geometry_type'] == 'Point':
-                spill_store[b['name']] = (srcs, (src_cx[idx], src_cy[idx]))
-                continue
-            scale, offset = grids[b['name']]
-            chunks = [idx[i : i + 50_000] for i in range(0, len(idx), 50_000)]
-            jobs = [
-                (
-                    src_wkb[c],
-                    src_cx[c],
-                    src_cy[c],
-                    [(scale, offset, np.arange(len(c)))],
-                    family,
-                    dot_cells,
-                )
-                for c in chunks
-            ]
-            spill_store[b['name']] = (srcs, _concat_parts([r[0] for r in pool.map(_render, jobs)]))
+                xs = np.concatenate([p[0] for p in point_parts_of[name]])
+                ys = np.concatenate([p[1] for p in point_parts_of[name]])
+                spill_store[name] = (lod_srcs[name], (xs, ys))
+            else:
+                spill_store[name] = (lod_srcs[name], _concat_parts(rendered_parts[name]))
+        del rendered_parts, point_parts_of, attr_chunks
         log(f'  straddler copies rendered, {time.time() - t0:.0f}s')
-        del src_table, src_wkb
     row_groups = 0
 
     def flush(table: pa.Table, fut):
