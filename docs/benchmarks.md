@@ -17,7 +17,7 @@ features:
 | file                           | writer, time                                                                                   | size    |
 | ------------------------------ | ---------------------------------------------------------------------------------------------- | ------- |
 | `japan_buildings.parquet`      | the cleaned source, DuckDB                                                                     | 4.84 GB |
-| `japan_buildings.lod2.parquet` | this layout, `combine(size_threshold(4), density_budget(40_000))`, 7 min                       | 6.59 GB |
+| `japan_buildings.lod3.parquet` | this layout, `chain(tiny_polygons(1.5), drop_smallest(40_000))`, 6.7 min                       | 6.56 GB |
 | `japan_buildings.cogp.parquet` | `cogp convert --webmerc-minzoom 10` 2.2.1, the level ladder of COGP's own demo file, 5.7 min   | 9.69 GB |
 | `japan_buildings.pmtiles`      | tippecanoe 2.82, `-zg -Z 6 --drop-smallest-as-needed --extend-zooms-if-still-dropping`, 23 min | 1.51 GB |
 | `japan_buildings.sop.parquet`  | Esri's hosted file, `sop write`, 9 levels                                                      | 6.18 GB |
@@ -34,9 +34,9 @@ for the tile:
 
 | tile                      | LOD columns | COGP  | PMTiles | Esri SOP |
 | ------------------------- | ----------- | ----- | ------- | -------- |
-| z8 metro, Tokyo           | 41,204      | 1,152 | 51,120  | 28,000   |
-| z11 city, Tokyo           | 22,971      | 860   | 17,402  | 177,679  |
-| z13 downtown, Shibuya     | 52,411      | 2,739 | 23,309  | 51,996   |
+| z8 metro, Tokyo           | 8,189       | 1,152 | 51,120  | 28,000   |
+| z11 city, Tokyo           | 20,806      | 860   | 17,402  | 177,679  |
+| z13 downtown, Shibuya     | 52,421      | 2,739 | 23,309  | 51,996   |
 | z13 suburbs, Chiba        | 6,880       | 454   | 4,109   | 6,841    |
 | z15 street, Tokyo station | 229         | 213   | 1,441   | 229      |
 | z15 street, Osaka         | 1,359       | 1,287 | 6,523   | 1,362    |
@@ -46,12 +46,12 @@ And what reading it cost:
 | tile                      | LOD columns    | COGP        | PMTiles    | Esri SOP        |
 | ------------------------- | -------------- | ----------- | ---------- | --------------- |
 | open                      | 0.47 MB, 4 req | 1.52 MB, 3  | 0.02 MB, 1 | 2.62 MB, 3      |
-| z8 metro, Tokyo           | 1.03 MB, 22    | 0.17 MB, 8  | 0.48 MB, 2 | 26.65 MB, 1,048 |
-| z11 city, Tokyo           | 0.79 MB, 16    | 0.26 MB, 17 | 0.30 MB, 2 | 5.39 MB, 143    |
-| z13 downtown, Shibuya     | 1.68 MB, 28    | 0.71 MB, 42 | 0.37 MB, 2 | 2.61 MB, 92     |
-| z13 suburbs, Chiba        | 0.72 MB, 32    | 0.44 MB, 34 | 0.07 MB, 2 | 1.30 MB, 55     |
-| z15 street, Tokyo station | 0.42 MB, 29    | 0.90 MB, 82 | 0.04 MB, 2 | 1.30 MB, 62     |
-| z15 street, Osaka         | 0.64 MB, 25    | 0.93 MB, 80 | 0.13 MB, 2 | 1.01 MB, 57     |
+| z8 metro, Tokyo           | 0.30 MB, 20    | 0.17 MB, 8  | 0.48 MB, 2 | 26.65 MB, 1,048 |
+| z11 city, Tokyo           | 0.73 MB, 16    | 0.26 MB, 17 | 0.30 MB, 2 | 5.39 MB, 143    |
+| z13 downtown, Shibuya     | 1.63 MB, 17    | 0.71 MB, 42 | 0.37 MB, 2 | 2.61 MB, 92     |
+| z13 suburbs, Chiba        | 0.53 MB, 19    | 0.44 MB, 34 | 0.07 MB, 2 | 1.30 MB, 55     |
+| z15 street, Tokyo station | 0.38 MB, 21    | 0.90 MB, 82 | 0.04 MB, 2 | 1.30 MB, 62     |
+| z15 street, Osaka         | 0.45 MB, 21    | 0.93 MB, 80 | 0.13 MB, 2 | 1.01 MB, 57     |
 
 Read the two tables together. COGP assigns a building to the coarsest
 level where it spans a pixel, with no density target, so on footprints its
@@ -70,15 +70,28 @@ building in it at the chosen level, and its reference reader fetches by XZ
 key ranges rather than pages, which is where the request counts come from;
 its README says a real implementation would tile. tippecanoe drops the
 smallest buildings until a tile fits its limit, and the archive stops at
-z14, so its z15 rows are the parent tile. Ours keeps the busiest tile at
-each zoom under 40,000 buildings plus everything over four pixels.
+z14, so its z15 rows are the parent tile. Ours follows the same two rules
+as tippecanoe, written as a chain: buildings under a 1.5 pixel square
+accumulate into squares holding their summed area, then a tile over 40,000
+keeps its largest.
+
+The share of a tile that the polygons cover, after decoding, shows how the
+two area rules differ in practice. On the z12 tile of central Tokyo this
+layout paints 35% of the tile with 28,709 shapes and PMTiles 18% with
+21,700; at z13 Shibuya, where neither drops much, 39% against 30%. Ours
+keeps the summed area of the buildings it folds, while tippecanoe's budget
+discards squares as well as buildings, so its city tiles come out lighter
+than the ground. An earlier write of this file with a uniform sample,
+`combine(size_threshold(4), density_budget(40_000))`, painted 12% of the
+same z12 tile with 33,106 mostly sub-pixel shapes, a haze with more
+features and less ink than either.
 
 Where every format draws close to the full set, at z15, this layout reads
-half the bytes of COGP in a third of the requests, and a third of what the
-Esri reader fetches. At coarser zooms it is the only one of the four
-parquet readers returning a density-capped footprint field, and it pays
-about a megabyte for it, in line with the equivalent PMTiles tile once
-decoded. Street tiles are, as on the national file, mostly index reads.
+half the bytes of COGP in a quarter of the requests, and a third of what
+the Esri reader fetches. At coarser zooms it is the only one of the four
+parquet readers returning an area-true footprint field, for about the bytes
+of the equivalent PMTiles tile. Street tiles are, as on the national file,
+mostly index reads.
 
 Reproduce with the four files served with range support:
 
@@ -92,7 +105,7 @@ The same four files side by side in a browser, each pane with its own byte
 and request tally:
 
 ```
-demo/compare.html?url=…/japan_buildings.lod2.parquet&cogp=…/japan_buildings.cogp.parquet&pmtiles=…/japan_buildings.pmtiles&esri=…/japan_buildings.sop.parquet&center=139.76,35.68&zoom=12
+demo/compare.html?url=…/japan_buildings.lod3.parquet&cogp=…/japan_buildings.cogp.parquet&pmtiles=…/japan_buildings.pmtiles&esri=…/japan_buildings.sop.parquet&center=139.76,35.68&zoom=12
 ```
 
 ## Measured

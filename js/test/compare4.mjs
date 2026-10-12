@@ -1,8 +1,8 @@
 // Bytes and requests per tile for four readers of the same buildings, served from one place:
 // this layout, COGP (@cogp/reader), PMTiles and Esri's SOP reference reader. Expects
-// japan_buildings.{lod2.parquet,cogp.parquet,pmtiles,sop.parquet} under BASE (default
+// japan_buildings.{lod3.parquet,cogp.parquet,pmtiles,sop.parquet} under BASE (default
 // http://localhost:8099/), and the Esri reader bundled for Node first. COGP names another
-// COGP file to measure, such as the one behind COGP's own demo:
+// COGP file to measure, such as the one behind COGP's own demo, and LOD another file in this layout:
 //   npx esbuild vendor/esri-sop/index.ts --bundle --platform=node --format=esm --outfile=test/esri-node.mjs
 //   node test/compare4.mjs
 import { LodReader, httpSource, coalescing, renderTile, tileBounds } from '../dist/index.js'
@@ -27,6 +27,7 @@ const features = (buf) => {
 
 const base = process.env.BASE ?? 'http://localhost:8099/'
 const cogpFile = process.env.COGP ?? base + 'japan_buildings.cogp.parquet'
+const lodFile = process.env.LOD ?? base + 'japan_buildings.lod3.parquet'
 const stats = {}
 const real = globalThis.fetch
 globalThis.fetch = async (input, init) => {
@@ -62,8 +63,7 @@ const open = async (name, fn) => {
   const r = await fn()
   return { r, open: delta(a, snap(name)) }
 }
-const lodOpen = async () =>
-  LodReader.open(coalescing(await httpSource([base + 'japan_buildings.lod2.parquet'])))
+const lodOpen = async () => LodReader.open(coalescing(await httpSource([lodFile])))
 const cogpOpen = () => CogpReader.open(cogpFile)
 const pmOpen = async () => {
   const p = new PMTiles(base + 'japan_buildings.pmtiles')
@@ -86,7 +86,7 @@ for (const [name, fn] of [
   opens[name] = (
     await open(
       name.startsWith('lod')
-        ? 'japan_buildings.lod2.parquet'
+        ? lodFile
         : name === 'cogp'
           ? cogpFile
           : name === 'pmtiles'
@@ -105,7 +105,7 @@ for (const [z, lon, lat, label] of tiles) {
   const row = []
   // ours: fresh reader, geometry only
   {
-    const key = 'japan_buildings.lod2.parquet'
+    const key = lodFile
     const r = await lodOpen()
     const a = snap(key)
     const mvt = await renderTile(r, z, x, y, { properties: [] })
