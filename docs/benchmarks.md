@@ -74,11 +74,31 @@ trips as well as bytes:
 | z15 street, Tokyo station | 0.15 MB, 8 req, 396 ms  | 0.03 MB, 2 req, 295 ms |
 | z15 street, Osaka         | 0.14 MB, 8 req, 581 ms  | 0.11 MB, 2 req, 357 ms |
 
-A cold tile here is three dependent stages after the footer (the key
+A cold tile there was three dependent stages after the footer (the key
 index, the boundary key pages, the LOD run) against the archive's one
-after its directory, which is what the 1.3 to 2.5 times longer wait is.
-The open over S3 reads the file's last megabyte speculatively, hence its
-size.
+after its directory, which is what the 1.3 to 2.5 times longer wait was.
+The reader has since dropped the middle stage, taking a tile's key runs at
+page granularity whenever trimming them to exact rows would save under a
+quarter megabyte, and opens with a 64 KB probe and then exactly the rest
+of the footer. The same two files on Cloudflare R2, read cold from node
+(HTTP/1.1; a browser would multiplex over HTTP/2):
+
+| tile, over R2             | LOD columns             | PMTiles                |
+| ------------------------- | ----------------------- | ---------------------- |
+| open                      | 0.54 MB, 7 req          | 0.02 MB, 1 req         |
+| z8 metro, Tokyo           | 0.68 MB, 5 req, 665 ms  | 0.50 MB, 2 req, 353 ms |
+| z11 city, Tokyo           | 0.51 MB, 10 req, 945 ms | 0.31 MB, 2 req, 358 ms |
+| z13 downtown, Shibuya     | 0.51 MB, 6 req, 515 ms  | 0.35 MB, 2 req, 351 ms |
+| z13 suburbs, Chiba        | 0.19 MB, 6 req, 592 ms  | 0.06 MB, 2 req, 261 ms |
+| z15 street, Tokyo station | 0.21 MB, 6 req, 517 ms  | 0.03 MB, 2 req, 640 ms |
+| z15 street, Osaka         | 0.23 MB, 6 req, 695 ms  | 0.11 MB, 2 req, 323 ms |
+
+The next tile on the same reader is two requests, one run per section,
+issued together: one round trip, as the archive's tile is. What stays
+slower is the round trip for a row group's indexes the first time a
+session touches it, which the reader now hides by warming the neighbouring
+groups' indexes on every read, and the decode and MVT encode of each tile
+in the worker, which a tile archive does not do.
 
 Those are cold reads, each on a fresh reader. The tile beside each, read
 next on the same reader, is what a session pays once a row group's indexes
