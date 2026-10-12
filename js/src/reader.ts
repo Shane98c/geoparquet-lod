@@ -85,6 +85,8 @@ export interface PrimaryRows {
 
 /** Compressed bytes of decoded bbox pages kept for later tiles; the oldest go first. */
 const PAGE_CACHE_BYTES = 4 * 1024 * 1024
+/** LOD bytes a tile may read past its exact rows rather than fetch key pages to trim them. */
+const LOOSE_BYTES = 24 * 1024
 const BBOX_LEAVES = ['bbox.xmin', 'bbox.ymin', 'bbox.xmax', 'bbox.ymax'] as const
 
 /**
@@ -258,6 +260,7 @@ export class LodReader {
           key.column,
           [interval],
           g === hostGroup ? start : null,
+          leaf,
           signal,
         )
         if (!ranges.length) return { g, values: new Map<number, unknown>() }
@@ -296,11 +299,13 @@ export class LodReader {
     column: string,
     intervals: Interval[],
     host: number | null,
+    leaf: string,
     signal?: AbortSignal,
   ): Promise<[number, number][]> {
-    const [pages, index] = await Promise.all([
+    const [pages, index, leafPages] = await Promise.all([
       this.offsetIndex(g, column),
       this.columnIndex(g, column),
+      this.offsetIndex(g, leaf),
     ])
     signal?.throwIfAborted()
     const inside = (k: number) => intervals.some(([a, b]) => k >= a && k < b)
@@ -322,6 +327,22 @@ export class LodReader {
       if (last && last[1] === p) last[1] = p + 1
       else runs.push([p, p + 1])
     }
+    // Reading the key pages at a run's ends finds the exact rows; when the LOD pages those
+    // rows could add weigh less than the key pages do, take the runs at page granularity.
+    const leafBytes = (rows: [number, number][]) =>
+      leafPages
+        .filter((p) => rows.some(([a, b]) => p.rowStart < b && p.rowEnd > a))
+        .reduce((n, p) => n + p.byteEnd - p.byteStart, 0)
+    const whole = runs.map(([a, b]): [number, number] => [pages[a].rowStart, pages[b - 1].rowEnd])
+    const inner = runs
+      .filter(([a, b]) => b - a > 2)
+      .map(([a, b]): [number, number] => [pages[a + 1].rowStart, pages[b - 2].rowEnd])
+    const atRisk = leafBytes(whole) - leafBytes(inner)
+    const keyBytes = runs.reduce((n, [a, b]) => {
+      const edge = new Set([a, b - 1])
+      return n + [...edge].reduce((m, p) => m + pages[p].byteEnd - pages[p].byteStart, 0)
+    }, 0)
+    if (atRisk <= Math.max(keyBytes, LOOSE_BYTES)) return mergeRanges(whole)
     const edges = new Set<number>()
     for (const [a, b] of runs) {
       edges.add(a)
