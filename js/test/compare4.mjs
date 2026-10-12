@@ -29,6 +29,8 @@ const base = process.env.BASE ?? 'http://localhost:8099/'
 const cogpFile = process.env.COGP ?? base + 'japan_buildings.cogp.parquet'
 const lodFile = process.env.LOD ?? base + 'japan_buildings.lod14.parquet'
 const pmFile = process.env.PMTILES ?? 'japan_buildings_z0.pmtiles'
+// SKIP=cogp,esri leaves those readers out, e.g. against a bucket holding only the other two files
+const skip = new Set((process.env.SKIP ?? '').split(',').filter(Boolean))
 const stats = {}
 const real = globalThis.fetch
 globalThis.fetch = async (input, init) => {
@@ -85,7 +87,7 @@ for (const [name, fn] of [
   ['cogp', cogpOpen],
   ['pmtiles', pmOpen],
   ['esri', esriOpen],
-])
+].filter(([name]) => !skip.has(name)))
   opens[name] = (
     await open(
       name.startsWith('lod')
@@ -126,7 +128,8 @@ for (const [z, lon, lat, label] of tiles) {
     )
   }
   // cogp: fresh reader, the tile bounds, resolution and read call of @cogp/maplibre's tile.js
-  {
+  if (skip.has('cogp')) row.push('skipped')
+  else {
     const key = cogpFile
     const r = await cogpOpen()
     const a = snap(key)
@@ -177,7 +180,8 @@ for (const [z, lon, lat, label] of tiles) {
     )
   }
   // esri: fresh query, the reference reader's view query for the tile extent
-  {
+  if (skip.has('esri')) row.push('skipped')
+  else {
     const key = 'japan_buildings.sop.parquet'
     const q = await esriOpen()
     const a = snap(key)
