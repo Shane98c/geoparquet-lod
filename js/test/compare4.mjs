@@ -27,7 +27,7 @@ const features = (buf) => {
 
 const base = process.env.BASE ?? 'http://localhost:8099/'
 const cogpFile = process.env.COGP ?? base + 'japan_buildings.cogp.parquet'
-const lodFile = process.env.LOD ?? base + 'japan_buildings.lod14.parquet'
+const lodFile = process.env.LOD ?? base + 'japan_buildings.lod15.parquet'
 const pmFile = process.env.PMTILES ?? 'japan_buildings_z0.pmtiles'
 // SKIP=cogp,esri leaves those readers out, e.g. against a bucket holding only the other two files
 const skip = new Set((process.env.SKIP ?? '').split(',').filter(Boolean))
