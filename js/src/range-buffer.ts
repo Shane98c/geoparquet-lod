@@ -5,13 +5,17 @@ import type { RangeSource } from './reader.js'
  * Browsers allow six HTTP/1.1 connections per host, so spreading a tile's
  * requests over several hosts lets them run in fewer waves.
  *
- * Opening asks for the file's size with a HEAD and then its last `tail` bytes
- * as an explicit range, so a footer that fits the tail costs two round trips
- * and works across origins wherever plain ranged GETs are allowed.
+ * Opening asks for the file's size with a HEAD, its last `tail` bytes as an
+ * explicit range, and when the footer is longer than that, the rest of the
+ * footer exactly: two or three round trips, no suffix range, so it works
+ * across origins wherever plain ranged GETs are allowed.
  */
+/** Bytes read ahead of the footer when it must be fetched separately, for the page index just before it. */
+const FOOTER_MARGIN = 64 * 1024
+
 export const httpSource = async (
   urls: string[],
-  { tail = 1024 * 1024, signal }: { tail?: number; signal?: AbortSignal } = {},
+  { tail = 64 * 1024, signal }: { tail?: number; signal?: AbortSignal } = {},
 ): Promise<RangeSource> => {
   // HEAD for the size, then the tail as an explicit range: a suffix range (`bytes=-N`) is not a
   // CORS-safelisted header value, so a bucket whose rule allows only plain ranged GETs, as one
@@ -20,16 +24,35 @@ export const httpSource = async (
   const byteLength = Number(head.headers.get('Content-Length'))
   if (!head.ok || !Number.isSafeInteger(byteLength))
     throw new Error(`cannot size ${urls[0]}: ${head.status}`)
-  const tailStart = Math.max(0, byteLength - tail)
-  let tailBuffer = new ArrayBuffer(0)
-  if (byteLength > 0) {
+  // probe the tail, read the footer's length from the file's last 8 bytes, and fetch exactly
+  // what the footer still needs, so opening reads the footer and little else
+  const get = async (start: number, end: number) => {
     const response = await fetch(urls[0], {
-      headers: { Range: `bytes=${tailStart}-${byteLength - 1}` },
+      headers: { Range: `bytes=${start}-${end - 1}` },
       cache: 'no-store',
       signal,
     })
-    if (response.status === 206) tailBuffer = await response.arrayBuffer()
-    else await response.body?.cancel()
+    if (response.status !== 206) {
+      await response.body?.cancel()
+      throw new Error(`range request failed: ${response.status}`)
+    }
+    return response.arrayBuffer()
+  }
+  let tailStart = Math.max(0, byteLength - tail)
+  let tailBuffer = byteLength > 0 ? await get(tailStart, byteLength) : new ArrayBuffer(0)
+  if (tailBuffer.byteLength >= 8) {
+    const view = new DataView(tailBuffer)
+    const footerLength = view.getUint32(tailBuffer.byteLength - 8, true)
+    const need = footerLength + 8 + FOOTER_MARGIN
+    if (need > tailBuffer.byteLength && need <= byteLength) {
+      const start = byteLength - need
+      const rest = await get(start, tailStart)
+      const joined = new Uint8Array(need)
+      joined.set(new Uint8Array(rest), 0)
+      joined.set(new Uint8Array(tailBuffer), rest.byteLength)
+      tailBuffer = joined.buffer
+      tailStart = start
+    }
   }
   let next = 0
   return {
