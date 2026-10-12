@@ -27,7 +27,7 @@ const features = (buf) => {
 
 const base = process.env.BASE ?? 'http://localhost:8099/'
 const cogpFile = process.env.COGP ?? base + 'japan_buildings.cogp.parquet'
-const lodFile = process.env.LOD ?? base + 'japan_buildings.lod12.parquet'
+const lodFile = process.env.LOD ?? base + 'japan_buildings.lod13.parquet'
 const stats = {}
 const real = globalThis.fetch
 globalThis.fetch = async (input, init) => {
@@ -109,10 +109,15 @@ for (const [z, lon, lat, label] of tiles) {
     const r = await lodOpen()
     const a = snap(key)
     const mvt = await renderTile(r, z, x, y, { properties: [] })
+    const cold = delta(a, snap(key))
+    // the neighbouring tile on the same reader: what a tile costs once the indexes are read
+    const b = snap(key)
+    await renderTile(r, z, x + 1, y, { properties: [] })
+    const warm = delta(b, snap(key))
     row.push(
       fmt(
-        delta(a, snap(key)),
-        `, ${(mvt.byteLength / 1e3).toFixed(0)} KB mvt, ${features(mvt)} features`,
+        cold,
+        `, ${(mvt.byteLength / 1e3).toFixed(0)} KB mvt, ${features(mvt)} features; next tile ${fmt(warm)}`,
       ),
     )
   }
@@ -154,12 +159,16 @@ for (const [z, lon, lat, label] of tiles) {
     const zz = Math.min(z, 14)
     const [px, py] = xy(zz, lon, lat)
     const t = await p.getZxy(zz, px, py)
+    const cold = delta(a, snap(key))
+    const b = snap(key)
+    await p.getZxy(zz, px + 1, py)
+    const warm = delta(b, snap(key))
     row.push(
       fmt(
-        delta(a, snap(key)),
-        t
+        cold,
+        (t
           ? `, ${(t.data.byteLength / 1e3).toFixed(0)} KB tile, ${features(t.data)} features`
-          : ', empty',
+          : ', empty') + `; next tile ${fmt(warm)}`,
       ),
     )
   }

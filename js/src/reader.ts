@@ -523,13 +523,12 @@ export class LodReader {
    */
   private warmPrefix(): void {
     const prefix = this.lod.prefix
-    if (!prefix) return
+    const key = this.lod.key
+    if (!prefix || !key) return
     const coarse = Object.values(this.lods).filter((lod) => Math.max(...lod.zooms) <= prefix.zoom)
     for (let g = 0; g <= prefix.row_group_end; g++) {
-      for (const leaf of BBOX_LEAVES) {
-        void this.offsetIndex(g, leaf).catch(() => undefined)
-        void this.columnIndex(g, leaf).catch(() => undefined)
-      }
+      void this.offsetIndex(g, key.column).catch(() => undefined)
+      void this.columnIndex(g, key.column).catch(() => undefined)
       for (const lod of coarse) void this.offsetIndex(g, this.lodLeaf(lod)).catch(() => undefined)
     }
   }

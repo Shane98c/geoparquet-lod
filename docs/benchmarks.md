@@ -17,13 +17,13 @@ WKB primary column. The same source, with Esri's multiscale and key columns
 dropped, was written three more ways, so every panel below draws the same
 features:
 
-| file                            | writer, time                                                                                     | size    |
-| ------------------------------- | ------------------------------------------------------------------------------------------------ | ------- |
-| `japan_buildings.parquet`       | the cleaned source, DuckDB                                                                       | 4.84 GB |
-| `japan_buildings.lod12.parquet` | this layout, `chain(drop_smallest(), tiny_polygons())`, prefix to z10, complete from z14, 20 min | 7.29 GB |
-| `japan_buildings.cogp.parquet`  | `cogp convert --webmerc-minzoom 10` 2.2.1, the level ladder of COGP's own demo file, 5.7 min     | 9.69 GB |
-| `japan_buildings.pmtiles`       | tippecanoe 2.82, `-zg -Z 6 --drop-smallest-as-needed --extend-zooms-if-still-dropping`, 23 min   | 1.51 GB |
-| `japan_buildings.sop.parquet`   | Esri's hosted file, `sop write`, 9 levels                                                        | 6.18 GB |
+| file                            | writer, time                                                                                                                       | size    |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| `japan_buildings.parquet`       | the cleaned source, DuckDB                                                                                                         | 4.84 GB |
+| `japan_buildings.lod13.parquet` | this layout, `chain(drop_smallest(), tiny_polygons())`, prefix to z10, complete from z14, 16 KB pages of at most 2048 rows, 21 min | 7.46 GB |
+| `japan_buildings.cogp.parquet`  | `cogp convert --webmerc-minzoom 10` 2.2.1, the level ladder of COGP's own demo file, 5.7 min                                       | 9.69 GB |
+| `japan_buildings.pmtiles`       | tippecanoe 2.82, `-zg -Z 6 --drop-smallest-as-needed --extend-zooms-if-still-dropping`, 23 min                                     | 1.51 GB |
+| `japan_buildings.sop.parquet`   | Esri's hosted file, `sop write`, 9 levels                                                                                          | 6.18 GB |
 
 Each reader opens once, then each tile is read on a fresh reader, geometry
 only, all four files served from one local range server. COGP is read with
@@ -49,12 +49,25 @@ And what reading it cost:
 | tile                      | LOD columns    | COGP        | PMTiles    | Esri SOP        |
 | ------------------------- | -------------- | ----------- | ---------- | --------------- |
 | open                      | 0.29 MB, 4 req | 1.52 MB, 3  | 0.02 MB, 1 | 2.62 MB, 3      |
-| z8 metro, Tokyo           | 0.43 MB, 13    | 0.17 MB, 8  | 0.48 MB, 2 | 26.65 MB, 1,048 |
-| z11 city, Tokyo           | 0.47 MB, 13    | 0.26 MB, 17 | 0.30 MB, 2 | 5.39 MB, 143    |
-| z13 downtown, Shibuya     | 0.43 MB, 13    | 0.71 MB, 42 | 0.37 MB, 2 | 2.61 MB, 92     |
-| z13 suburbs, Chiba        | 0.20 MB, 12    | 0.44 MB, 34 | 0.07 MB, 2 | 1.30 MB, 55     |
-| z15 street, Tokyo station | 0.19 MB, 12    | 0.90 MB, 82 | 0.04 MB, 2 | 1.30 MB, 62     |
-| z15 street, Osaka         | 0.23 MB, 12    | 0.93 MB, 80 | 0.13 MB, 2 | 1.01 MB, 57     |
+| z8 metro, Tokyo           | 0.48 MB, 11    | 0.17 MB, 8  | 0.48 MB, 2 | 26.65 MB, 1,048 |
+| z11 city, Tokyo           | 0.48 MB, 12    | 0.26 MB, 17 | 0.30 MB, 2 | 5.39 MB, 143    |
+| z13 downtown, Shibuya     | 0.47 MB, 11    | 0.71 MB, 42 | 0.37 MB, 2 | 2.61 MB, 92     |
+| z13 suburbs, Chiba        | 0.23 MB, 11    | 0.44 MB, 34 | 0.07 MB, 2 | 1.30 MB, 55     |
+| z15 street, Tokyo station | 0.21 MB, 10    | 0.90 MB, 82 | 0.04 MB, 2 | 1.30 MB, 62     |
+| z15 street, Osaka         | 0.24 MB, 10    | 0.93 MB, 80 | 0.13 MB, 2 | 1.01 MB, 57     |
+
+Those are cold reads, each on a fresh reader. The tile beside each, read
+next on the same reader, is what a session pays once a row group's indexes
+are in:
+
+| next tile                 | LOD columns | PMTiles    |
+| ------------------------- | ----------- | ---------- |
+| z8 metro, Tokyo           | 0.06 MB, 9  | 0.02 MB, 1 |
+| z11 city, Tokyo           | 0.23 MB, 9  | 0.17 MB, 1 |
+| z13 downtown, Shibuya     | 0.27 MB, 5  | 0.29 MB, 1 |
+| z13 suburbs, Chiba        | 0.11 MB, 5  | 0.09 MB, 1 |
+| z15 street, Tokyo station | 0.07 MB, 4  | 0.13 MB, 1 |
+| z15 street, Osaka         | 0.10 MB, 4  | 0.15 MB, 1 |
 
 Read the two tables together. COGP assigns a building to the coarsest
 level where it spans a pixel, with no density target, so on footprints its
@@ -108,9 +121,9 @@ zooms. What a tile costs, after the layout changes measured one at a time:
 
 | z11 Tokyo, cold                           | KB  | requests |
 | ----------------------------------------- | --- | -------- |
-| key pages at the interval's ends          | 53  | 5        |
-| the LOD column run, copies and attributes | 360 | 1        |
-| offset and column indexes                 | 17  | 6        |
+| key pages at the interval's ends          | 14  | 5        |
+| the LOD column run, copies and attributes | 325 | 1        |
+| offset and column indexes                 | 61  | 6        |
 | PMTiles tile                              | 300 | 1        |
 
 The run itself is close to the PMTiles tile: ring-step varints make a
@@ -123,7 +136,11 @@ indexes cost 0.60 MB in 18 requests here, a sorted key with a ring of
 neighbouring cells for straddlers 0.83 MB in 34, and straddler copies in
 Arrow spill lists 0.55 MB in 31; packing each LOD row into one binary
 value halved the requests and took the open from 1.08 MB to 0.29 MB,
-since the footer describes one leaf per LOD rather than seven.
+since the footer describes one leaf per LOD rather than seven. Pages of
+16 KB and at most 2048 rows, against 64 KB, moved bytes from the key pages
+and the column run into the indexes, which a session reads once: the cold
+tile is about the same and the next tile a third to a half cheaper at
+street zooms.
 
 Reproduce with the four files served with range support:
 
@@ -137,7 +154,7 @@ The same four files side by side in a browser, each pane with its own byte
 and request tally:
 
 ```
-demo/compare.html?url=…/japan_buildings.lod12.parquet&cogp=…/japan_buildings.cogp.parquet&pmtiles=…/japan_buildings.pmtiles&esri=…/japan_buildings.sop.parquet&center=139.76,35.68&zoom=12
+demo/compare.html?url=…/japan_buildings.lod13.parquet&cogp=…/japan_buildings.cogp.parquet&pmtiles=…/japan_buildings.pmtiles&esri=…/japan_buildings.sop.parquet&center=139.76,35.68&zoom=12
 ```
 
 ## Measured

@@ -366,7 +366,7 @@ def write(
     single_lod_bytes: int = 16 * 1024 * 1024,
     row_group_rows: int = 1_048_576,
     page_bytes: int = 16384,
-    page_rows: int = 8192,
+    page_rows: int = 2048,
     compression_level: int = 9,
     batch_rows: int | None = None,
     workers: int | None = None,
