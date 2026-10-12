@@ -115,6 +115,56 @@
         return response
       }
 
+      // features in each tile a protocol hands to MapLibre, read from the MVT bytes:
+      // a tile is layers (field 3), a layer holds features (field 2)
+      const mvtFeatures = (buf) => {
+        const b = new Uint8Array(buf)
+        let n = 0
+        const walk = (start, end, field, visit) => {
+          let i = start
+          while (i < end) {
+            let key = 0
+            let shift = 0
+            let byte
+            do {
+              byte = b[i++]
+              key |= (byte & 0x7f) << shift
+              shift += 7
+            } while (byte & 0x80)
+            const tag = key >>> 3
+            const wire = key & 7
+            if (wire === 0) {
+              while (b[i++] & 0x80);
+            } else if (wire === 1) i += 8
+            else if (wire === 5) i += 4
+            else if (wire === 2) {
+              let len = 0
+              shift = 0
+              do {
+                byte = b[i++]
+                len |= (byte & 0x7f) << shift
+                shift += 7
+              } while (byte & 0x80)
+              if (tag === field) visit(i, i + len)
+              i += len
+            } else return
+          }
+        }
+        walk(0, b.length, 3, (ls, le) => walk(ls, le, 2, () => n++))
+        return n
+      }
+      const tileCounts = {}
+      const addProtocol = maplibregl.addProtocol.bind(maplibregl)
+      maplibregl.addProtocol = (scheme, handler) =>
+        addProtocol(scheme, async (request, abort) => {
+          const result = await handler(request, abort)
+          if (result?.data instanceof ArrayBuffer) {
+            const key = decodeURIComponent(request.url)
+            tileCounts[key] = (tileCounts[key] ?? 0) + mvtFeatures(result.data)
+          }
+          return result
+        })
+
       registerProtocol(maplibregl)
       const protocol = new pmtiles.Protocol()
       maplibregl.addProtocol('pmtiles', protocol.tile)
@@ -148,6 +198,7 @@
         {
           title: 'LOD columns, page indexes',
           keys: [fileUrl],
+          tile: (u) => u.includes(fileUrl) && !u.includes(fileUrl + '?dir'),
           sources: { lod: lodSource(fileUrl) },
           layers: [fill('lod', 'shapes'), dots('lod', 'points')],
         },
@@ -156,6 +207,7 @@
         panes.push({
           title: 'LOD columns, tile directory',
           keys: [fileUrl + '?dir', tiledir],
+          tile: (u) => u.includes(fileUrl + '?dir'),
           sources: { lod: lodSource(fileUrl + '?dir', { tiledir }) },
           layers: [fill('lod', 'shapes'), dots('lod', 'points')],
         })
@@ -169,6 +221,7 @@
         panes.push({
           title: 'COGP, @cogp/maplibre',
           keys: [cogpUrl],
+          tile: (u) => u.startsWith('cogp://'),
           sources: {
             cogp: {
               type: 'vector',
@@ -184,6 +237,7 @@
         panes.push({
           title: 'PMTiles',
           keys: [pmtilesUrl],
+          tile: (u) => u.startsWith('pmtiles://'),
           sources: { shapes: { type: 'vector', url: 'pmtiles://' + pmtilesUrl } },
           layers: [fill('shapes', pmtilesLayer)],
         })
@@ -196,7 +250,6 @@
           keys: [esriUrl],
           sources: {},
           layers: [],
-          countLayers: ['maplibre-parquet-fill'],
           attach: (map, hud) => {
             // the reader converts each view to GeoJSON on moveend and owns its layers
             const layer = new MapLibreParquetLayer(
@@ -225,33 +278,22 @@
         })
       }
 
-      // features drawn in the view, counted once each where the tiles give them ids
-      const inView = (map, pane) => {
-        const layers = (pane.countLayers ?? pane.layers.map((l) => l.id)).filter((id) =>
-          map.getLayer(id),
-        )
-        if (!layers.length) return 0
-        const ids = new Set()
-        let anonymous = 0
-        for (const f of map.queryRenderedFeatures({ layers })) {
-          if (f.id == null) anonymous++
-          else ids.add(f.id)
-        }
-        return ids.size + anonymous
-      }
       const container = document.getElementById('panes')
-      const maps = []
       for (const pane of panes) {
         const div = document.createElement('div')
         div.className = 'pane'
-        const mapDiv = document.createElement('div')
-        mapDiv.className = 'map'
-        const hud = document.createElement('div')
-        hud.className = 'hud'
-        div.append(mapDiv, hud)
+        pane.mapDiv = document.createElement('div')
+        pane.mapDiv.className = 'map'
+        pane.hud = document.createElement('div')
+        pane.hud.className = 'hud'
+        div.append(pane.mapDiv, pane.hud)
         container.append(div)
+      }
+      const maps = []
+      for (const pane of panes) {
+        const { hud } = pane
         const map = new maplibregl.Map({
-          container: mapDiv,
+          container: pane.mapDiv,
           style: 'https://basemaps.cartocdn.com/gl/positron-nolabels-gl-style/style.json',
           ...start,
           attributionControl: false,
@@ -263,7 +305,6 @@
         })
         pane.attach?.(map, hud)
         map.on('error', (e) => console.error(pane.title, e.error ?? e))
-        map.on('idle', () => (hud.dataset.features = String(inView(map, pane))))
         maps.push({ map, hud, pane })
       }
 
@@ -287,6 +328,7 @@
       }
 
       let baseline = {}
+      let featureBaseline = {}
       const format = (bytes) => (bytes / 1e6).toFixed(2) + ' MB'
       // a file is fetched under several hostnames; match on the object name and query
       const tally = (stats, keys) => {
@@ -303,6 +345,13 @@
         }
         return { requests, bytes }
       }
+      // each pane says which tile URLs are its own
+      const features = (pane) => {
+        let n = 0
+        for (const [u, count] of Object.entries(tileCounts))
+          if (pane.tile?.(u)) n += count - (featureBaseline[u] ?? 0)
+        return n
+      }
       const current = async () => {
         const stats = { ...(await readStats()), ...mainStats }
         for (const { pane } of maps) if (pane.stats) Object.assign(stats, await pane.stats())
@@ -316,19 +365,18 @@
             Object.assign(document.createElement('b'), { textContent: pane.title }),
             document.createTextNode(`${format(bytes)} in ${requests} requests`),
             Object.assign(document.createElement('small'), {
-              textContent: `${Number(hud.dataset.features ?? 0).toLocaleString()} features in view`,
+              textContent: hud.dataset.status
+                ? hud.dataset.status
+                : `${features(pane).toLocaleString()} features in tiles`,
             }),
           ]
-          if (hud.dataset.status)
-            children.push(
-              Object.assign(document.createElement('small'), { textContent: hud.dataset.status }),
-            )
           hud.replaceChildren(...children)
         }
         document.getElementById('zoom').textContent = ` zoom ${maps[0].map.getZoom().toFixed(1)}`
       }
       document.getElementById('reset').onclick = async () => {
         baseline = structuredClone(await current())
+        featureBaseline = { ...tileCounts }
         show()
       }
       setInterval(show, 500)
