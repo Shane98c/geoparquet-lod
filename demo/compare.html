@@ -225,6 +225,20 @@
         })
       }
 
+      // features drawn in the view, counted once each where the tiles give them ids
+      const inView = (map, pane) => {
+        const layers = (pane.countLayers ?? pane.layers.map((l) => l.id)).filter((id) =>
+          map.getLayer(id),
+        )
+        if (!layers.length) return 0
+        const ids = new Set()
+        let anonymous = 0
+        for (const f of map.queryRenderedFeatures({ layers })) {
+          if (f.id == null) anonymous++
+          else ids.add(f.id)
+        }
+        return ids.size + anonymous
+      }
       const container = document.getElementById('panes')
       const maps = []
       for (const pane of panes) {
@@ -249,6 +263,7 @@
         })
         pane.attach?.(map, hud)
         map.on('error', (e) => console.error(pane.title, e.error ?? e))
+        map.on('idle', () => (hud.dataset.features = String(inView(map, pane))))
         maps.push({ map, hud, pane })
       }
 
@@ -293,29 +308,15 @@
         for (const { pane } of maps) if (pane.stats) Object.assign(stats, await pane.stats())
         return stats
       }
-      // features drawn in the view, counted once each where the tiles give them ids
-      const inView = (map, pane) => {
-        const layers = (pane.countLayers ?? pane.layers.map((l) => l.id)).filter((id) =>
-          map.getLayer(id),
-        )
-        if (!layers.length) return 0
-        const ids = new Set()
-        let anonymous = 0
-        for (const f of map.queryRenderedFeatures({ layers })) {
-          if (f.id == null) anonymous++
-          else ids.add(f.id)
-        }
-        return ids.size + anonymous
-      }
       const show = async () => {
         const stats = await current()
-        for (const { map, hud, pane } of maps) {
+        for (const { hud, pane } of maps) {
           const { requests, bytes } = tally(stats, pane.keys)
           const children = [
             Object.assign(document.createElement('b'), { textContent: pane.title }),
             document.createTextNode(`${format(bytes)} in ${requests} requests`),
             Object.assign(document.createElement('small'), {
-              textContent: `${inView(map, pane).toLocaleString()} features in view`,
+              textContent: `${Number(hud.dataset.features ?? 0).toLocaleString()} features in view`,
             }),
           ]
           if (hud.dataset.status)
