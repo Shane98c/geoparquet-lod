@@ -216,10 +216,11 @@ mislead:
 - COGP and the Esri reference reader cost more than either at every zoom
   measured, and COGP draws a small fraction of the buildings.
 
-The earlier section of that document, on 155.6 million US buildings, was
-measured on the previous layout of this format (nested Arrow geometry read
-through the bbox page indexes) and is kept for the record until the
-national file is rewritten.
+On the 155.6 million US buildings behind CarbonPlan's fire-risk map, where
+the file keeps every building from z13 and the archive drops half, a warm
+tile is one round trip per section against the archive's one, street tiles
+read 0.03 to 0.05 MB warm against 0.05 to 0.12, and a z13 downtown tile
+reads 2.5 times the archive's bytes to draw twice its buildings.
 
 A tile is one range read of its LOD column plus the key pages at the ends
 of its interval and, cold, the row group's indexes; the floor is therefore
