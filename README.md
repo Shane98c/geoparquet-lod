@@ -203,13 +203,16 @@ Optimized Parquet, with every reader cold on each tile and feature counts
 beside the bytes, since the four thin so differently that bytes alone
 mislead:
 
-- The thinning is calibrated against the archive: within 15% of
+- The thinning is calibrated against the archive: within about 20% of
   tippecanoe's feature count at every zoom from 6 to 12, and the share of
   a city tile the buildings paint agrees within a point.
-- A z8 metro tile is 0.43 MB in 13 requests against the archive's 0.48 MB
-  in 2; a z11 city tile 0.47 MB against 0.30; z13 downtown 0.43 against
-  0.37; street tiles 0.19 to 0.23 MB against 0.04 to 0.13.
-- Opening costs 0.29 MB, nearly all footer, against 20 KB for PMTiles.
+- A z8 metro tile is 0.69 MB in 9 requests against the archive's 0.50 MB
+  in 2; a z11 city tile 0.50 MB against 0.31; z13 downtown 0.47 against
+  0.35; street tiles 0.14 to 0.16 MB against 0.03 to 0.11. The next tile
+  on a warm reader is 0.06 to 0.32 MB in 4 to 9 requests against 0.02 to
+  0.26 in 1.
+- Opening costs 0.47 MB, the footer and the prefix indexes, against 20 KB
+  for PMTiles.
 - COGP and the Esri reference reader cost more than either at every zoom
   measured, and COGP draws a small fraction of the buildings.
 
