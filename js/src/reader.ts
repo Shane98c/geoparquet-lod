@@ -86,7 +86,7 @@ export interface PrimaryRows {
 /** Compressed bytes of decoded bbox pages kept for later tiles; the oldest go first. */
 const PAGE_CACHE_BYTES = 4 * 1024 * 1024
 /** LOD bytes a tile may read past its exact rows rather than fetch key pages to trim them. */
-const LOOSE_BYTES = 96 * 1024
+const LOOSE_BYTES = 32 * 1024
 const BBOX_LEAVES = ['bbox.xmin', 'bbox.ymin', 'bbox.xmax', 'bbox.ymax'] as const
 
 /**
