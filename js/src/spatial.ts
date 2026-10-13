@@ -1,3 +1,4 @@
+import type { ProjectionExecutor } from './projection.js'
 import { readColumn } from 'hyparquet/src/column.js'
 import { DEFAULT_PARSERS } from 'hyparquet/src/convert.js'
 import { getSchemaPath } from 'hyparquet/src/schema.js'
@@ -163,8 +164,13 @@ export class SpatialReader implements TileReader {
     return (await this.analytical()).readRow(row, columns, signal)
   }
 
-  async readColumns(rows: number[], columns: string[], signal?: AbortSignal) {
-    return (await this.analytical()).readColumns(rows, columns, signal)
+  async readColumns(
+    rows: number[],
+    columns: string[],
+    signal?: AbortSignal,
+    execute?: ProjectionExecutor,
+  ) {
+    return (await this.analytical()).readColumns(rows, columns, signal, execute)
   }
 
   async readPrimary(bbox: Bbox, attributes: string[] = [], signal?: AbortSignal) {

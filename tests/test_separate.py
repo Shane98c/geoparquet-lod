@@ -132,6 +132,34 @@ def test_separate(tmp_path, family):
                 ]
     if family != 'point':
         assert copies > 0
+    # Exercise source projection across dictionary and v2 pages, with page
+    # boundaries unrelated to selected IDs. Keep LOD metadata and row order.
+    projected = tmp_path / 'projection.parquet'
+    pq.write_table(
+        old,
+        projected,
+        compression='zstd',
+        use_dictionary=['name', 'source_only'],
+        data_page_version='2.0',
+        max_rows_per_page=11,
+        row_group_size=128,
+        write_page_index=True,
+    )
+    selected = [399, 0, 37, 37, 128, 17]
+    columns = ['name', 'height', 'half', 'count', 'source_only', 'value', 'active']
+    expected = {name: [old[name][i].as_py() for i in selected] for name in columns}
+    expected_path = tmp_path / 'projection.json'
+    expected_path.write_text(json.dumps({'rows': selected, 'expected': expected}))
     subprocess.run(
-        ['node', 'js/test/separate.test.mjs', str(a), str(b), str(split)], cwd=ROOT, check=True
+        [
+            'node',
+            'js/test/separate.test.mjs',
+            str(a),
+            str(b),
+            str(split),
+            str(projected),
+            str(expected_path),
+        ],
+        cwd=ROOT,
+        check=True,
     )

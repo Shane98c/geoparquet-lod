@@ -58,6 +58,14 @@ Parquet rewrite will discard the directory; run the optimizer again afterward.
 
 ### Whole-feature reads and runtime attributes
 
+Indexed packed tiles now retain decoded geometry and hydrate newly requested
+source attributes without decoding that geometry again. The MapLibre adapter
+uses an additional bounded 32 MiB / 64-tile cache and runs source-page projection
+and tile encoding in its CPU pool. A Tokyo city style change improved from
+797 to 402 ms on first use, and from 245 to 81 ms on repeat, with unchanged
+requests and bytes. Cold styled loads were slightly slower. See
+[style-change results and memory costs](docs/parity-styles.md).
+
 The packed path now supports styling with source scalar columns that were not
 carried at write time. These are batched by source row ID and cached on demand;
 the first read can be substantially slower than reading carried attributes.

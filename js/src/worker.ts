@@ -1,12 +1,17 @@
+import { VisibleTileCache, waitForTile } from './visible-cache.js'
+import { decodeProjection } from './projection.js'
 /// <reference lib="webworker" />
 import type { Transfer, WorkerRequest, WorkerResponse } from './maplibre.js'
 import { coalescing, httpSource, s3Mirrors } from './range-buffer.js'
 import { openReader, SpatialReader, type TileReader } from './spatial.js'
-import { renderPreparedTile, renderTile } from './tile.js'
-import { TilePool } from './tile-pool.js'
+import { decodePreparedTile, renderDecodedTile, renderPreparedTile, renderTile } from './tile.js'
+import { TilePool, geometryTransfers } from './tile-pool.js'
 import type { CpuRequest, TileReply } from './tile-protocol.js'
 
 const scope = self as unknown as DedicatedWorkerGlobalScope
+const visible = new VisibleTileCache()
+let geometryDecodes = 0,
+  projectionJobs = 0
 const readers = new Map<string, Promise<TileReader>>()
 let workerCount = 2
 let pool: TilePool | undefined
@@ -38,15 +43,37 @@ const getReader = (url: string): Promise<TileReader> => {
 scope.addEventListener('message', (event: MessageEvent<WorkerRequest | CpuRequest>) => {
   const request = event.data
   // CPU workers reuse this same URL, so the pool adds no second JS bundle.
-  // They receive only prepared pages and never open their own reader/cache.
+  // They receive prepared pages or decoded geometry, never their own reader.
   if (request.type === 'cpu-init') {
     scope.postMessage({ ready: true } satisfies TileReply)
     return
   }
-  if (request.type === 'render') {
+  if (
+    request.type === 'render' ||
+    request.type === 'decode' ||
+    request.type === 'encode' ||
+    request.type === 'project'
+  ) {
     try {
-      const data = renderPreparedTile(request.task, request.options)
-      scope.postMessage({ id: request.id, data } satisfies TileReply, [data])
+      if (request.type === 'project') {
+        scope.postMessage({
+          id: request.id,
+          values: decodeProjection(request.task),
+        } satisfies TileReply)
+      } else if (request.type === 'decode') {
+        const tile = decodePreparedTile(request.task)
+        const data = request.options ? renderDecodedTile(tile, request.options) : undefined
+        scope.postMessage({ id: request.id, tile, data } satisfies TileReply, [
+          ...geometryTransfers(tile),
+          ...(data ? [data] : []),
+        ])
+      } else {
+        const data =
+          request.type === 'render'
+            ? renderPreparedTile(request.task, request.options)
+            : renderDecodedTile(request.tile, request.options)
+        scope.postMessage({ id: request.id, data } satisfies TileReply, [data])
+      }
     } catch (error) {
       scope.postMessage({
         id: request.id,
@@ -80,7 +107,17 @@ scope.addEventListener('message', (event: MessageEvent<WorkerRequest | CpuReques
     return
   }
   if (request.type === 'stats') {
-    scope.postMessage({ id: request.id, ok: true, stats } satisfies WorkerResponse)
+    scope.postMessage({
+      id: request.id,
+      ok: true,
+      stats,
+      cache: {
+        bytes: visible.bytes,
+        tiles: visible.size,
+        decodes: geometryDecodes,
+        projections: projectionJobs,
+      },
+    } satisfies WorkerResponse)
     return
   }
   if (request.type === 'open') {
@@ -125,6 +162,63 @@ scope.addEventListener('message', (event: MessageEvent<WorkerRequest | CpuReques
             }
             const cpu = getPool()
             const properties = options.properties ?? reader.lod.attributes.map((a) => a.name)
+            if (
+              reader instanceof SpatialReader &&
+              reader.lod.encoding === 'packed' &&
+              request.z <= reader.finestZoom
+            ) {
+              const source = properties.filter(
+                (name) => !reader.lod.attributes.some((a) => a.name === name),
+              )
+              const key = JSON.stringify([request.config.url, request.z, request.x, request.y])
+              let rendered: ArrayBuffer | undefined
+              const tile = await waitForTile(
+                visible.getOrLoad(key, async () => {
+                  // Shared work outlives any one cancelled style request. Cache
+                  // all carried values already in the fetched packed pages.
+                  const task = await reader.prepareTile(
+                    reader.lodForZoom(request.z),
+                    request.z,
+                    request.x,
+                    request.y,
+                  )
+                  geometryDecodes++
+                  const settings = source.length ? undefined : { ...options, signal: undefined }
+                  if (cpu) {
+                    const result = await cpu.decode(task, settings)
+                    rendered = result.data
+                    return result.tile
+                  }
+                  const decoded = decodePreparedTile(task)
+                  if (settings) rendered = renderDecodedTile(decoded, settings)
+                  return decoded
+                }),
+                controller.signal,
+              )
+              if (rendered) return rendered
+              const missing = source.filter((name) => !Object.hasOwn(tile.columns, name))
+              const extras = missing.length
+                ? await reader.readColumns(
+                    tile.rows,
+                    missing,
+                    controller.signal,
+                    cpu
+                      ? (task, signal) => {
+                          projectionJobs++
+                          return cpu.project(task, signal)
+                        }
+                      : undefined,
+                  )
+                : {}
+              controller.signal.throwIfAborted()
+              visible.addColumns(key, tile, extras)
+              // New styles never modify the cached geometry or carried columns.
+              const columns = Object.fromEntries(
+                properties.map((name) => [name, extras[name] ?? tile.columns[name]]),
+              )
+              const styled = { ...tile, columns }
+              return cpu ? cpu.render(styled, options) : renderDecodedTile(styled, options)
+            }
             if (
               cpu &&
               reader instanceof SpatialReader &&

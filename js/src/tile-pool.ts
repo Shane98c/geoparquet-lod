@@ -1,12 +1,12 @@
+import type { ProjectionTask } from './projection.js'
 import type { PreparedTile } from './spatial.js'
-import type { TileOptions } from './tile.js'
-import type { TileJob, TileReply } from './tile-protocol.js'
+import type { DecodedTile, TileOptions } from './tile.js'
+import type { TileJob, TileReply, TileWork, TileResult } from './tile-protocol.js'
 
 interface Job {
   id: number
-  task: PreparedTile
-  options: Omit<TileOptions, 'signal'>
-  resolve: (data: ArrayBuffer) => void
+  work: TileWork
+  resolve: (data: TileResult) => void
   reject: (error: Error) => void
   cleanup: () => void
   cancelled: boolean
@@ -17,7 +17,7 @@ interface Slot {
   ready: boolean
 }
 
-/** One shared reader owns I/O. Only compressed page copies cross this boundary.
+/** One shared reader owns I/O. CPU jobs receive source pages or decoded geometry.
  * Copies are made at dispatch, so queued jobs retain cache references, not copies.
  */
 export class TilePool {
@@ -50,8 +50,9 @@ export class TilePool {
               slot.job = undefined
               job.cleanup()
               if (!job.cancelled) {
-                if ('data' in data) job.resolve(data.data)
-                else job.reject(Object.assign(new Error(data.error), { name: data.name }))
+                if ('error' in data)
+                  job.reject(Object.assign(new Error(data.error), { name: data.name }))
+                else job.resolve(data)
               }
               this.pump()
             })
@@ -72,8 +73,36 @@ export class TilePool {
     void this.ready.catch((error: Error) => this.fail(error))
   }
 
-  run(task: PreparedTile, options: TileOptions): Promise<ArrayBuffer> {
+  async run(task: PreparedTile, options: TileOptions): Promise<ArrayBuffer> {
     const { signal, ...settings } = options
+    return (
+      (await this.submit({ type: 'render', task, options: settings }, signal)) as {
+        data: ArrayBuffer
+      }
+    ).data
+  }
+  async decode(
+    task: PreparedTile,
+    options?: TileOptions,
+  ): Promise<{ tile: DecodedTile; data?: ArrayBuffer }> {
+    const { signal, ...settings } = options ?? {}
+    return (await this.submit(
+      { type: 'decode', task, options: options ? settings : undefined },
+      signal,
+    )) as { tile: DecodedTile; data?: ArrayBuffer }
+  }
+  async render(tile: DecodedTile, options: TileOptions): Promise<ArrayBuffer> {
+    const { signal, ...settings } = options
+    return (
+      (await this.submit({ type: 'encode', tile, options: settings }, signal)) as {
+        data: ArrayBuffer
+      }
+    ).data
+  }
+  async project(task: ProjectionTask, signal?: AbortSignal): Promise<unknown[]> {
+    return ((await this.submit({ type: 'project', task }, signal)) as { values: unknown[] }).values
+  }
+  private submit(work: TileWork, signal?: AbortSignal): Promise<TileResult> {
     signal?.throwIfAborted()
     if (this.failure) return Promise.reject(this.failure)
     return new Promise((resolve, reject) => {
@@ -88,8 +117,7 @@ export class TilePool {
       }
       const job: Job = {
         id: ++this.nextId,
-        task,
-        options: settings,
+        work,
         resolve,
         reject,
         cancelled: false,
@@ -108,20 +136,8 @@ export class TilePool {
       if (!job) return
       slot.job = job
       try {
-        const payloads = job.task.payloads.map((bytes) => bytes.slice(0))
-        const attributePages = job.task.attributePages?.map((attr) => ({
-          ...attr,
-          payloads: attr.payloads.map((bytes) => bytes.slice(0)),
-        }))
-        slot.worker.postMessage(
-          {
-            type: 'render',
-            id: job.id,
-            task: { ...job.task, payloads, attributePages },
-            options: job.options,
-          } satisfies TileJob,
-          [...payloads, ...(attributePages ?? []).flatMap((attr) => attr.payloads)],
-        )
+        const work = copyWork(job.work)
+        slot.worker.postMessage({ ...work, id: job.id } satisfies TileJob, workTransfers(work))
       } catch (error) {
         slot.job = undefined
         job.cleanup()
@@ -144,4 +160,62 @@ export class TilePool {
       job.reject(error)
     }
   }
+}
+
+/** Copy at dispatch, never detach cached geometry or compressed source pages. */
+function copyWork(work: TileWork): TileWork {
+  if (work.type === 'encode') {
+    const geometry = { ...work.tile.geometry }
+    for (const key of [
+      'types',
+      'x',
+      'y',
+      'geometryOffsets',
+      'polygonOffsets',
+      'ringOffsets',
+    ] as const)
+      (geometry[key] as unknown) = work.tile.geometry[key].slice()
+    return { ...work, tile: { ...work.tile, geometry } }
+  }
+  if (work.type === 'project')
+    return {
+      ...work,
+      task: {
+        ...work.task,
+        dictionary: work.task.dictionary?.slice(0) ?? null,
+        runs: work.task.runs.map((run) => ({ ...run, bytes: run.bytes.slice(0) })),
+      },
+    }
+  return {
+    ...work,
+    task: {
+      ...work.task,
+      payloads: work.task.payloads.map((bytes) => bytes.slice(0)),
+      attributePages: work.task.attributePages?.map((attr) => ({
+        ...attr,
+        payloads: attr.payloads.map((bytes) => bytes.slice(0)),
+      })),
+    },
+  }
+}
+export function geometryTransfers(tile: DecodedTile): ArrayBuffer[] {
+  return [
+    ...new Set(
+      Object.values(tile.geometry).flatMap((value) =>
+        ArrayBuffer.isView(value) ? [value.buffer as ArrayBuffer] : [],
+      ),
+    ),
+  ]
+}
+function workTransfers(work: TileWork): ArrayBuffer[] {
+  if (work.type === 'encode') return geometryTransfers(work.tile)
+  if (work.type === 'project')
+    return [
+      ...work.task.runs.map((run) => run.bytes),
+      ...(work.task.dictionary ? [work.task.dictionary] : []),
+    ]
+  return [
+    ...work.task.payloads,
+    ...(work.task.attributePages ?? []).flatMap((attr) => attr.payloads),
+  ]
 }

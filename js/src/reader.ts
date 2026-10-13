@@ -13,6 +13,7 @@ import { DEFAULT_PARSERS } from 'hyparquet/src/convert.js'
 import { getSchemaPath } from 'hyparquet/src/schema.js'
 import { compressors } from 'hyparquet-compressors'
 import { attributeKind, decodeRow, type AttributeField } from './decode.js'
+import { decodeProjection, type ProjectionExecutor, type ProjectionTask } from './projection.js'
 import type { GeometryType } from './geometry.js'
 import { tileInterval, type Interval } from './key.js'
 
@@ -550,6 +551,7 @@ export class LodReader {
     rows: number[],
     columns: string[],
     signal?: AbortSignal,
+    execute?: ProjectionExecutor,
   ): Promise<Record<string, unknown[]>> {
     signal?.throwIfAborted()
     for (const column of columns)
@@ -586,13 +588,10 @@ export class LodReader {
             })
             if (!missing.length) return
             const sorted = [...new Set(missing.map((e) => e.local))].sort((a, b) => a - b)
-            const ranges: [number, number][] = []
-            for (const row of sorted) {
-              const last = ranges.at(-1)
-              if (last?.[1] === row) last[1]++
-              else ranges.push([row, row + 1])
-            }
-            const values = await this.readLeafValues(g, name, ranges, signal)
+            const task = await this.prepareProjection(g, name, sorted, signal)
+            const projected = execute ? await execute(task, signal) : decodeProjection(task)
+            signal?.throwIfAborted()
+            const values = new Map(sorted.map((row, i) => [row, projected[i]]))
             for (const entry of missing) {
               const value = values.get(entry.local) ?? null
               out[name][entry.output] = value
@@ -619,6 +618,43 @@ export class LodReader {
     )
     signal?.throwIfAborted()
     return out
+  }
+
+  private async prepareProjection(
+    g: number,
+    leaf: string,
+    rows: number[],
+    signal?: AbortSignal,
+  ): Promise<ProjectionTask> {
+    const pages = await this.offsetIndex(g, leaf)
+    const runs: PageLocation[][] = []
+    let selected = 0
+    for (const page of pages) {
+      while (selected < rows.length && rows[selected] < page.rowStart) selected++
+      if (selected === rows.length || rows[selected] >= page.rowEnd) continue
+      const last = runs.at(-1)
+      if (last && last.at(-1)!.byteEnd === page.byteStart && last.at(-1)!.rowEnd === page.rowStart)
+        last.push(page)
+      else runs.push([page])
+    }
+    const { type, codec, element, schemaPath, pathInSchema, utf8 } = this.decoder(g, leaf)
+    const [dictionary, payloads] = await Promise.all([
+      this.dictionaryPage(g, leaf),
+      Promise.all(
+        runs.map(async (run) => ({
+          first: run[0].rowStart,
+          count: run.at(-1)!.rowEnd - run[0].rowStart,
+          bytes: await this.file.slice(run[0].byteStart, run.at(-1)!.byteEnd, signal),
+        })),
+      ),
+    ])
+    signal?.throwIfAborted()
+    return {
+      rows,
+      decoder: { type, codec, element, schemaPath, pathInSchema, utf8 },
+      dictionary,
+      runs: payloads,
+    }
   }
 
   /** Values of flat columns for one global row, one page read per column. */

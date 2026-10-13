@@ -172,3 +172,27 @@ modest geometry-only byte savings did not outweigh companion decode and request
 costs for styled views. Arbitrary source-column projection and whole-feature
 queries work with either profile. Source projection loads the ordinary footer
 and indexes lazily; it does not require companions.
+
+## Decoded tile reuse
+
+The MapLibre coordinator additionally retains indexed packed overview tiles in
+an LRU bounded to 32 MiB of estimated storage and 64 entries. Cache keys include
+the source URL and z/x/y, so properties and layer names can change independently.
+The entry stores whole decoded geometry, source IDs, carried values, and hydrated
+scalar source columns. Point filtering precedes caching; MVT encoding reads the
+entry without modifying it. Typed buffers are copied at dispatch so cached
+originals remain attached. This cache does not apply to exact-primary or the
+separated-attribute experiment's geometry path.
+
+Cold carried-style work decodes and encodes in one CPU job, returning geometry
+for reuse. A new source attribute uses a row-ID projection through ordinary
+footer/page indexes. The coordinator fetches source-page runs and dictionaries;
+the CPU pool decodes them and returns only selected values. Hydrated scalar
+columns count toward the decoded-tile budget and avoid repeated source joins.
+One-worker mode executes these stages locally. Eviction or an oversized tile
+causes a later geometry read to decode again. Shared pending loads can finish
+after one requester cancels; failed loads are removed.
+
+No stored data, page lookup rules, feature IDs, or analytical semantics change.
+See [measurements and limits](../docs/parity-styles.md) for the cold-load and
+memory tradeoffs; the cache budget is not a bound on total browser memory.

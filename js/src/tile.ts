@@ -66,7 +66,6 @@ export const renderTile = async (
     return renderGeometryTile(lod, data, z, x, y, options)
   }
   const { rows, coords, columns } = await reader.readLodByTile(lod, z, x, y, names, signal)
-  signal?.throwIfAborted()
   if (pointFamily) {
     const px: number[] = []
     const py: number[] = []
@@ -111,19 +110,51 @@ export const tileResolution = (z: number, y: number) => {
   return (360 * Math.cos((latitude * Math.PI) / 180)) / (VECTOR_TILE_SIZE * 2 ** z)
 }
 
-export function renderPreparedTile(task: PreparedTile, options: TileOptions = {}): ArrayBuffer {
+export interface DecodedTile {
+  lod: Lod
+  z: number
+  x: number
+  y: number
+  rows: number[]
+  columns: Record<string, unknown[]>
+  geometry: ReturnType<GeometryBuilder['finish']>
+}
+
+export function decodePreparedTile(
+  task: PreparedTile,
+  names = task.defaultAttributes ?? task.fields.map((f) => f.name),
+  signal?: AbortSignal,
+): DecodedTile {
   const builder = new GeometryBuilder()
-  const names =
-    options.properties ?? task.defaultAttributes ?? task.fields.map((field) => field.name)
-  const { rows, columns } = decodeTile(task, names, builder, options.signal)
-  return renderGeometryTile(
+  const { rows, columns } = decodeTile(task, names, builder, signal)
+  return normalizeTile(
     task.lod,
     { rows, columns, geometry: builder.finish(task.lod.scale, task.lod.offset) },
     task.z,
     task.x,
     task.y,
-    options,
   )
+}
+
+export function renderDecodedTile(tile: DecodedTile, options: TileOptions = {}): ArrayBuffer {
+  const { lod, rows, geometry, z, x, y } = tile
+  const names = options.properties ?? Object.keys(tile.columns)
+  const columns = Object.fromEntries(
+    names.map((name) => {
+      if (!(name in tile.columns)) throw new Error(`missing hydrated attribute ${name}`)
+      return [name, tile.columns[name]]
+    }),
+  )
+  const layer =
+    (lod.geometry_type === 'Point' ? options.pointLayer : undefined) ?? options.layer ?? 'features'
+  return toMvt(
+    { geometry: geometry as never, rowIndex: rows, columns },
+    { z, x, y, layer, signal: options.signal },
+  )
+}
+
+export function renderPreparedTile(task: PreparedTile, options: TileOptions = {}): ArrayBuffer {
+  return renderDecodedTile(decodePreparedTile(task, options.properties, options.signal), options)
 }
 
 function renderGeometryTile(
@@ -134,14 +165,23 @@ function renderGeometryTile(
   y: number,
   options: TileOptions,
 ): ArrayBuffer {
-  const { signal } = options
+  options.signal?.throwIfAborted()
+  return renderDecodedTile(normalizeTile(lod, data, z, x, y), options)
+}
+
+/** Point filtering happens once before caching; rendering is read-only. */
+function normalizeTile(
+  lod: Lod,
+  data: Pick<DecodedTile, 'rows' | 'columns' | 'geometry'>,
+  z: number,
+  x: number,
+  y: number,
+): DecodedTile {
   const bbox = tileBounds(z, x, y)
   const names = Object.keys(data.columns)
   const pointFamily = lod.geometry_type === 'Point'
-  const layer = (pointFamily ? options.pointLayer : undefined) ?? options.layer ?? 'features'
   const { rows, columns } = data
   let { geometry } = data
-  signal?.throwIfAborted()
   if (pointFamily) {
     // Keep the existing lon/lat bbox rule before projection. Point offsets
     // are the identity sequence; compact coordinates and attributes in place.
@@ -169,5 +209,5 @@ function renderGeometryTile(
       ringOffsets: geometry.ringOffsets.subarray(0, count + 1),
     }
   }
-  return toMvt({ geometry: geometry as never, rowIndex: rows, columns }, { z, x, y, layer, signal })
+  return { lod, z, x, y, rows, columns, geometry }
 }

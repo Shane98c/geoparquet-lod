@@ -59,7 +59,12 @@ export type WorkerResponse =
   | { id: number; ok: true; configured: true }
   | { id: number; ok: true; data: ArrayBuffer }
   | { id: number; ok: true; row: Record<string, unknown> }
-  | { id: number; ok: true; stats: Record<string, Transfer> }
+  | {
+      id: number
+      ok: true
+      stats: Record<string, Transfer>
+      cache?: { bytes: number; tiles: number; decodes: number; projections: number }
+    }
   | {
       id: number
       ok: true

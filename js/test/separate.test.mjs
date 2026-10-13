@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { openReader, LodReader, readFeatures, renderTile } from '../dist/index.js'
 import { workerClient } from './worker-client.mjs'
-const [a, b, raw] = process.argv.slice(2)
+const [a, b, raw, projectionPath, projectionExpected] = process.argv.slice(2)
 const source = async (path) => {
   const bytes = await readFile(path),
     reads = []
@@ -134,3 +134,96 @@ try {
   await client.close()
 }
 console.log('separated attributes, whole-feature queries, batch joins, and CPU workers passed')
+
+// The same packed viewport changes styles without another geometry decode.
+for (const workers of [1, 2]) {
+  const cached = await workerClient(a, workers, 0)
+  try {
+    const url = 'https://example.test/features.parquet'
+    for (const properties of [
+      ['source_only'],
+      [],
+      attrs,
+      ['height', 'source_only'],
+      ['source_only'],
+      [],
+      ['height', 'source_only'],
+    ]) {
+      const response = await cached.call({ type: 'tile', config: { url, properties }, z, x, y })
+      assert.deepEqual(
+        new Uint8Array(response.data),
+        new Uint8Array(await renderTile(first, z, x, y, { properties })),
+      )
+      const { cache } = await cached.call({ type: 'stats' })
+      assert.equal(cache.decodes, 1, 'styles reuse geometry')
+      assert.ok(cache.bytes <= 32 * 1024 * 1024)
+    }
+    const metrics = await cached.call({ type: 'stats' })
+    const different = await cached.call({
+      type: 'tile',
+      config: { url: 'https://another.test/features.parquet', properties: [] },
+      z,
+      x,
+      y,
+    })
+    assert.ok(different.data.byteLength)
+    assert.equal(
+      (await cached.call({ type: 'stats' })).cache.decodes,
+      metrics.cache.decodes + 1,
+      'source URLs cannot share cached tiles',
+    )
+    await assert.rejects(
+      cached.call({ type: 'tile', config: { url, properties: ['does_not_exist'] }, z, x, y }),
+      /unknown column/,
+    )
+  } finally {
+    await cached.close()
+  }
+}
+const projectedFile = await source(projectionPath)
+const projectionReader = await LodReader.open(projectedFile)
+const golden = JSON.parse(await readFile(projectionExpected, 'utf8'))
+assert.deepEqual(
+  await projectionReader.readColumns(golden.rows, Object.keys(golden.expected)),
+  golden.expected,
+)
+// Actual worker projection, separate reader to avoid value-cache hits.
+import { TilePool } from '../dist/tile-pool.js'
+import { Worker as NodeWorker } from 'node:worker_threads'
+globalThis.Worker = class {
+  constructor(url) {
+    this.worker = new NodeWorker(new URL('./worker-harness.mjs', import.meta.url), {
+      workerData: { entry: url.href },
+    })
+  }
+  postMessage(data, transfer) {
+    this.worker.postMessage(data, transfer)
+  }
+  addEventListener(type, callback) {
+    this.worker.on(type, (data) => callback(type === 'message' ? { data } : data))
+  }
+  terminate() {
+    return this.worker.terminate()
+  }
+}
+const pool = new TilePool(2)
+try {
+  await pool.ready
+  const reader = await LodReader.open(await source(projectionPath))
+  let tasks = 0
+  assert.deepEqual(
+    await reader.readColumns(
+      golden.rows,
+      Object.keys(golden.expected),
+      undefined,
+      (task, signal) => {
+        tasks++
+        return pool.project(task, signal)
+      },
+    ),
+    golden.expected,
+  )
+  assert.ok(tasks > 0)
+} finally {
+  for (const slot of pool.slots) slot.worker.terminate()
+}
