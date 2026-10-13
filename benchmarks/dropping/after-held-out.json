@@ -1,0 +1,922 @@
+[
+  {
+    "name": "Sendai",
+    "z": 6,
+    "x": 57,
+    "y": 24,
+    "lod": {
+      "sha256": "527b21f7edcbd19ad4b73d3c289042bf32b09f723dee56c53e90be06c9bb0ddc",
+      "features": 7626,
+      "areaPixels": 612.171875,
+      "interior": 7608,
+      "areaQuantiles": [0.03125, 0.0625, 0.0625, 0.0625, 0.0625, 0.09375]
+    },
+    "pmtiles": {
+      "sha256": "8d4db4ddb357246fa9ad5e66a18c5d2590f3b487aeaacac072f13b13ba705634",
+      "features": 8680,
+      "areaPixels": 542.640625,
+      "interior": 7614,
+      "areaQuantiles": [0.03125, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625]
+    }
+  },
+  {
+    "name": "Naha",
+    "z": 6,
+    "x": 54,
+    "y": 27,
+    "lod": {
+      "sha256": "df7e5d40adec205c849acc0d3b93ab52cffe0e560c36a2db6e5039bf608b49ee",
+      "features": 724,
+      "areaPixels": 50.25,
+      "interior": 724,
+      "areaQuantiles": [0.03125, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625]
+    },
+    "pmtiles": {
+      "sha256": "16abc4a0fbaa836e271da7ed376cb0bef9728e79799e67fc2b62a31abdf1e062",
+      "features": 725,
+      "areaPixels": 45.3125,
+      "interior": 724,
+      "areaQuantiles": [0.0625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625]
+    }
+  },
+  {
+    "name": "Hiroshima",
+    "z": 7,
+    "x": 111,
+    "y": 50,
+    "lod": {
+      "sha256": "4a39fb9f7299a31dd1b981e3e5ad0f9f79aad89052750fef460ef725dc202273",
+      "features": 27308,
+      "areaPixels": 2069.328125,
+      "interior": 27258,
+      "areaQuantiles": [0.03125, 0.03125, 0.0625, 0.0625, 0.0625, 0.0625]
+    },
+    "pmtiles": {
+      "sha256": "a1fa1ba94b1499576e9bbf333db3b2e175c2530e3270b4adf950ca099d7a571f",
+      "features": 29097,
+      "areaPixels": 1835.203125,
+      "interior": 26633,
+      "areaQuantiles": [0.0234375, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625]
+    }
+  },
+  {
+    "name": "Sendai",
+    "z": 7,
+    "x": 114,
+    "y": 49,
+    "lod": {
+      "sha256": "cf112e7c67fc195f9b0b90aa99a63f0e728f6d1b1222ff421aac371cb8869247",
+      "features": 14564,
+      "areaPixels": 1148.953125,
+      "interior": 14553,
+      "areaQuantiles": [0.03125, 0.046875, 0.0625, 0.0625, 0.0625, 0.09375]
+    },
+    "pmtiles": {
+      "sha256": "91fb0ee7aceee469f35433f2b60a40ee27ce7e9cb24e95ea6e861185b7e56177",
+      "features": 15538,
+      "areaPixels": 979.84375,
+      "interior": 14385,
+      "areaQuantiles": [0.015625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625]
+    }
+  },
+  {
+    "name": "Naha",
+    "z": 7,
+    "x": 109,
+    "y": 54,
+    "lod": {
+      "sha256": "6db276fa7ad17c024eb88158f722d3897a1e7339172fb9eb1e5d8379559d34d1",
+      "features": 2310,
+      "areaPixels": 159.796875,
+      "interior": 2310,
+      "areaQuantiles": [0.03125, 0.03125, 0.0625, 0.0625, 0.0625, 0.0625]
+    },
+    "pmtiles": {
+      "sha256": "bb81e603eaaac0c2886bc8e44a8360f09164b01fc3457daaec24e5b5d92f7a6e",
+      "features": 2287,
+      "areaPixels": 142.921875,
+      "interior": 2283,
+      "areaQuantiles": [0.015625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625]
+    }
+  },
+  {
+    "name": "rural Niigata",
+    "z": 7,
+    "x": 113,
+    "y": 49,
+    "lod": {
+      "sha256": "a4898b41539713bfad627eb2a36df6c7c96ebf96bd6fcf52f3f4836faddef39c",
+      "features": 33577,
+      "areaPixels": 2620.984375,
+      "interior": 33532,
+      "areaQuantiles": [0.03125, 0.046875, 0.0625, 0.0625, 0.0625, 0.09375]
+    },
+    "pmtiles": {
+      "sha256": "52874f52fd196503135514219b813e5a2c48e131cb3e9cfc88b523080c070d78",
+      "features": 36006,
+      "areaPixels": 2260.7109375,
+      "interior": 33064,
+      "areaQuantiles": [0.015625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625]
+    }
+  },
+  {
+    "name": "Hiroshima",
+    "z": 8,
+    "x": 222,
+    "y": 101,
+    "lod": {
+      "sha256": "9580d19ce2e14898ebd4dfe123e02949c135df99853183148bc979261659277a",
+      "features": 11925,
+      "areaPixels": 941.640625,
+      "interior": 11915,
+      "areaQuantiles": [0.03125, 0.03125, 0.03125, 0.0625, 0.0625, 0.0625]
+    },
+    "pmtiles": {
+      "sha256": "c824c7f0cf0c3fd382df59e8a34b10ec2851c14c176d4faee02bd6976578e12a",
+      "features": 12327,
+      "areaPixels": 878.84375,
+      "interior": 11725,
+      "areaQuantiles": [0.015625, 0.046875, 0.0625, 0.0625, 0.0625, 0.0625]
+    }
+  },
+  {
+    "name": "Sendai",
+    "z": 8,
+    "x": 228,
+    "y": 98,
+    "lod": {
+      "sha256": "7d3399efd768562dc4d17f0d19adbf1a6248e96e976451a6f60a6640e9ff4e3c",
+      "features": 13197,
+      "areaPixels": 1088,
+      "interior": 13190,
+      "areaQuantiles": [0.03125, 0.03125, 0.046875, 0.046875, 0.0625, 0.09375]
+    },
+    "pmtiles": {
+      "sha256": "1c159aaae2639ce87d870e8be57bf1f42dcb77c766d5d3fb9e5771dde984950c",
+      "features": 13503,
+      "areaPixels": 964.8984375,
+      "interior": 12959,
+      "areaQuantiles": [0.0078125, 0.046875, 0.0625, 0.0625, 0.0625, 0.0625]
+    }
+  },
+  {
+    "name": "Naha",
+    "z": 8,
+    "x": 218,
+    "y": 108,
+    "lod": {
+      "sha256": "584e78ae5f3253929a8a697cd48944664c6aaa5ef5b992e6cb0763f8e3964109",
+      "features": 2886,
+      "areaPixels": 199.3125,
+      "interior": 2885,
+      "areaQuantiles": [0.03125, 0.03125, 0.03125, 0.046875, 0.0625, 0.0625]
+    },
+    "pmtiles": {
+      "sha256": "c27c7c030d251f8aeb343c61f7b93ee7fb7e8d4487573cbb3338c6ec1f13d4bd",
+      "features": 2928,
+      "areaPixels": 197.53125,
+      "interior": 2842,
+      "areaQuantiles": [0.015625, 0.0390625, 0.0625, 0.0625, 0.0625, 0.0625]
+    }
+  },
+  {
+    "name": "rural Niigata",
+    "z": 8,
+    "x": 226,
+    "y": 99,
+    "lod": {
+      "sha256": "9705bc1164a605e475ac1bfa1b97a5db339356c7abe22e7c3ceb3605bd01258a",
+      "features": 9867,
+      "areaPixels": 767.703125,
+      "interior": 9848,
+      "areaQuantiles": [0.03125, 0.03125, 0.03125, 0.046875, 0.0625, 0.0625]
+    },
+    "pmtiles": {
+      "sha256": "91cbfd9351a5140bf28b7ceff4d8c877f45a8bcac557df65c8e8a56956bcfc30",
+      "features": 10302,
+      "areaPixels": 706.3828125,
+      "interior": 9695,
+      "areaQuantiles": [0.015625, 0.046875, 0.0625, 0.0625, 0.0625, 0.0625]
+    }
+  },
+  {
+    "name": "Hiroshima",
+    "z": 9,
+    "x": 444,
+    "y": 203,
+    "lod": {
+      "sha256": "e8289a93564554c901881a87a2c3372336e037d1ffeeb3fdceddc82f03023ab8",
+      "features": 3843,
+      "areaPixels": 667.515625,
+      "interior": 3829,
+      "areaQuantiles": [0.03125, 0.03125, 0.03125, 0.0625, 0.0625, 0.09375]
+    },
+    "pmtiles": {
+      "sha256": "4518149050a0a06298234d5392528f1bcff425a7d4052d26a263c3dca786c5ef",
+      "features": 3943,
+      "areaPixels": 732.3359375,
+      "interior": 3786,
+      "areaQuantiles": [0.0078125, 0.0390625, 0.0625, 0.0703125, 0.09375, 0.125]
+    }
+  },
+  {
+    "name": "Sendai",
+    "z": 9,
+    "x": 456,
+    "y": 197,
+    "lod": {
+      "sha256": "e60ad11d3bf1fbc434b22d47596bd5c29ffd818aa939f586effb564aab12f5e3",
+      "features": 4321,
+      "areaPixels": 824.609375,
+      "interior": 4271,
+      "areaQuantiles": [0.03125, 0.03125, 0.046875, 0.0625, 0.078125, 0.09375]
+    },
+    "pmtiles": {
+      "sha256": "ccfc345480217de0424f6996f7dc6e3144cfdea84f493fcd080623e660adcdd2",
+      "features": 4744,
+      "areaPixels": 941.609375,
+      "interior": 4217,
+      "areaQuantiles": [0.015625, 0.0390625, 0.0625, 0.0703125, 0.09375, 0.125]
+    }
+  },
+  {
+    "name": "Kyoto",
+    "z": 9,
+    "x": 449,
+    "y": 202,
+    "lod": {
+      "sha256": "d80e1819aa8a0d0cb7ff1b58e336b5d2fc3d23d6b5f247c51cfd31da1cf9b254",
+      "features": 8463,
+      "areaPixels": 1508.7265625,
+      "interior": 8414,
+      "areaQuantiles": [0.03125, 0.03125, 0.03125, 0.0625, 0.0625, 0.09375]
+    },
+    "pmtiles": {
+      "sha256": "beace0aeacb9e8a4297aab4fed34895f619955a0a6081f707b972225c2e12c84",
+      "features": 8845,
+      "areaPixels": 1725.359375,
+      "interior": 8327,
+      "areaQuantiles": [0.0078125, 0.0390625, 0.0625, 0.0703125, 0.09375, 0.125]
+    }
+  },
+  {
+    "name": "Naha",
+    "z": 9,
+    "x": 437,
+    "y": 217,
+    "lod": {
+      "sha256": "358437af149c7ff0ccd124be20aa9a6b85bce40bca27aec352b26de2e7e418d9",
+      "features": 2299,
+      "areaPixels": 343.5625,
+      "interior": 2299,
+      "areaQuantiles": [0.03125, 0.03125, 0.03125, 0.0625, 0.0625, 0.09375]
+    },
+    "pmtiles": {
+      "sha256": "c0418cf8deb75e6372e950884de7d31b2997fdb60d05b2667743843ae22ce71e",
+      "features": 2297,
+      "areaPixels": 380.515625,
+      "interior": 2275,
+      "areaQuantiles": [0.015625, 0.0390625, 0.0546875, 0.0703125, 0.0859375, 0.125]
+    }
+  },
+  {
+    "name": "Narita",
+    "z": 9,
+    "x": 455,
+    "y": 201,
+    "lod": {
+      "sha256": "cd75fb562709e09a8b5b15dd62cc2b09a576c4f19477258d815eddba39fd0174",
+      "features": 14750,
+      "areaPixels": 2712.3359375,
+      "interior": 14652,
+      "areaQuantiles": [0.015625, 0.03125, 0.046875, 0.0625, 0.0625, 0.09375]
+    },
+    "pmtiles": {
+      "sha256": "e033598c7611012c2eefda11b00dc7236646de89c5a50e61527b4baf162de95e",
+      "features": 15684,
+      "areaPixels": 3083.5078125,
+      "interior": 14474,
+      "areaQuantiles": [0.0078125, 0.0390625, 0.0546875, 0.0703125, 0.09375, 0.125]
+    }
+  },
+  {
+    "name": "rural Niigata",
+    "z": 9,
+    "x": 453,
+    "y": 199,
+    "lod": {
+      "sha256": "8dabdeae415e602cd549d026ee537d1acb1116563fd9c9e6021b735f3d8ccb99",
+      "features": 1423,
+      "areaPixels": 215.234375,
+      "interior": 1407,
+      "areaQuantiles": [0.03125, 0.03125, 0.03125, 0.046875, 0.0625, 0.09375]
+    },
+    "pmtiles": {
+      "sha256": "509a49ba4badca818f37eaaffa243ed0a1719432179e757b69d003fcd8b086c2",
+      "features": 1530,
+      "areaPixels": 258.078125,
+      "interior": 1391,
+      "areaQuantiles": [0.0234375, 0.0390625, 0.0625, 0.0703125, 0.09375, 0.125]
+    }
+  },
+  {
+    "name": "Hiroshima",
+    "z": 10,
+    "x": 888,
+    "y": 407,
+    "lod": {
+      "sha256": "da3554a5599a5f7702d7a4d39f61558800e21a6a1431de834aa118c41c9f3ae9",
+      "features": 6217,
+      "areaPixels": 2551.671875,
+      "interior": 6185,
+      "areaQuantiles": [0.03125, 0.0625, 0.0625, 0.09375, 0.15625, 0.234375]
+    },
+    "pmtiles": {
+      "sha256": "1d4b4fe8659ed6f0689b8bc316fce62bd845d733735fb81050fb93adb67537f5",
+      "features": 5896,
+      "areaPixels": 2668.640625,
+      "interior": 5807,
+      "areaQuantiles": [0.0390625, 0.125, 0.15625, 0.171875, 0.203125, 0.2734375]
+    }
+  },
+  {
+    "name": "Sendai",
+    "z": 10,
+    "x": 912,
+    "y": 394,
+    "lod": {
+      "sha256": "de88c1f8d6188d265f371e1abfcb40d761f26e143e4c70344e66039646d07686",
+      "features": 8375,
+      "areaPixels": 3653.90625,
+      "interior": 8188,
+      "areaQuantiles": [0.03125, 0.0625, 0.078125, 0.09375, 0.15625, 0.25]
+    },
+    "pmtiles": {
+      "sha256": "28a7985d4d13622a054cb144f7638b549cba21db112d6b326314650bb8aaf17f",
+      "features": 8311,
+      "areaPixels": 3899.828125,
+      "interior": 7659,
+      "areaQuantiles": [0.0625, 0.125, 0.15625, 0.171875, 0.2109375, 0.28125]
+    }
+  },
+  {
+    "name": "Kyoto",
+    "z": 10,
+    "x": 898,
+    "y": 405,
+    "lod": {
+      "sha256": "fbbf9e80ca47393dd76e26d5f80f21bcd9947c2e291fc20eb0fbef8ddb794e51",
+      "features": 12085,
+      "areaPixels": 4709.2109375,
+      "interior": 11883,
+      "areaQuantiles": [0.015625, 0.0625, 0.0625, 0.09375, 0.15625, 0.234375]
+    },
+    "pmtiles": {
+      "sha256": "017a0e99984b875f5ead8c2b623ef0ef413634b5682a89c3174fddda1433fc3b",
+      "features": 11793,
+      "areaPixels": 5023.265625,
+      "interior": 11162,
+      "areaQuantiles": [0.0390625, 0.1171875, 0.1484375, 0.1640625, 0.203125, 0.28125]
+    }
+  },
+  {
+    "name": "Naha",
+    "z": 10,
+    "x": 875,
+    "y": 434,
+    "lod": {
+      "sha256": "e23fa823cfe7cc7bd8a193c797bb6ee84ea7a5ead1e40b6d72e1d3536e3ec989",
+      "features": 5627,
+      "areaPixels": 2151.671875,
+      "interior": 5604,
+      "areaQuantiles": [0.03125, 0.0625, 0.09375, 0.109375, 0.15625, 0.25]
+    },
+    "pmtiles": {
+      "sha256": "ba1c8ee6d1e3001c44f469a711bf980350c33df2dcd08628fb64faca8cb01e05",
+      "features": 5383,
+      "areaPixels": 2229.1875,
+      "interior": 5283,
+      "areaQuantiles": [0.03125, 0.1171875, 0.15625, 0.171875, 0.203125, 0.2734375]
+    }
+  },
+  {
+    "name": "Narita",
+    "z": 10,
+    "x": 911,
+    "y": 402,
+    "lod": {
+      "sha256": "8aefd2c41318de84fd3f3d0472c2a5584059ac40475513db5bc83efb2824f234",
+      "features": 4703,
+      "areaPixels": 1936.234375,
+      "interior": 4612,
+      "areaQuantiles": [0.03125, 0.0625, 0.0625, 0.09375, 0.15625, 0.234375]
+    },
+    "pmtiles": {
+      "sha256": "7dc710953d6cabef8e5d414f7ac63456f4b64fe9cd9a258d330effb5996ad74c",
+      "features": 4610,
+      "areaPixels": 2058.953125,
+      "interior": 4307,
+      "areaQuantiles": [0.0546875, 0.1171875, 0.15625, 0.171875, 0.203125, 0.28125]
+    }
+  },
+  {
+    "name": "rural Niigata",
+    "z": 10,
+    "x": 906,
+    "y": 398,
+    "lod": {
+      "sha256": "1fec1db053ca024cf296fdaee3d48dd7314f80d138be7a3db183136d6cc8adb5",
+      "features": 951,
+      "areaPixels": 343.953125,
+      "interior": 930,
+      "areaQuantiles": [0.03125, 0.046875, 0.078125, 0.09375, 0.15625, 0.234375]
+    },
+    "pmtiles": {
+      "sha256": "bfb99d8da5a79fc3d65a8a273b51f9cb76b1740bdabff960ec967d3eee0f1109",
+      "features": 959,
+      "areaPixels": 375.8203125,
+      "interior": 886,
+      "areaQuantiles": [0.09375, 0.1171875, 0.15625, 0.171875, 0.1953125, 0.2734375]
+    }
+  },
+  {
+    "name": "Hiroshima",
+    "z": 11,
+    "x": 1777,
+    "y": 815,
+    "lod": {
+      "sha256": "5e31dc251851ba5df8a329aea40cb9edee68cf414eadffbf85cf79a82e4e3a59",
+      "features": 8908,
+      "areaPixels": 9917.5,
+      "interior": 8738,
+      "areaQuantiles": [0.0625, 0.1875, 0.28125, 0.328125, 0.4375, 0.625]
+    },
+    "pmtiles": {
+      "sha256": "5a9eea83929e487599cdd35452ad1fdc361f3362d57c4bb380e538cc40538454",
+      "features": 8859,
+      "areaPixels": 10067.015625,
+      "interior": 8600,
+      "areaQuantiles": [0.1875, 0.3125, 0.359375, 0.390625, 0.4609375, 0.6328125]
+    }
+  },
+  {
+    "name": "Sendai",
+    "z": 11,
+    "x": 1825,
+    "y": 788,
+    "lod": {
+      "sha256": "d6a0bb1e5a4baaaf6701c2d728b97f6099a2500fdca33af6998054b669f652d2",
+      "features": 10155,
+      "areaPixels": 11363.03125,
+      "interior": 9713,
+      "areaQuantiles": [0.046875, 0.1875, 0.296875, 0.328125, 0.453125, 0.625]
+    },
+    "pmtiles": {
+      "sha256": "c2584c803d48e473113e38421f70c1559e546a698e5358490ee8070dc855a2eb",
+      "features": 10210,
+      "areaPixels": 11638.3828125,
+      "interior": 9579,
+      "areaQuantiles": [0.1640625, 0.3203125, 0.3671875, 0.390625, 0.46875, 0.65625]
+    }
+  },
+  {
+    "name": "Kyoto",
+    "z": 11,
+    "x": 1796,
+    "y": 811,
+    "lod": {
+      "sha256": "391ec85a8050bba541a34e74f50af92e795c0b06d66085a95e30bc4990e1f78b",
+      "features": 14287,
+      "areaPixels": 14154.234375,
+      "interior": 13643,
+      "areaQuantiles": [0.0625, 0.1875, 0.28125, 0.3125, 0.4375, 0.625]
+    },
+    "pmtiles": {
+      "sha256": "84353e2de065cf0d423384502f34d7eeec4a3430291fecc4fa46effb69b9aa97",
+      "features": 14369,
+      "areaPixels": 14506.8828125,
+      "interior": 13442,
+      "areaQuantiles": [0.2109375, 0.3125, 0.359375, 0.390625, 0.46875, 0.625]
+    }
+  },
+  {
+    "name": "Naha",
+    "z": 11,
+    "x": 1750,
+    "y": 869,
+    "lod": {
+      "sha256": "2aa36787120e65de55ff001035afa304289db49737b89433abfd8682b6ac2b7e",
+      "features": 6051,
+      "areaPixels": 6351.0625,
+      "interior": 5906,
+      "areaQuantiles": [0.0625, 0.1875, 0.28125, 0.34375, 0.4375, 0.625]
+    },
+    "pmtiles": {
+      "sha256": "6ea2ea7bd500060cd1aeee8b042035fb220fcd67d8034612f892518d3c0ab863",
+      "features": 6032,
+      "areaPixels": 6486.296875,
+      "interior": 5832,
+      "areaQuantiles": [0.1953125, 0.3125, 0.359375, 0.390625, 0.4609375, 0.640625]
+    }
+  },
+  {
+    "name": "Narita",
+    "z": 11,
+    "x": 1822,
+    "y": 805,
+    "lod": {
+      "sha256": "6e40848b31156ef64b7514b667548fc32d6b4661cef37819e8a3dbfa478e9521",
+      "features": 3654,
+      "areaPixels": 4440.1640625,
+      "interior": 3449,
+      "areaQuantiles": [0.0625, 0.15625, 0.28125, 0.328125, 0.4375, 0.625]
+    },
+    "pmtiles": {
+      "sha256": "4b0870c3040775568fe4efe7c61f43439d1788a012ad9f61aba343790befa1e9",
+      "features": 3667,
+      "areaPixels": 4545.5859375,
+      "interior": 3390,
+      "areaQuantiles": [0.21875, 0.3125, 0.3671875, 0.390625, 0.453125, 0.625]
+    }
+  },
+  {
+    "name": "rural Niigata",
+    "z": 11,
+    "x": 1813,
+    "y": 796,
+    "lod": {
+      "sha256": "2124d9f5950899c8bad18a0260e66c1cfdcfb550052f293f344d574544ccf7f3",
+      "features": 1093,
+      "areaPixels": 1044.5390625,
+      "interior": 1042,
+      "areaQuantiles": [0.078125, 0.21875, 0.3125, 0.34375, 0.4375, 0.625]
+    },
+    "pmtiles": {
+      "sha256": "9974e731e1a6bdaf96b7dfa5eb8c4f3f6192f3451ae281669c13ac285a9b7331",
+      "features": 1107,
+      "areaPixels": 1068.421875,
+      "interior": 1028,
+      "areaQuantiles": [0.296875, 0.328125, 0.3671875, 0.390625, 0.4609375, 0.625]
+    }
+  },
+  {
+    "name": "Hiroshima",
+    "z": 12,
+    "x": 3555,
+    "y": 1630,
+    "lod": {
+      "sha256": "fd4685bb85d4febcd26a8740e3c682de37fa2c27ace5f79097f5a3331b1e51fc",
+      "features": 12704,
+      "areaPixels": 20555.6796875,
+      "interior": 11863,
+      "areaQuantiles": [0.0625, 0.4375, 0.546875, 0.59375, 0.71875, 0.9375]
+    },
+    "pmtiles": {
+      "sha256": "8713c95701119103a21e93dcbd60ec02d3f6c3e635de3d1e18fc86c85d56b60b",
+      "features": 12669,
+      "areaPixels": 20826.5078125,
+      "interior": 11633,
+      "areaQuantiles": [0.3828125, 0.5546875, 0.609375, 0.640625, 0.734375, 0.9609375]
+    }
+  },
+  {
+    "name": "Sendai",
+    "z": 12,
+    "x": 3650,
+    "y": 1576,
+    "lod": {
+      "sha256": "6917dba4af2cf4679b482a328c01b8e82becade3dc7f2b4ce1a92d02e723e21b",
+      "features": 13723,
+      "areaPixels": 23170.8046875,
+      "interior": 12866,
+      "areaQuantiles": [0.0625, 0.421875, 0.53125, 0.59375, 0.703125, 0.9375]
+    },
+    "pmtiles": {
+      "sha256": "ebf754c1d1cd652c2fc225f5c78555b0ff5c0a13367d5ef44291d641b6dabc2a",
+      "features": 13654,
+      "areaPixels": 23443.515625,
+      "interior": 12590,
+      "areaQuantiles": [0.390625, 0.5625, 0.609375, 0.6328125, 0.7109375, 0.921875]
+    }
+  },
+  {
+    "name": "Kyoto",
+    "z": 12,
+    "x": 3592,
+    "y": 1622,
+    "lod": {
+      "sha256": "0ccdd8e0ec2581235380991faf4769b3cf5bce0e64fcee03ade4d8bf7a1ad362",
+      "features": 22488,
+      "areaPixels": 40704.6328125,
+      "interior": 21258,
+      "areaQuantiles": [0.0625, 0.40625, 0.546875, 0.625, 0.75, 1.015625]
+    },
+    "pmtiles": {
+      "sha256": "1a836ba0f17baa65cdad7011a60bf02369e56579acb0552a2e694106ed7dd4a4",
+      "features": 22516,
+      "areaPixels": 41152.71875,
+      "interior": 20938,
+      "areaQuantiles": [0.4296875, 0.5546875, 0.6171875, 0.65625, 0.75, 1.015625]
+    }
+  },
+  {
+    "name": "Naha",
+    "z": 12,
+    "x": 3500,
+    "y": 1738,
+    "lod": {
+      "sha256": "40dc89ca6420870ec8312f2d788a823f3955f1c1569a57f57a364758ef4b9cd4",
+      "features": 8165,
+      "areaPixels": 15199.4375,
+      "interior": 7488,
+      "areaQuantiles": [0.09375, 0.4375, 0.53125, 0.578125, 0.703125, 0.90625]
+    },
+    "pmtiles": {
+      "sha256": "c2e1771e8d89be9e08bda2a65ce6b541bd26de324b9f3bc334c55b5f761639f6",
+      "features": 8145,
+      "areaPixels": 15383.5,
+      "interior": 7319,
+      "areaQuantiles": [0.4765625, 0.546875, 0.609375, 0.640625, 0.71875, 0.921875]
+    }
+  },
+  {
+    "name": "Narita",
+    "z": 12,
+    "x": 3644,
+    "y": 1611,
+    "lod": {
+      "sha256": "f22057d5f0b14b9138780e114a7b7574b07e49c044e0cd71ba25e03440a60b6d",
+      "features": 6850,
+      "areaPixels": 11305.7109375,
+      "interior": 6591,
+      "areaQuantiles": [0.0625, 0.4375, 0.546875, 0.59375, 0.703125, 0.90625]
+    },
+    "pmtiles": {
+      "sha256": "f906d543396a52eebf33c3ef6b3ef9779fe46fa17f6aca8ced4c79abd5c4e988",
+      "features": 6759,
+      "areaPixels": 11342.734375,
+      "interior": 6458,
+      "areaQuantiles": [0.46875, 0.5625, 0.609375, 0.640625, 0.71875, 0.8984375]
+    }
+  },
+  {
+    "name": "rural Niigata",
+    "z": 12,
+    "x": 3626,
+    "y": 1592,
+    "lod": {
+      "sha256": "ccce78a27f91ca822f71527fd2e2dfcf2ae3c313bd348b7a485d0383eb0dc984",
+      "features": 3651,
+      "areaPixels": 5007.90625,
+      "interior": 3541,
+      "areaQuantiles": [0.296875, 0.4375, 0.53125, 0.578125, 0.65625, 0.8125]
+    },
+    "pmtiles": {
+      "sha256": "8d7490fa6e306ce283803f0228ffd9d0f63f6a8bd3f83b88c84b5c7127329138",
+      "features": 3589,
+      "areaPixels": 5009.78125,
+      "interior": 3443,
+      "areaQuantiles": [0.4375, 0.5625, 0.609375, 0.6328125, 0.6875, 0.8125]
+    }
+  },
+  {
+    "name": "Hiroshima",
+    "z": 13,
+    "x": 7110,
+    "y": 3261,
+    "lod": {
+      "sha256": "2e97cd8354d1f5db7e41f42795ff1d9e51918dac42aef510f216eb1e4eb4fe03",
+      "features": 17821,
+      "areaPixels": 61269.4140625,
+      "interior": 16691,
+      "areaQuantiles": [0.09375, 0.90625, 1.046875, 1.125, 1.34375, 1.828125]
+    },
+    "pmtiles": {
+      "sha256": "4176dfef3cef1e056bee622959cea4c5c07dc4b84d2c32283eaa93823081437f",
+      "features": 17284,
+      "areaPixels": 61377.59375,
+      "interior": 16003,
+      "areaQuantiles": [0.671875, 1.0625, 1.140625, 1.203125, 1.3984375, 1.875]
+    }
+  },
+  {
+    "name": "Sendai",
+    "z": 13,
+    "x": 7301,
+    "y": 3152,
+    "lod": {
+      "sha256": "f41946ff4ba7bc2c1b646bb96bc848b337147fb6eaf292b04d7d6746fe9abcd7",
+      "features": 17091,
+      "areaPixels": 63605.15625,
+      "interior": 15537,
+      "areaQuantiles": [0.09375, 0.9375, 1.09375, 1.21875, 1.484375, 2.0625]
+    },
+    "pmtiles": {
+      "sha256": "673c92fc0e672a5e1f60991f38228c4f521e2dd44671d4beef6fa579d70ebf95",
+      "features": 17033,
+      "areaPixels": 64198.234375,
+      "interior": 15196,
+      "areaQuantiles": [0.9375, 1.078125, 1.1796875, 1.265625, 1.5390625, 2.078125]
+    }
+  },
+  {
+    "name": "Kyoto",
+    "z": 13,
+    "x": 7185,
+    "y": 3244,
+    "lod": {
+      "sha256": "0388eb70e027e69536889b5f6e81a115cd77ccb7a918a319afa8c21a5855dae8",
+      "features": 24179,
+      "areaPixels": 72295.7578125,
+      "interior": 22580,
+      "areaQuantiles": [0.4375, 0.84375, 0.96875, 1.09375, 1.296875, 1.71875]
+    },
+    "pmtiles": {
+      "sha256": "a5086fe5c4735ebed03a84609c138c1412efc6e99a781250685af371ecc9ff91",
+      "features": 23090,
+      "areaPixels": 71958.2265625,
+      "interior": 21297,
+      "areaQuantiles": [0.890625, 1.03125, 1.125, 1.171875, 1.34375, 1.78125]
+    }
+  },
+  {
+    "name": "Naha",
+    "z": 13,
+    "x": 7001,
+    "y": 3477,
+    "lod": {
+      "sha256": "133c52fda7d93857f9b9edd1eb20c81fa907ca9f1d60d072ec7bd63c4e5b17a5",
+      "features": 21165,
+      "areaPixels": 60623.203125,
+      "interior": 19762,
+      "areaQuantiles": [0.5625, 0.90625, 1.03125, 1.125, 1.328125, 1.75]
+    },
+    "pmtiles": {
+      "sha256": "10aa5b14b47fa5ff170444a1ee66c79d6998bf0b346909165be8162b86dd03ab",
+      "features": 20628,
+      "areaPixels": 60739.34375,
+      "interior": 18976,
+      "areaQuantiles": [0.8671875, 1.0546875, 1.140625, 1.203125, 1.3828125, 1.796875]
+    }
+  },
+  {
+    "name": "Narita",
+    "z": 13,
+    "x": 7289,
+    "y": 3223,
+    "lod": {
+      "sha256": "aea2fe11dcb821ab2460a0604ac04af0a4b51a6f382d9d03ff59ada61d47ff6d",
+      "features": 6065,
+      "areaPixels": 15100.2890625,
+      "interior": 5377,
+      "areaQuantiles": [0.59375, 0.890625, 1.03125, 1.125, 1.3125, 1.5625]
+    },
+    "pmtiles": {
+      "sha256": "9ab439751e02288d7fd5e7ea62ea41529707c71e0e4bcb139cea1a1a907c018e",
+      "features": 5959,
+      "areaPixels": 15262.8984375,
+      "interior": 5180,
+      "areaQuantiles": [0.953125, 1.0703125, 1.140625, 1.2109375, 1.359375, 1.59375]
+    }
+  },
+  {
+    "name": "rural Niigata",
+    "z": 13,
+    "x": 7253,
+    "y": 3185,
+    "lod": {
+      "sha256": "2a4cd1970cb84e30cbc6a31409269f91ec57c04d9113661b1b2a4ed0ccbb0b85",
+      "features": 2117,
+      "areaPixels": 5875.015625,
+      "interior": 1960,
+      "areaQuantiles": [0.859375, 0.96875, 1.125, 1.265625, 1.5625, 2.09375]
+    },
+    "pmtiles": {
+      "sha256": "8a57bf43e2c2be4b6658d1d77768a5cb9223673d5ef26008ab77aa7f180652a5",
+      "features": 2117,
+      "areaPixels": 5907.0625,
+      "interior": 1926,
+      "areaQuantiles": [1.015625, 1.09375, 1.1875, 1.296875, 1.59375, 2.109375]
+    }
+  },
+  {
+    "name": "Hiroshima",
+    "z": 14,
+    "x": 14220,
+    "y": 6523,
+    "lod": {
+      "sha256": "d855165df739415386778271d5dc1881aed4ae954bd689f3e342a78a6560b88b",
+      "features": 7137,
+      "areaPixels": 87319.265625,
+      "interior": 6685,
+      "areaQuantiles": [0.1171875, 0.75, 1.578125, 2.25, 3.78125, 6.40625]
+    },
+    "pmtiles": {
+      "sha256": "d195b7b119417a216b280f0cfdc1c02bc36da7f117247bd11bc23ab93f4dfc50",
+      "features": 7222,
+      "areaPixels": 88231.4765625,
+      "interior": 6686,
+      "areaQuantiles": [0.125, 0.75, 1.5703125, 2.2578125, 3.796875, 6.390625]
+    }
+  },
+  {
+    "name": "Sendai",
+    "z": 14,
+    "x": 14603,
+    "y": 6304,
+    "lod": {
+      "sha256": "4b476c23c4fb1c6ec82c8765cf900b77841456d90fb153cfd710390cf77a88f2",
+      "features": 6242,
+      "areaPixels": 102257.7421875,
+      "interior": 5656,
+      "areaQuantiles": [0.125, 0.4609375, 1.125, 2.1953125, 4.234375, 7.6875]
+    },
+    "pmtiles": {
+      "sha256": "b413fc78d5cd89a0a31ca5b7e571717413bce46563b432927dec3f6366b5fb34",
+      "features": 6332,
+      "areaPixels": 103544.1015625,
+      "interior": 5657,
+      "areaQuantiles": [0.1171875, 0.453125, 1.125, 2.203125, 4.234375, 7.7109375]
+    }
+  },
+  {
+    "name": "Kyoto",
+    "z": 14,
+    "x": 14371,
+    "y": 6489,
+    "lod": {
+      "sha256": "ddac739a2ab6b3daa5f258c168bbe21e1dac60d13102e23122ee36e681798962",
+      "features": 12994,
+      "areaPixels": 76610.359375,
+      "interior": 12321,
+      "areaQuantiles": [0.0078125, 0.3125, 0.7578125, 1.1328125, 2.0703125, 3.390625]
+    },
+    "pmtiles": {
+      "sha256": "b34a8908750f83cb4cd77516d9594a1832c47a2590a015c626df1179fad1aa65",
+      "features": 13137,
+      "areaPixels": 77622.3203125,
+      "interior": 12315,
+      "areaQuantiles": [0.0546875, 0.3125, 0.75, 1.1484375, 2.0625, 3.3984375]
+    }
+  },
+  {
+    "name": "Naha",
+    "z": 14,
+    "x": 14002,
+    "y": 6955,
+    "lod": {
+      "sha256": "8a9ca0a765238fbd915d2b0507ff5b1131ae9e4dc71b75d417842719d8009d65",
+      "features": 4725,
+      "areaPixels": 59776.4921875,
+      "interior": 4150,
+      "areaQuantiles": [0.03125, 0.765625, 2.265625, 3.1875, 4.765625, 6.8203125]
+    },
+    "pmtiles": {
+      "sha256": "f5ebf86b76756c1f413af880ffa23ea8b924a86d372724fcb8027406f40c1a4b",
+      "features": 4825,
+      "areaPixels": 60774.234375,
+      "interior": 4150,
+      "areaQuantiles": [0.0625, 0.765625, 2.25, 3.1875, 4.796875, 6.8203125]
+    }
+  },
+  {
+    "name": "Narita",
+    "z": 14,
+    "x": 14578,
+    "y": 6446,
+    "lod": {
+      "sha256": "d5e51f097b120d6bd203600edfd57b9903dd03453a749e330f2142c4c8a3fff6",
+      "features": 3765,
+      "areaPixels": 29881.6015625,
+      "interior": 3417,
+      "areaQuantiles": [0.375, 0.875, 1.5625, 2.46875, 4.421875, 5.765625]
+    },
+    "pmtiles": {
+      "sha256": "b77d3475977758b1ee5eff986cc7501d359361f55ad5bdd4714a97ec9b27e9e2",
+      "features": 3855,
+      "areaPixels": 30391.96875,
+      "interior": 3417,
+      "areaQuantiles": [0.375, 0.890625, 1.5546875, 2.4609375, 4.4296875, 5.796875]
+    }
+  },
+  {
+    "name": "rural Niigata",
+    "z": 14,
+    "x": 14507,
+    "y": 6371,
+    "lod": {
+      "sha256": "a074938bc5ca7682d3833413d37e20f8a6c4bd4110603a4ac4eefeb8216a58a6",
+      "features": 175,
+      "areaPixels": 1161.2109375,
+      "interior": 142,
+      "areaQuantiles": [0.75, 0.8984375, 1.1484375, 1.453125, 2.6015625, 5.4375]
+    },
+    "pmtiles": {
+      "sha256": "a44bd7d16da69e66f943db23f913f29bb9385df59bd09b1d5b09368600d79063",
+      "features": 181,
+      "areaPixels": 1218.5,
+      "interior": 142,
+      "areaQuantiles": [0.8125, 0.84375, 1.21875, 1.421875, 2.5390625, 5.3359375]
+    }
+  }
+]

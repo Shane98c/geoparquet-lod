@@ -18,6 +18,7 @@ if (!Number.isInteger(runs) || runs < 1 || !Number.isFinite(latency) || latency 
 const tiles = [
   [8, 139.76, 35.68, 'Tokyo metro'],
   [11, 139.76, 35.68, 'Tokyo city'],
+  [12, 139.76, 35.68, 'Tokyo district'],
   [13, 139.7, 35.66, 'Shibuya'],
   [13, 139.95, 35.45, 'Chiba'],
   [15, 139.76, 35.68, 'Tokyo station'],
