@@ -105,8 +105,11 @@ for (const sample of samples) {
   )
   const entry = { ...sample }
   delete entry.round
-  for (const key of ['readMs', 'flattenMs', 'mvtMs', 'totalMs'])
-    entry[key] = group.map((r) => r[key]).sort((a, b) => a - b)[Math.floor(group.length / 2)]
+  for (const key of ['readMs', 'flattenMs', 'mvtMs', 'totalMs']) {
+    const values = group.map((r) => r[key]).sort((a, b) => a - b)
+    entry[key] =
+      (values[Math.floor((values.length - 1) / 2)] + values[Math.floor(values.length / 2)]) / 2
+  }
   results.push(entry)
 }
 console.log(JSON.stringify({ path, baselineModule, runs: 12, results, samples }, null, 2))

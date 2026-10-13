@@ -128,6 +128,8 @@ local I/O plus CPU. The benchmark requires local paths to the same Japan
 fixtures; it never downloads data. Raw counts and all timing samples are in
 [parity-benchmark.json](parity-benchmark.json).
 
-The useful remaining experiments are eliminating the prefix/main split at
-write time, reducing MVT conversion cost, and tuning directory leaves for
-complete viewport pans. Request-count parity is not claimed by this branch.
+These measurements describe the initial `b57e6f5` experiment. The
+[single-order and rendering follow-up](parity-followup.md) tests removing the
+prefix/main split, reducing MVT conversion cost, and complete viewport pans.
+It reaches request-count parity in the six individual-tile samples, with
+remaining coarse-byte and CPU tradeoffs.

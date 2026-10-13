@@ -65,7 +65,7 @@ def _copy(src, dst, start, size):
         size -= len(data)
 
 
-def _tile_pages(parquet, group, name, lod, keys, work, target):
+def _tile_pages(parquet, group, name, lod, keys, work, target, sparse_pages):
     """Use Arrow to encode tile-aligned pages, then concatenate its temporary
     column chunks into one ordinary chunk in the original row group. Dictionary
     encoding is disabled so every page is independently decodable. Consecutive
@@ -77,6 +77,14 @@ def _tile_pages(parquet, group, name, lod, keys, work, target):
     shift = 2 * max(0, lod['key']['depth'] - max(lod['lods'][name]['zooms']))
     cells = keys >> shift
     boundaries = np.r_[0, np.flatnonzero(cells[1:] != cells[:-1]) + 1, len(keys)]
+    # A sparse overview may contain only a handful of values per 2048 source
+    # rows. Give its compression pages a useful value budget while retaining
+    # tile boundaries, the byte target, and a bounded decoded row span.
+    page_rows = 2048
+    if sparse_pages:
+        page_rows = min(
+            262144, max(page_rows, int(page_rows * len(present) / max(1, present.sum())))
+        )
     path = work / 'pages.parquet'
     with pq.ParquetWriter(
         path,
@@ -87,7 +95,7 @@ def _tile_pages(parquet, group, name, lod, keys, work, target):
         write_statistics=False,
         write_page_index=True,
         data_page_size=16384,
-        max_rows_per_page=2048,
+        max_rows_per_page=page_rows,
         write_batch_size=128,
     ) as writer:
         null_start = None
@@ -135,7 +143,7 @@ def _tile_pages(parquet, group, name, lod, keys, work, target):
     return combined, {1: (9, (12, pages))}, present
 
 
-def optimize(src, out, *, leaf_pages=1024, tile_pages=True, log=print):
+def optimize(src, out, *, leaf_pages=1024, tile_pages=True, sparse_pages=True, log=print):
     """Write a separate optimized copy, atomically. Working memory is bounded by
     one row group of LOD values plus the file's page directory and indexes; keys
     are staged in a disk mmap. Encrypted/external chunks and bloom filters are
@@ -242,7 +250,7 @@ def optimize(src, out, *, leaf_pages=1024, tile_pages=True, log=print):
                         if name and tile_pages:
                             local_keys = keys[starts[g] : starts[g] + get(group, 3)]
                             cm, index, present = _tile_pages(
-                                parquet, g, name, lod, local_keys, work, target
+                                parquet, g, name, lod, local_keys, work, target, sparse_pages
                             )
                             set_value(chunk, 3, cm)
                             set_value(chunk, 2, 0)

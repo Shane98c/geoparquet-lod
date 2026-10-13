@@ -84,6 +84,9 @@ def cli():
 )
 @click.option('--geometry', default='geometry', show_default=True)
 @click.option('--prefix-zoom', default=6, type=int, show_default=True)
+@click.option(
+    '--no-prefix', is_flag=True, help='Use one global Hilbert order for indexed-file experiments'
+)
 @click.option('--row-group-rows', default=1_048_576, type=int, show_default=True)
 @click.option('--page-bytes', default=16384, type=int, show_default=True)
 @click.option('--compression-level', default=9, type=int, show_default=True, help='zstd level')
@@ -107,6 +110,7 @@ def write_cmd(
     carry,
     geometry,
     prefix_zoom,
+    no_prefix,
     row_group_rows,
     page_bytes,
     compression_level,
@@ -131,7 +135,7 @@ def write_cmd(
         complete_from=complete_from,
         carry=carried,
         geometry=geometry,
-        prefix_zoom=prefix_zoom,
+        prefix_zoom=None if no_prefix else prefix_zoom,
         row_group_rows=row_group_rows,
         page_bytes=page_bytes,
         compression_level=compression_level,
@@ -178,8 +182,21 @@ def inspect_cmd(path):
     show_default=True,
     help='Align LOD compression pages to tile boundaries, or just relocate existing pages',
 )
-def optimize_cmd(src, out, leaf_pages, tile_pages):
+@click.option(
+    '--sparse-pages/--fixed-pages',
+    default=True,
+    show_default=True,
+    help='Size sparse LOD pages by present values, or cap all pages at 2048 source rows',
+)
+def optimize_cmd(src, out, leaf_pages, tile_pages, sparse_pages):
     """Cluster LOD pages and add a spatial directory; preserve every table value."""
     from .optimize import optimize
 
-    optimize(src, out, leaf_pages=leaf_pages, tile_pages=tile_pages, log=click.echo)
+    optimize(
+        src,
+        out,
+        leaf_pages=leaf_pages,
+        tile_pages=tile_pages,
+        sparse_pages=sparse_pages,
+        log=click.echo,
+    )

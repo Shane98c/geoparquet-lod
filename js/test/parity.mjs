@@ -11,6 +11,8 @@ if (!sourcePath || !optimizedPath || !pmPath)
   throw new Error('expected source.parquet optimized.parquet baseline.pmtiles [latency-ms]')
 const latency = Number(latencyArg)
 const runs = Number(process.env.RUNS ?? 3)
+// LAYOUTS=1 treats both Parquet arguments as indexed files, isolating layout.
+const layouts = process.env.LAYOUTS === '1'
 if (!Number.isInteger(runs) || runs < 1 || !Number.isFinite(latency) || latency < 0)
   throw new Error('invalid runs or latency')
 const tiles = [
@@ -83,8 +85,8 @@ async function source(path) {
 const results = []
 for (const [z, lon, lat, label] of tiles) {
   for (const [implementation, path] of [
-    ['original', sourcePath],
-    ['spatial', optimizedPath],
+    [layouts ? 'prefix' : 'original', sourcePath],
+    [layouts ? 'single' : 'spatial', optimizedPath],
     ['pmtiles', pmPath],
   ]) {
     for (let run = 0; run < runs; run++) {
@@ -97,7 +99,7 @@ for (const [z, lon, lat, label] of tiles) {
         nativeZoom = Math.min(z, (await archive.getHeader()).maxZoom)
         read = async (x, y) => (await archive.getZxy(nativeZoom, x, y))?.data
       } else {
-        const reader = await (implementation === 'spatial' ? openReader : LodReader.open)(
+        const reader = await (implementation === 'original' ? LodReader.open : openReader)(
           coalescing(src.file),
         )
         read = (x, y) => renderTile(reader, z, x, y, { properties: [] })

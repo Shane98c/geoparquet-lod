@@ -34,6 +34,14 @@ Expose `Content-Range` in CORS responses to avoid a separate sizing HEAD.
 `--keep-pages` isolates the effect of the directory and physical clustering;
 the default also re-encodes the LOD pages on their finest tile grid.
 
+For new indexed-file experiments, `write --no-prefix` (Python
+`prefix_zoom=None`) uses one Hilbert order. This rewrites row positions and
+remaps boundary-copy IDs. The optimizer now sizes sparse LOD pages by present
+values; `--fixed-pages` restores the 2,048-source-row cap. The reader decodes
+straight into coordinate buffers and streams MVT output. See the
+[single-order and rendering results](docs/parity-followup.md) for request parity
+in six sampled tiles, faster rendering, and the remaining coarse-zoom tradeoff.
+
 This is experimental and remains behind PMTiles in some workloads. The Japan
 measurements, tradeoffs, and reproduction commands are in
 [the parity experiment](docs/parity-experiment.md); the physical layout is in

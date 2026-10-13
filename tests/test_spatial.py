@@ -27,12 +27,14 @@ ROOT = Path(__file__).resolve().parents[1]
         ('polygon', 11, True, 16),
         ('polygon', None, True, 1),
         ('point', None, False, 16),
+        ('point', None, True, 16),
         ('line', None, True, 16),
     ],
 )
 def test_spatial_roundtrip(tmp_path, monkeypatch, family, prefix, tile_pages, leaf_pages):
     rng = np.random.default_rng(913)
-    n = 1200
+    sparse = family == 'point' and tile_pages
+    n = 12000 if sparse else 1200
     x, y = -105 + rng.random(n) * 0.25, 39.6 + rng.random(n) * 0.25
     geometry = (
         shapely.points(x, y) if family == 'point' else shapely.box(x, y, x + 0.002, y + 0.001)
@@ -74,16 +76,16 @@ def test_spatial_roundtrip(tmp_path, monkeypatch, family, prefix, tile_pages, le
         zooms=range(10, 15),
         complete_from=13,
         prefix_zoom=prefix,
-        thinning=drop_rate(2.5),
+        thinning=drop_rate(10 if sparse else 2.5),
         carry=['height', 'name'],
-        row_group_rows=256,
+        row_group_rows=n if sparse else 256,
         page_bytes=1024,
         page_rows=32,
         batch_rows=32,
         workers=1,
         log=lambda *_: None,
     )
-    if family == 'point':
+    if family == 'point' and not sparse:
         # Keep-pages must retain support for standard v2 pages through the
         # general decoder when the sparse v1/PLAIN fast path doesn't apply.
         table = pq.read_table(old)
@@ -106,6 +108,18 @@ def test_spatial_roundtrip(tmp_path, monkeypatch, family, prefix, tile_pages, le
             importlib.import_module('geoparquet_lod.optimize'), '_ROOT_TARGET_BYTES', 800
         )
     optimize(old, new, leaf_pages=leaf_pages, tile_pages=tile_pages, log=lambda *_: None)
+    if sparse:
+        raw = new.read_bytes()
+        root = json.loads(gzip.decompress(raw[16 : 16 + int.from_bytes(raw[12:16], 'little')]))
+        largest = 0
+        for sections in root['streams'].values():
+            for offset, depth, triples in sections:
+                assert depth == 0
+                for length in triples[2::3]:
+                    pages = json.loads(gzip.decompress(raw[offset : offset + length]))
+                    largest = max(largest, max(page[5] for page in pages))
+                    offset += length
+        assert largest > 2048, 'exercise sparse pages spanning many analytical rows'
     if leaf_pages == 1:
         raw = new.read_bytes()
         root = json.loads(gzip.decompress(raw[16 : 16 + int.from_bytes(raw[12:16], 'little')]))

@@ -23,12 +23,19 @@ Primary geometry and source attribute chunks are copied byte for byte. LOD
 chunks are optionally re-encoded using the original row order, nullable binary
 schema, and zstd, with page breaks at the LOD's finest tile grid. Multiple
 pages may serve a dense tile; a row-group boundary can also split a tile.
+The row cap scales with the chunk's LOD density to target 2,048 present values,
+up to 262,144 analytical rows per page, alongside the 16 KiB byte target.
+`--fixed-pages` keeps the previous 2,048-row cap. Neither changes table values.
 Runs of entirely null tiles are encoded together and omitted from the spatial
 directory. Standard offset indexes still describe every page.
 
 Every column chunk remains contiguous. Interleaving pages from different
 chunks is not part of this profile. A tile may need both the coarse-prefix
 section and the main section, so two data requests can remain necessary.
+A file written with `prefix_zoom=None` has only the main stream and can serve
+contiguous tile data in one range; row-group and directory boundaries can still
+introduce extra reads. Rewriting the logical order changes row IDs, unlike
+optimizing an existing file.
 
 ## Bootstrap
 
@@ -79,7 +86,10 @@ Read consecutive pages together. Decode the standard Parquet page with the
 root's codec and the existing required-struct/nullable-binary schema. Use the
 fences to retain own rows inside the tile interval, and the host row for its
 copies tagged with the requested tile. Keep global row indices as feature ids.
-Clipping and MVT generation use the existing renderer. The directory stores
+The reader can scan definition-level runs in v1 PLAIN pages directly and
+skip null rows, falling back to the general decoder for other encodings.
+Selected geometries decode into typed coordinate buffers; MVT generation uses
+reusable scratch buffers and retains the reference clipping behavior. The directory stores
 no geometry or styling payload and is not an MVT archive.
 
 ## Caching and analytical access
