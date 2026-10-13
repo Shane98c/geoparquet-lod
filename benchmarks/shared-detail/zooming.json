@@ -1,0 +1,1518 @@
+{
+  "baseline": "/private/tmp/japan.tippecanoe-density.spatial.parquet",
+  "shared": "/private/tmp/japan.shared-detail.spatial.parquet",
+  "runs": 5,
+  "latencyMs": 50,
+  "workers": 2,
+  "viewport": "3x3 tiles at each zoom; same center; opening excluded",
+  "results": [
+    {
+      "label": "Tokyo",
+      "variant": "baseline",
+      "phases": [
+        {
+          "z": 14,
+          "ms": 179.52354099999997,
+          "bytes": 1153113,
+          "requests": 5,
+          "hash": "1078ad5afb63ed873fdb3731b3201745f1dfa4eb776dd32495c3a2ad2f2ffd51"
+        },
+        {
+          "z": 15,
+          "ms": 6.476042000000007,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "5028fdd1de6ae46fd905358da5a0df798ebd38670b9277371ab888dec26fbb66"
+        },
+        {
+          "z": 16,
+          "ms": 108.87770799999998,
+          "bytes": 43345,
+          "requests": 4,
+          "hash": "9819ed53108f71bc93c12ad39a7c24671493d1bd2cda62854ab30376de0206a0"
+        },
+        {
+          "z": 15,
+          "ms": 6.813167000000249,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "5028fdd1de6ae46fd905358da5a0df798ebd38670b9277371ab888dec26fbb66"
+        },
+        {
+          "z": 14,
+          "ms": 26.98504200000002,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "1078ad5afb63ed873fdb3731b3201745f1dfa4eb776dd32495c3a2ad2f2ffd51"
+        }
+      ]
+    },
+    {
+      "label": "Tokyo",
+      "variant": "shared",
+      "phases": [
+        {
+          "z": 14,
+          "ms": 183.76608299999998,
+          "bytes": 1534348,
+          "requests": 5,
+          "hash": "4cecbcc992d1381bf44a3694e38f940ca6c9e47651b3e132ce2c48a74a0a5f46"
+        },
+        {
+          "z": 15,
+          "ms": 7.430582999999842,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "e823ecf02a2f912ce7a24e4d55b4669b7334d7d19e376f3f7db0965665fbd60a"
+        },
+        {
+          "z": 16,
+          "ms": 1.1725830000000315,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "9819ed53108f71bc93c12ad39a7c24671493d1bd2cda62854ab30376de0206a0"
+        },
+        {
+          "z": 15,
+          "ms": 6.150583000000097,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "e823ecf02a2f912ce7a24e4d55b4669b7334d7d19e376f3f7db0965665fbd60a"
+        },
+        {
+          "z": 14,
+          "ms": 26.701249999999845,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "4cecbcc992d1381bf44a3694e38f940ca6c9e47651b3e132ce2c48a74a0a5f46"
+        }
+      ]
+    },
+    {
+      "label": "Osaka",
+      "variant": "baseline",
+      "phases": [
+        {
+          "z": 14,
+          "ms": 186.30254100000002,
+          "bytes": 1536387,
+          "requests": 4,
+          "hash": "b72529131fbb9ad0956562c075feb1224acb332d980ae4abe1cb7d847b9bd365"
+        },
+        {
+          "z": 15,
+          "ms": 11.104041999999936,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b7ac7874e73f4ac222c7e1dd080f265762d5e32e66e49d829563e4af925f625c"
+        },
+        {
+          "z": 16,
+          "ms": 110.43370799999957,
+          "bytes": 108869,
+          "requests": 5,
+          "hash": "b3d0c4a75929daadbfd37907ed4692005465768057209289a10bd8daa20da81e"
+        },
+        {
+          "z": 15,
+          "ms": 11.546499999999469,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b7ac7874e73f4ac222c7e1dd080f265762d5e32e66e49d829563e4af925f625c"
+        },
+        {
+          "z": 14,
+          "ms": 27.446791999999732,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b72529131fbb9ad0956562c075feb1224acb332d980ae4abe1cb7d847b9bd365"
+        }
+      ]
+    },
+    {
+      "label": "Osaka",
+      "variant": "shared",
+      "phases": [
+        {
+          "z": 14,
+          "ms": 194.84845799999948,
+          "bytes": 1984742,
+          "requests": 4,
+          "hash": "672738b054b0c614428b769689b7b4063bd0a58f21ad49a9dc85003111de6d09"
+        },
+        {
+          "z": 15,
+          "ms": 12.085124999999607,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b25e2f93651609ddb9714d6814c442317c018aca91dc75a1bed9cf6c3ec36876"
+        },
+        {
+          "z": 16,
+          "ms": 3.33587499999976,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b3d0c4a75929daadbfd37907ed4692005465768057209289a10bd8daa20da81e"
+        },
+        {
+          "z": 15,
+          "ms": 10.148541999999907,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b25e2f93651609ddb9714d6814c442317c018aca91dc75a1bed9cf6c3ec36876"
+        },
+        {
+          "z": 14,
+          "ms": 30.613542000000052,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "672738b054b0c614428b769689b7b4063bd0a58f21ad49a9dc85003111de6d09"
+        }
+      ]
+    },
+    {
+      "label": "rural Niigata",
+      "variant": "baseline",
+      "phases": [
+        {
+          "z": 14,
+          "ms": 119.29508299999907,
+          "bytes": 86685,
+          "requests": 5,
+          "hash": "ae64f8e65e5c4393751e9cce86492b2fe82a43f5b541f64555398a0afdcd92c8"
+        },
+        {
+          "z": 15,
+          "ms": 1.5219170000000304,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "7dd51a2c416829459c1e8419b87102fa6036ef58d5d62bb2fc290ec3c22d31a9"
+        },
+        {
+          "z": 16,
+          "ms": 108.25062500000058,
+          "bytes": 29049,
+          "requests": 3,
+          "hash": "008e6b7763f61893557fdaf5f0a4ecff28b79a2d4436866f5c6bbaa11413a558"
+        },
+        {
+          "z": 15,
+          "ms": 1.6689169999990554,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "7dd51a2c416829459c1e8419b87102fa6036ef58d5d62bb2fc290ec3c22d31a9"
+        },
+        {
+          "z": 14,
+          "ms": 2.946750000000975,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "ae64f8e65e5c4393751e9cce86492b2fe82a43f5b541f64555398a0afdcd92c8"
+        }
+      ]
+    },
+    {
+      "label": "rural Niigata",
+      "variant": "shared",
+      "phases": [
+        {
+          "z": 14,
+          "ms": 120.08291699999972,
+          "bytes": 129567,
+          "requests": 5,
+          "hash": "1df3e2c8a5ddffd3d9e1bc900268cceb26a73b3cf0c8d96009fbf432c194dc02"
+        },
+        {
+          "z": 15,
+          "ms": 1.653667000000496,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "911e90c27f0fa34beea5d032e4665d43cacf9d37bf0233df938d5f47a43bf25e"
+        },
+        {
+          "z": 16,
+          "ms": 1.2672500000007858,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "008e6b7763f61893557fdaf5f0a4ecff28b79a2d4436866f5c6bbaa11413a558"
+        },
+        {
+          "z": 15,
+          "ms": 2.0225829999999405,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "911e90c27f0fa34beea5d032e4665d43cacf9d37bf0233df938d5f47a43bf25e"
+        },
+        {
+          "z": 14,
+          "ms": 3.0888749999994616,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "1df3e2c8a5ddffd3d9e1bc900268cceb26a73b3cf0c8d96009fbf432c194dc02"
+        }
+      ]
+    }
+  ],
+  "samples": [
+    {
+      "label": "Tokyo",
+      "variant": "baseline",
+      "run": 0,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 179.52354099999997,
+          "bytes": 1153113,
+          "requests": 5,
+          "hash": "1078ad5afb63ed873fdb3731b3201745f1dfa4eb776dd32495c3a2ad2f2ffd51"
+        },
+        {
+          "z": 15,
+          "ms": 6.476042000000007,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "5028fdd1de6ae46fd905358da5a0df798ebd38670b9277371ab888dec26fbb66"
+        },
+        {
+          "z": 16,
+          "ms": 108.6875,
+          "bytes": 43345,
+          "requests": 4,
+          "hash": "9819ed53108f71bc93c12ad39a7c24671493d1bd2cda62854ab30376de0206a0"
+        },
+        {
+          "z": 15,
+          "ms": 6.68383399999999,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "5028fdd1de6ae46fd905358da5a0df798ebd38670b9277371ab888dec26fbb66"
+        },
+        {
+          "z": 14,
+          "ms": 26.98504200000002,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "1078ad5afb63ed873fdb3731b3201745f1dfa4eb776dd32495c3a2ad2f2ffd51"
+        }
+      ]
+    },
+    {
+      "label": "Tokyo",
+      "variant": "shared",
+      "run": 0,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 185.05345799999998,
+          "bytes": 1534348,
+          "requests": 5,
+          "hash": "4cecbcc992d1381bf44a3694e38f940ca6c9e47651b3e132ce2c48a74a0a5f46"
+        },
+        {
+          "z": 15,
+          "ms": 7.589999999999918,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "e823ecf02a2f912ce7a24e4d55b4669b7334d7d19e376f3f7db0965665fbd60a"
+        },
+        {
+          "z": 16,
+          "ms": 1.55662499999994,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "9819ed53108f71bc93c12ad39a7c24671493d1bd2cda62854ab30376de0206a0"
+        },
+        {
+          "z": 15,
+          "ms": 6.975915999999984,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "e823ecf02a2f912ce7a24e4d55b4669b7334d7d19e376f3f7db0965665fbd60a"
+        },
+        {
+          "z": 14,
+          "ms": 26.989750000000072,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "4cecbcc992d1381bf44a3694e38f940ca6c9e47651b3e132ce2c48a74a0a5f46"
+        }
+      ]
+    },
+    {
+      "label": "Tokyo",
+      "variant": "shared",
+      "run": 1,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 180.29075,
+          "bytes": 1534348,
+          "requests": 5,
+          "hash": "4cecbcc992d1381bf44a3694e38f940ca6c9e47651b3e132ce2c48a74a0a5f46"
+        },
+        {
+          "z": 15,
+          "ms": 7.1841249999999945,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "e823ecf02a2f912ce7a24e4d55b4669b7334d7d19e376f3f7db0965665fbd60a"
+        },
+        {
+          "z": 16,
+          "ms": 1.1321250000000873,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "9819ed53108f71bc93c12ad39a7c24671493d1bd2cda62854ab30376de0206a0"
+        },
+        {
+          "z": 15,
+          "ms": 6.014750000000049,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "e823ecf02a2f912ce7a24e4d55b4669b7334d7d19e376f3f7db0965665fbd60a"
+        },
+        {
+          "z": 14,
+          "ms": 26.701249999999845,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "4cecbcc992d1381bf44a3694e38f940ca6c9e47651b3e132ce2c48a74a0a5f46"
+        }
+      ]
+    },
+    {
+      "label": "Tokyo",
+      "variant": "baseline",
+      "run": 1,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 179.92983400000003,
+          "bytes": 1153113,
+          "requests": 5,
+          "hash": "1078ad5afb63ed873fdb3731b3201745f1dfa4eb776dd32495c3a2ad2f2ffd51"
+        },
+        {
+          "z": 15,
+          "ms": 6.206208999999944,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "5028fdd1de6ae46fd905358da5a0df798ebd38670b9277371ab888dec26fbb66"
+        },
+        {
+          "z": 16,
+          "ms": 110.12316699999997,
+          "bytes": 43345,
+          "requests": 4,
+          "hash": "9819ed53108f71bc93c12ad39a7c24671493d1bd2cda62854ab30376de0206a0"
+        },
+        {
+          "z": 15,
+          "ms": 7.77924999999982,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "5028fdd1de6ae46fd905358da5a0df798ebd38670b9277371ab888dec26fbb66"
+        },
+        {
+          "z": 14,
+          "ms": 28.869625000000042,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "1078ad5afb63ed873fdb3731b3201745f1dfa4eb776dd32495c3a2ad2f2ffd51"
+        }
+      ]
+    },
+    {
+      "label": "Tokyo",
+      "variant": "baseline",
+      "run": 2,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 177.10120800000004,
+          "bytes": 1153113,
+          "requests": 5,
+          "hash": "1078ad5afb63ed873fdb3731b3201745f1dfa4eb776dd32495c3a2ad2f2ffd51"
+        },
+        {
+          "z": 15,
+          "ms": 6.34962500000006,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "5028fdd1de6ae46fd905358da5a0df798ebd38670b9277371ab888dec26fbb66"
+        },
+        {
+          "z": 16,
+          "ms": 108.35591599999998,
+          "bytes": 43345,
+          "requests": 4,
+          "hash": "9819ed53108f71bc93c12ad39a7c24671493d1bd2cda62854ab30376de0206a0"
+        },
+        {
+          "z": 15,
+          "ms": 9.64145899999994,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "5028fdd1de6ae46fd905358da5a0df798ebd38670b9277371ab888dec26fbb66"
+        },
+        {
+          "z": 14,
+          "ms": 29.202541999999994,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "1078ad5afb63ed873fdb3731b3201745f1dfa4eb776dd32495c3a2ad2f2ffd51"
+        }
+      ]
+    },
+    {
+      "label": "Tokyo",
+      "variant": "shared",
+      "run": 2,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 178.71762500000023,
+          "bytes": 1534348,
+          "requests": 5,
+          "hash": "4cecbcc992d1381bf44a3694e38f940ca6c9e47651b3e132ce2c48a74a0a5f46"
+        },
+        {
+          "z": 15,
+          "ms": 7.430582999999842,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "e823ecf02a2f912ce7a24e4d55b4669b7334d7d19e376f3f7db0965665fbd60a"
+        },
+        {
+          "z": 16,
+          "ms": 1.280334000000039,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "9819ed53108f71bc93c12ad39a7c24671493d1bd2cda62854ab30376de0206a0"
+        },
+        {
+          "z": 15,
+          "ms": 6.07616599999983,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "e823ecf02a2f912ce7a24e4d55b4669b7334d7d19e376f3f7db0965665fbd60a"
+        },
+        {
+          "z": 14,
+          "ms": 26.814834000000246,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "4cecbcc992d1381bf44a3694e38f940ca6c9e47651b3e132ce2c48a74a0a5f46"
+        }
+      ]
+    },
+    {
+      "label": "Tokyo",
+      "variant": "shared",
+      "run": 3,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 187.10154199999988,
+          "bytes": 1534348,
+          "requests": 5,
+          "hash": "4cecbcc992d1381bf44a3694e38f940ca6c9e47651b3e132ce2c48a74a0a5f46"
+        },
+        {
+          "z": 15,
+          "ms": 7.609334000000217,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "e823ecf02a2f912ce7a24e4d55b4669b7334d7d19e376f3f7db0965665fbd60a"
+        },
+        {
+          "z": 16,
+          "ms": 1.1725830000000315,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "9819ed53108f71bc93c12ad39a7c24671493d1bd2cda62854ab30376de0206a0"
+        },
+        {
+          "z": 15,
+          "ms": 6.150583000000097,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "e823ecf02a2f912ce7a24e4d55b4669b7334d7d19e376f3f7db0965665fbd60a"
+        },
+        {
+          "z": 14,
+          "ms": 26.228375000000142,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "4cecbcc992d1381bf44a3694e38f940ca6c9e47651b3e132ce2c48a74a0a5f46"
+        }
+      ]
+    },
+    {
+      "label": "Tokyo",
+      "variant": "baseline",
+      "run": 3,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 177.95658299999968,
+          "bytes": 1153113,
+          "requests": 5,
+          "hash": "1078ad5afb63ed873fdb3731b3201745f1dfa4eb776dd32495c3a2ad2f2ffd51"
+        },
+        {
+          "z": 15,
+          "ms": 6.962083000000348,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "5028fdd1de6ae46fd905358da5a0df798ebd38670b9277371ab888dec26fbb66"
+        },
+        {
+          "z": 16,
+          "ms": 108.87770799999998,
+          "bytes": 43345,
+          "requests": 4,
+          "hash": "9819ed53108f71bc93c12ad39a7c24671493d1bd2cda62854ab30376de0206a0"
+        },
+        {
+          "z": 15,
+          "ms": 5.748999999999796,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "5028fdd1de6ae46fd905358da5a0df798ebd38670b9277371ab888dec26fbb66"
+        },
+        {
+          "z": 14,
+          "ms": 23.739458000000013,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "1078ad5afb63ed873fdb3731b3201745f1dfa4eb776dd32495c3a2ad2f2ffd51"
+        }
+      ]
+    },
+    {
+      "label": "Tokyo",
+      "variant": "baseline",
+      "run": 4,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 180.71533399999998,
+          "bytes": 1153113,
+          "requests": 5,
+          "hash": "1078ad5afb63ed873fdb3731b3201745f1dfa4eb776dd32495c3a2ad2f2ffd51"
+        },
+        {
+          "z": 15,
+          "ms": 7.114374999999654,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "5028fdd1de6ae46fd905358da5a0df798ebd38670b9277371ab888dec26fbb66"
+        },
+        {
+          "z": 16,
+          "ms": 109.89170800000011,
+          "bytes": 43345,
+          "requests": 4,
+          "hash": "9819ed53108f71bc93c12ad39a7c24671493d1bd2cda62854ab30376de0206a0"
+        },
+        {
+          "z": 15,
+          "ms": 6.813167000000249,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "5028fdd1de6ae46fd905358da5a0df798ebd38670b9277371ab888dec26fbb66"
+        },
+        {
+          "z": 14,
+          "ms": 25.577374999999847,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "1078ad5afb63ed873fdb3731b3201745f1dfa4eb776dd32495c3a2ad2f2ffd51"
+        }
+      ]
+    },
+    {
+      "label": "Tokyo",
+      "variant": "shared",
+      "run": 4,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 183.76608299999998,
+          "bytes": 1534348,
+          "requests": 5,
+          "hash": "4cecbcc992d1381bf44a3694e38f940ca6c9e47651b3e132ce2c48a74a0a5f46"
+        },
+        {
+          "z": 15,
+          "ms": 7.211709000000155,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "e823ecf02a2f912ce7a24e4d55b4669b7334d7d19e376f3f7db0965665fbd60a"
+        },
+        {
+          "z": 16,
+          "ms": 1.168833000000177,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "9819ed53108f71bc93c12ad39a7c24671493d1bd2cda62854ab30376de0206a0"
+        },
+        {
+          "z": 15,
+          "ms": 6.273290999999972,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "e823ecf02a2f912ce7a24e4d55b4669b7334d7d19e376f3f7db0965665fbd60a"
+        },
+        {
+          "z": 14,
+          "ms": 26.437708999999813,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "4cecbcc992d1381bf44a3694e38f940ca6c9e47651b3e132ce2c48a74a0a5f46"
+        }
+      ]
+    },
+    {
+      "label": "Osaka",
+      "variant": "baseline",
+      "run": 0,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 191.2424170000004,
+          "bytes": 1536387,
+          "requests": 4,
+          "hash": "b72529131fbb9ad0956562c075feb1224acb332d980ae4abe1cb7d847b9bd365"
+        },
+        {
+          "z": 15,
+          "ms": 11.143459000000348,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b7ac7874e73f4ac222c7e1dd080f265762d5e32e66e49d829563e4af925f625c"
+        },
+        {
+          "z": 16,
+          "ms": 111.08312500000011,
+          "bytes": 108869,
+          "requests": 5,
+          "hash": "b3d0c4a75929daadbfd37907ed4692005465768057209289a10bd8daa20da81e"
+        },
+        {
+          "z": 15,
+          "ms": 10.457000000000335,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b7ac7874e73f4ac222c7e1dd080f265762d5e32e66e49d829563e4af925f625c"
+        },
+        {
+          "z": 14,
+          "ms": 27.07329100000061,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b72529131fbb9ad0956562c075feb1224acb332d980ae4abe1cb7d847b9bd365"
+        }
+      ]
+    },
+    {
+      "label": "Osaka",
+      "variant": "shared",
+      "run": 0,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 188.61970800000017,
+          "bytes": 1984742,
+          "requests": 4,
+          "hash": "672738b054b0c614428b769689b7b4063bd0a58f21ad49a9dc85003111de6d09"
+        },
+        {
+          "z": 15,
+          "ms": 12.45508399999926,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b25e2f93651609ddb9714d6814c442317c018aca91dc75a1bed9cf6c3ec36876"
+        },
+        {
+          "z": 16,
+          "ms": 3.448333000000275,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b3d0c4a75929daadbfd37907ed4692005465768057209289a10bd8daa20da81e"
+        },
+        {
+          "z": 15,
+          "ms": 10.148541999999907,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b25e2f93651609ddb9714d6814c442317c018aca91dc75a1bed9cf6c3ec36876"
+        },
+        {
+          "z": 14,
+          "ms": 31.419834000000264,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "672738b054b0c614428b769689b7b4063bd0a58f21ad49a9dc85003111de6d09"
+        }
+      ]
+    },
+    {
+      "label": "Osaka",
+      "variant": "shared",
+      "run": 1,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 193.92941599999995,
+          "bytes": 1984742,
+          "requests": 4,
+          "hash": "672738b054b0c614428b769689b7b4063bd0a58f21ad49a9dc85003111de6d09"
+        },
+        {
+          "z": 15,
+          "ms": 11.983375000000706,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b25e2f93651609ddb9714d6814c442317c018aca91dc75a1bed9cf6c3ec36876"
+        },
+        {
+          "z": 16,
+          "ms": 3.217083999999886,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b3d0c4a75929daadbfd37907ed4692005465768057209289a10bd8daa20da81e"
+        },
+        {
+          "z": 15,
+          "ms": 9.953625000000102,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b25e2f93651609ddb9714d6814c442317c018aca91dc75a1bed9cf6c3ec36876"
+        },
+        {
+          "z": 14,
+          "ms": 31.367333000000144,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "672738b054b0c614428b769689b7b4063bd0a58f21ad49a9dc85003111de6d09"
+        }
+      ]
+    },
+    {
+      "label": "Osaka",
+      "variant": "baseline",
+      "run": 1,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 186.25970899999993,
+          "bytes": 1536387,
+          "requests": 4,
+          "hash": "b72529131fbb9ad0956562c075feb1224acb332d980ae4abe1cb7d847b9bd365"
+        },
+        {
+          "z": 15,
+          "ms": 10.056832999999642,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b7ac7874e73f4ac222c7e1dd080f265762d5e32e66e49d829563e4af925f625c"
+        },
+        {
+          "z": 16,
+          "ms": 110.43370799999957,
+          "bytes": 108869,
+          "requests": 5,
+          "hash": "b3d0c4a75929daadbfd37907ed4692005465768057209289a10bd8daa20da81e"
+        },
+        {
+          "z": 15,
+          "ms": 11.572833000000173,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b7ac7874e73f4ac222c7e1dd080f265762d5e32e66e49d829563e4af925f625c"
+        },
+        {
+          "z": 14,
+          "ms": 31.71466700000019,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b72529131fbb9ad0956562c075feb1224acb332d980ae4abe1cb7d847b9bd365"
+        }
+      ]
+    },
+    {
+      "label": "Osaka",
+      "variant": "baseline",
+      "run": 2,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 186.30254100000002,
+          "bytes": 1536387,
+          "requests": 4,
+          "hash": "b72529131fbb9ad0956562c075feb1224acb332d980ae4abe1cb7d847b9bd365"
+        },
+        {
+          "z": 15,
+          "ms": 14.955582999999933,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b7ac7874e73f4ac222c7e1dd080f265762d5e32e66e49d829563e4af925f625c"
+        },
+        {
+          "z": 16,
+          "ms": 110.23566699999992,
+          "bytes": 108869,
+          "requests": 5,
+          "hash": "b3d0c4a75929daadbfd37907ed4692005465768057209289a10bd8daa20da81e"
+        },
+        {
+          "z": 15,
+          "ms": 11.546499999999469,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b7ac7874e73f4ac222c7e1dd080f265762d5e32e66e49d829563e4af925f625c"
+        },
+        {
+          "z": 14,
+          "ms": 27.08770900000036,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b72529131fbb9ad0956562c075feb1224acb332d980ae4abe1cb7d847b9bd365"
+        }
+      ]
+    },
+    {
+      "label": "Osaka",
+      "variant": "shared",
+      "run": 2,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 206.72220800000014,
+          "bytes": 1984742,
+          "requests": 4,
+          "hash": "672738b054b0c614428b769689b7b4063bd0a58f21ad49a9dc85003111de6d09"
+        },
+        {
+          "z": 15,
+          "ms": 12.085124999999607,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b25e2f93651609ddb9714d6814c442317c018aca91dc75a1bed9cf6c3ec36876"
+        },
+        {
+          "z": 16,
+          "ms": 3.4154170000001614,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b3d0c4a75929daadbfd37907ed4692005465768057209289a10bd8daa20da81e"
+        },
+        {
+          "z": 15,
+          "ms": 10.488459000000148,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b25e2f93651609ddb9714d6814c442317c018aca91dc75a1bed9cf6c3ec36876"
+        },
+        {
+          "z": 14,
+          "ms": 30.5323329999992,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "672738b054b0c614428b769689b7b4063bd0a58f21ad49a9dc85003111de6d09"
+        }
+      ]
+    },
+    {
+      "label": "Osaka",
+      "variant": "shared",
+      "run": 3,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 199.21670799999993,
+          "bytes": 1984742,
+          "requests": 4,
+          "hash": "672738b054b0c614428b769689b7b4063bd0a58f21ad49a9dc85003111de6d09"
+        },
+        {
+          "z": 15,
+          "ms": 12.070083999999952,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b25e2f93651609ddb9714d6814c442317c018aca91dc75a1bed9cf6c3ec36876"
+        },
+        {
+          "z": 16,
+          "ms": 3.33587499999976,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b3d0c4a75929daadbfd37907ed4692005465768057209289a10bd8daa20da81e"
+        },
+        {
+          "z": 15,
+          "ms": 10.342500000000655,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b25e2f93651609ddb9714d6814c442317c018aca91dc75a1bed9cf6c3ec36876"
+        },
+        {
+          "z": 14,
+          "ms": 30.094583000000057,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "672738b054b0c614428b769689b7b4063bd0a58f21ad49a9dc85003111de6d09"
+        }
+      ]
+    },
+    {
+      "label": "Osaka",
+      "variant": "baseline",
+      "run": 3,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 188.94062500000018,
+          "bytes": 1536387,
+          "requests": 4,
+          "hash": "b72529131fbb9ad0956562c075feb1224acb332d980ae4abe1cb7d847b9bd365"
+        },
+        {
+          "z": 15,
+          "ms": 11.104041999999936,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b7ac7874e73f4ac222c7e1dd080f265762d5e32e66e49d829563e4af925f625c"
+        },
+        {
+          "z": 16,
+          "ms": 112.09529199999997,
+          "bytes": 108869,
+          "requests": 5,
+          "hash": "b3d0c4a75929daadbfd37907ed4692005465768057209289a10bd8daa20da81e"
+        },
+        {
+          "z": 15,
+          "ms": 11.952000000000226,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b7ac7874e73f4ac222c7e1dd080f265762d5e32e66e49d829563e4af925f625c"
+        },
+        {
+          "z": 14,
+          "ms": 30.57916699999987,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b72529131fbb9ad0956562c075feb1224acb332d980ae4abe1cb7d847b9bd365"
+        }
+      ]
+    },
+    {
+      "label": "Osaka",
+      "variant": "baseline",
+      "run": 4,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 179.671292,
+          "bytes": 1536387,
+          "requests": 4,
+          "hash": "b72529131fbb9ad0956562c075feb1224acb332d980ae4abe1cb7d847b9bd365"
+        },
+        {
+          "z": 15,
+          "ms": 10.039291999999477,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b7ac7874e73f4ac222c7e1dd080f265762d5e32e66e49d829563e4af925f625c"
+        },
+        {
+          "z": 16,
+          "ms": 108.73404200000004,
+          "bytes": 108869,
+          "requests": 5,
+          "hash": "b3d0c4a75929daadbfd37907ed4692005465768057209289a10bd8daa20da81e"
+        },
+        {
+          "z": 15,
+          "ms": 10.007792000000336,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b7ac7874e73f4ac222c7e1dd080f265762d5e32e66e49d829563e4af925f625c"
+        },
+        {
+          "z": 14,
+          "ms": 27.446791999999732,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b72529131fbb9ad0956562c075feb1224acb332d980ae4abe1cb7d847b9bd365"
+        }
+      ]
+    },
+    {
+      "label": "Osaka",
+      "variant": "shared",
+      "run": 4,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 194.84845799999948,
+          "bytes": 1984742,
+          "requests": 4,
+          "hash": "672738b054b0c614428b769689b7b4063bd0a58f21ad49a9dc85003111de6d09"
+        },
+        {
+          "z": 15,
+          "ms": 12.428458000000319,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b25e2f93651609ddb9714d6814c442317c018aca91dc75a1bed9cf6c3ec36876"
+        },
+        {
+          "z": 16,
+          "ms": 3.2480829999994967,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b3d0c4a75929daadbfd37907ed4692005465768057209289a10bd8daa20da81e"
+        },
+        {
+          "z": 15,
+          "ms": 9.78583399999934,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "b25e2f93651609ddb9714d6814c442317c018aca91dc75a1bed9cf6c3ec36876"
+        },
+        {
+          "z": 14,
+          "ms": 30.613542000000052,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "672738b054b0c614428b769689b7b4063bd0a58f21ad49a9dc85003111de6d09"
+        }
+      ]
+    },
+    {
+      "label": "rural Niigata",
+      "variant": "baseline",
+      "run": 0,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 116.74533299999985,
+          "bytes": 86685,
+          "requests": 5,
+          "hash": "ae64f8e65e5c4393751e9cce86492b2fe82a43f5b541f64555398a0afdcd92c8"
+        },
+        {
+          "z": 15,
+          "ms": 1.4402499999996508,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "7dd51a2c416829459c1e8419b87102fa6036ef58d5d62bb2fc290ec3c22d31a9"
+        },
+        {
+          "z": 16,
+          "ms": 106.67604099999971,
+          "bytes": 29049,
+          "requests": 3,
+          "hash": "008e6b7763f61893557fdaf5f0a4ecff28b79a2d4436866f5c6bbaa11413a558"
+        },
+        {
+          "z": 15,
+          "ms": 1.7910839999995005,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "7dd51a2c416829459c1e8419b87102fa6036ef58d5d62bb2fc290ec3c22d31a9"
+        },
+        {
+          "z": 14,
+          "ms": 3.143540999999459,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "ae64f8e65e5c4393751e9cce86492b2fe82a43f5b541f64555398a0afdcd92c8"
+        }
+      ]
+    },
+    {
+      "label": "rural Niigata",
+      "variant": "shared",
+      "run": 0,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 121.36770900000101,
+          "bytes": 129567,
+          "requests": 5,
+          "hash": "1df3e2c8a5ddffd3d9e1bc900268cceb26a73b3cf0c8d96009fbf432c194dc02"
+        },
+        {
+          "z": 15,
+          "ms": 1.653667000000496,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "911e90c27f0fa34beea5d032e4665d43cacf9d37bf0233df938d5f47a43bf25e"
+        },
+        {
+          "z": 16,
+          "ms": 1.0259580000001733,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "008e6b7763f61893557fdaf5f0a4ecff28b79a2d4436866f5c6bbaa11413a558"
+        },
+        {
+          "z": 15,
+          "ms": 2.299957999999606,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "911e90c27f0fa34beea5d032e4665d43cacf9d37bf0233df938d5f47a43bf25e"
+        },
+        {
+          "z": 14,
+          "ms": 3.440500000000611,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "1df3e2c8a5ddffd3d9e1bc900268cceb26a73b3cf0c8d96009fbf432c194dc02"
+        }
+      ]
+    },
+    {
+      "label": "rural Niigata",
+      "variant": "shared",
+      "run": 1,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 120.08291699999972,
+          "bytes": 129567,
+          "requests": 5,
+          "hash": "1df3e2c8a5ddffd3d9e1bc900268cceb26a73b3cf0c8d96009fbf432c194dc02"
+        },
+        {
+          "z": 15,
+          "ms": 1.716167000000496,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "911e90c27f0fa34beea5d032e4665d43cacf9d37bf0233df938d5f47a43bf25e"
+        },
+        {
+          "z": 16,
+          "ms": 0.9765000000006694,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "008e6b7763f61893557fdaf5f0a4ecff28b79a2d4436866f5c6bbaa11413a558"
+        },
+        {
+          "z": 15,
+          "ms": 1.91320899999846,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "911e90c27f0fa34beea5d032e4665d43cacf9d37bf0233df938d5f47a43bf25e"
+        },
+        {
+          "z": 14,
+          "ms": 3.498541999999361,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "1df3e2c8a5ddffd3d9e1bc900268cceb26a73b3cf0c8d96009fbf432c194dc02"
+        }
+      ]
+    },
+    {
+      "label": "rural Niigata",
+      "variant": "baseline",
+      "run": 1,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 119.29508299999907,
+          "bytes": 86685,
+          "requests": 5,
+          "hash": "ae64f8e65e5c4393751e9cce86492b2fe82a43f5b541f64555398a0afdcd92c8"
+        },
+        {
+          "z": 15,
+          "ms": 1.444999999999709,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "7dd51a2c416829459c1e8419b87102fa6036ef58d5d62bb2fc290ec3c22d31a9"
+        },
+        {
+          "z": 16,
+          "ms": 106.5187909999986,
+          "bytes": 29049,
+          "requests": 3,
+          "hash": "008e6b7763f61893557fdaf5f0a4ecff28b79a2d4436866f5c6bbaa11413a558"
+        },
+        {
+          "z": 15,
+          "ms": 1.8261670000010781,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "7dd51a2c416829459c1e8419b87102fa6036ef58d5d62bb2fc290ec3c22d31a9"
+        },
+        {
+          "z": 14,
+          "ms": 3.983250000001135,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "ae64f8e65e5c4393751e9cce86492b2fe82a43f5b541f64555398a0afdcd92c8"
+        }
+      ]
+    },
+    {
+      "label": "rural Niigata",
+      "variant": "baseline",
+      "run": 2,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 121.65745900000002,
+          "bytes": 86685,
+          "requests": 5,
+          "hash": "ae64f8e65e5c4393751e9cce86492b2fe82a43f5b541f64555398a0afdcd92c8"
+        },
+        {
+          "z": 15,
+          "ms": 2.2449999999989814,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "7dd51a2c416829459c1e8419b87102fa6036ef58d5d62bb2fc290ec3c22d31a9"
+        },
+        {
+          "z": 16,
+          "ms": 109.62112499999967,
+          "bytes": 29049,
+          "requests": 3,
+          "hash": "008e6b7763f61893557fdaf5f0a4ecff28b79a2d4436866f5c6bbaa11413a558"
+        },
+        {
+          "z": 15,
+          "ms": 1.5292090000002645,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "7dd51a2c416829459c1e8419b87102fa6036ef58d5d62bb2fc290ec3c22d31a9"
+        },
+        {
+          "z": 14,
+          "ms": 2.094875000000684,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "ae64f8e65e5c4393751e9cce86492b2fe82a43f5b541f64555398a0afdcd92c8"
+        }
+      ]
+    },
+    {
+      "label": "rural Niigata",
+      "variant": "shared",
+      "run": 2,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 121.18333299999904,
+          "bytes": 129567,
+          "requests": 5,
+          "hash": "1df3e2c8a5ddffd3d9e1bc900268cceb26a73b3cf0c8d96009fbf432c194dc02"
+        },
+        {
+          "z": 15,
+          "ms": 1.568333999999595,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "911e90c27f0fa34beea5d032e4665d43cacf9d37bf0233df938d5f47a43bf25e"
+        },
+        {
+          "z": 16,
+          "ms": 1.389500000001135,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "008e6b7763f61893557fdaf5f0a4ecff28b79a2d4436866f5c6bbaa11413a558"
+        },
+        {
+          "z": 15,
+          "ms": 2.2577499999988504,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "911e90c27f0fa34beea5d032e4665d43cacf9d37bf0233df938d5f47a43bf25e"
+        },
+        {
+          "z": 14,
+          "ms": 3.0888749999994616,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "1df3e2c8a5ddffd3d9e1bc900268cceb26a73b3cf0c8d96009fbf432c194dc02"
+        }
+      ]
+    },
+    {
+      "label": "rural Niigata",
+      "variant": "shared",
+      "run": 3,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 119.29420899999968,
+          "bytes": 129567,
+          "requests": 5,
+          "hash": "1df3e2c8a5ddffd3d9e1bc900268cceb26a73b3cf0c8d96009fbf432c194dc02"
+        },
+        {
+          "z": 15,
+          "ms": 1.772041000000172,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "911e90c27f0fa34beea5d032e4665d43cacf9d37bf0233df938d5f47a43bf25e"
+        },
+        {
+          "z": 16,
+          "ms": 1.6659999999992579,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "008e6b7763f61893557fdaf5f0a4ecff28b79a2d4436866f5c6bbaa11413a558"
+        },
+        {
+          "z": 15,
+          "ms": 2.0225829999999405,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "911e90c27f0fa34beea5d032e4665d43cacf9d37bf0233df938d5f47a43bf25e"
+        },
+        {
+          "z": 14,
+          "ms": 2.7820000000010623,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "1df3e2c8a5ddffd3d9e1bc900268cceb26a73b3cf0c8d96009fbf432c194dc02"
+        }
+      ]
+    },
+    {
+      "label": "rural Niigata",
+      "variant": "baseline",
+      "run": 3,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 121.2515000000003,
+          "bytes": 86685,
+          "requests": 5,
+          "hash": "ae64f8e65e5c4393751e9cce86492b2fe82a43f5b541f64555398a0afdcd92c8"
+        },
+        {
+          "z": 15,
+          "ms": 2.227500000000873,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "7dd51a2c416829459c1e8419b87102fa6036ef58d5d62bb2fc290ec3c22d31a9"
+        },
+        {
+          "z": 16,
+          "ms": 108.25062500000058,
+          "bytes": 29049,
+          "requests": 3,
+          "hash": "008e6b7763f61893557fdaf5f0a4ecff28b79a2d4436866f5c6bbaa11413a558"
+        },
+        {
+          "z": 15,
+          "ms": 1.1662080000005517,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "7dd51a2c416829459c1e8419b87102fa6036ef58d5d62bb2fc290ec3c22d31a9"
+        },
+        {
+          "z": 14,
+          "ms": 2.404583999999886,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "ae64f8e65e5c4393751e9cce86492b2fe82a43f5b541f64555398a0afdcd92c8"
+        }
+      ]
+    },
+    {
+      "label": "rural Niigata",
+      "variant": "baseline",
+      "run": 4,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 118.38191700000061,
+          "bytes": 86685,
+          "requests": 5,
+          "hash": "ae64f8e65e5c4393751e9cce86492b2fe82a43f5b541f64555398a0afdcd92c8"
+        },
+        {
+          "z": 15,
+          "ms": 1.5219170000000304,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "7dd51a2c416829459c1e8419b87102fa6036ef58d5d62bb2fc290ec3c22d31a9"
+        },
+        {
+          "z": 16,
+          "ms": 110.25012499999866,
+          "bytes": 29049,
+          "requests": 3,
+          "hash": "008e6b7763f61893557fdaf5f0a4ecff28b79a2d4436866f5c6bbaa11413a558"
+        },
+        {
+          "z": 15,
+          "ms": 1.6689169999990554,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "7dd51a2c416829459c1e8419b87102fa6036ef58d5d62bb2fc290ec3c22d31a9"
+        },
+        {
+          "z": 14,
+          "ms": 2.946750000000975,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "ae64f8e65e5c4393751e9cce86492b2fe82a43f5b541f64555398a0afdcd92c8"
+        }
+      ]
+    },
+    {
+      "label": "rural Niigata",
+      "variant": "shared",
+      "run": 4,
+      "phases": [
+        {
+          "z": 14,
+          "ms": 117.92391700000007,
+          "bytes": 129567,
+          "requests": 5,
+          "hash": "1df3e2c8a5ddffd3d9e1bc900268cceb26a73b3cf0c8d96009fbf432c194dc02"
+        },
+        {
+          "z": 15,
+          "ms": 1.5355840000011085,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "911e90c27f0fa34beea5d032e4665d43cacf9d37bf0233df938d5f47a43bf25e"
+        },
+        {
+          "z": 16,
+          "ms": 1.2672500000007858,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "008e6b7763f61893557fdaf5f0a4ecff28b79a2d4436866f5c6bbaa11413a558"
+        },
+        {
+          "z": 15,
+          "ms": 1.7061670000002778,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "911e90c27f0fa34beea5d032e4665d43cacf9d37bf0233df938d5f47a43bf25e"
+        },
+        {
+          "z": 14,
+          "ms": 2.4030840000013995,
+          "bytes": 0,
+          "requests": 0,
+          "hash": "1df3e2c8a5ddffd3d9e1bc900268cceb26a73b3cf0c8d96009fbf432c194dc02"
+        }
+      ]
+    }
+  ]
+}

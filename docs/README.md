@@ -14,6 +14,10 @@ Start with the [project overview](../README.md), [usage guide](usage.md),
   not yet the dataset on the hosted page. Reproduction uses
   `benchmarks/write-japan-tippecanoe.py` and `js/test/dropping-profile.mjs`.
 
+- [Shared detailed levels](shared-detail.md): a separate storage tradeoff; saves
+  817 MB, increases cold-detail transfer, and reuses pages while zooming in.
+  The density file remains the preferred map-transfer baseline.
+
 ## Design history
 
 These reports describe the implementation at the time of each experiment.
