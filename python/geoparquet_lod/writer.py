@@ -884,9 +884,11 @@ def write(
             log(f'  {row_groups} row groups, {time.time() - t0:.0f}s')
 
     def write_rows(where: str):
+        # Match file_pos: equal Hilbert keys retain source-id order. Without
+        # this tie-break, a boundary copy can point at a different source row.
         reader = con.execute(f"""
             SELECT s.*, r.levels AS __levels FROM '{sorted_path}' s JOIN rows r ON r.id = s.__id
-            WHERE {where} ORDER BY s.__h
+            WHERE {where} ORDER BY s.__h NULLS LAST, s.__id
         """).to_arrow_reader(row_group_rows)
         pending = []
         for batch in reader:
