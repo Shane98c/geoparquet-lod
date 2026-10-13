@@ -1,0 +1,6038 @@
+{
+  "config": {
+    "runs": 3,
+    "delay": 50,
+    "concurrency": 6,
+    "maxGap": 8192,
+    "nativeFile": "/private/tmp/claude-501/-Users-shaneloeffler-dev-carbonplan-geoparquet-lod/d381515f-9625-4789-8845-832ecdedf85f/scratchpad/japan/japan_buildings.cogp.parquet",
+    "packedFile": "/private/tmp/cogp-japan-packed-v2.parquet",
+    "directory": "/private/tmp/cogp-japan-packed-v2.cidx",
+    "oursFile": "/private/tmp/japan.single-64k.spatial.parquet"
+  },
+  "results": [
+    {
+      "variant": "native",
+      "run": 0,
+      "z": 8,
+      "phase": "cold",
+      "ms": 231.771,
+      "openMs": 140.30183399999999,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 8,
+        "completed": 8,
+        "aborted": 0,
+        "bytes": 196347
+      },
+      "initialMs": 372.07283399999994,
+      "features": 1885
+    },
+    {
+      "variant": "native",
+      "run": 0,
+      "z": 8,
+      "phase": "pan",
+      "ms": 26.54920800000002,
+      "openMs": 140.30183399999999,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1526
+    },
+    {
+      "variant": "native",
+      "run": 0,
+      "z": 8,
+      "phase": "style",
+      "ms": 132.59408299999996,
+      "openMs": 140.30183399999999,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 4,
+        "completed": 4,
+        "aborted": 0,
+        "bytes": 2492
+      },
+      "features": 1526
+    },
+    {
+      "variant": "native",
+      "run": 0,
+      "z": 8,
+      "phase": "repeat",
+      "ms": 44.41512499999999,
+      "openMs": 140.30183399999999,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1526
+    },
+    {
+      "variant": "indexed",
+      "run": 0,
+      "z": 8,
+      "phase": "cold",
+      "ms": 220.38158399999998,
+      "openMs": 70.99037499999997,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 7,
+        "completed": 7,
+        "aborted": 0,
+        "bytes": 201815
+      },
+      "initialMs": 291.37195899999995,
+      "features": 1885
+    },
+    {
+      "variant": "indexed",
+      "run": 0,
+      "z": 8,
+      "phase": "pan",
+      "ms": 35.01299999999992,
+      "openMs": 70.99037499999997,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1526
+    },
+    {
+      "variant": "indexed",
+      "run": 0,
+      "z": 8,
+      "phase": "style",
+      "ms": 83.52216600000008,
+      "openMs": 70.99037499999997,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 2366
+      },
+      "features": 1526
+    },
+    {
+      "variant": "indexed",
+      "run": 0,
+      "z": 8,
+      "phase": "repeat",
+      "ms": 32.68925000000013,
+      "openMs": 70.99037499999997,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1526
+    },
+    {
+      "variant": "packed",
+      "run": 0,
+      "z": 8,
+      "phase": "cold",
+      "ms": 188.532291,
+      "openMs": 61.19150000000013,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 3,
+        "completed": 3,
+        "aborted": 0,
+        "bytes": 119031
+      },
+      "initialMs": 249.72379100000012,
+      "features": 1885
+    },
+    {
+      "variant": "packed",
+      "run": 0,
+      "z": 8,
+      "phase": "pan",
+      "ms": 11.214791999999989,
+      "openMs": 61.19150000000013,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1526
+    },
+    {
+      "variant": "packed",
+      "run": 0,
+      "z": 8,
+      "phase": "style",
+      "ms": 121.77254199999993,
+      "openMs": 61.19150000000013,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 3,
+        "completed": 3,
+        "aborted": 0,
+        "bytes": 11659
+      },
+      "features": 1526
+    },
+    {
+      "variant": "packed",
+      "run": 0,
+      "z": 8,
+      "phase": "repeat",
+      "ms": 13.485875000000078,
+      "openMs": 61.19150000000013,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1526
+    },
+    {
+      "variant": "ours",
+      "run": 0,
+      "z": 8,
+      "phase": "cold",
+      "ms": 249.39716699999985,
+      "openMs": 59.96945800000003,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 5,
+        "completed": 5,
+        "aborted": 0,
+        "bytes": 1323262
+      },
+      "initialMs": 309.3666249999999,
+      "features": 209230
+    },
+    {
+      "variant": "ours",
+      "run": 0,
+      "z": 8,
+      "phase": "pan",
+      "ms": 127.04491599999983,
+      "openMs": 59.96945800000003,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 515
+      },
+      "features": 152120
+    },
+    {
+      "variant": "ours",
+      "run": 0,
+      "z": 8,
+      "phase": "style",
+      "ms": 711.7845409999998,
+      "openMs": 59.96945800000003,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 13,
+        "completed": 13,
+        "aborted": 0,
+        "bytes": 1879496
+      },
+      "features": 152120
+    },
+    {
+      "variant": "ours",
+      "run": 0,
+      "z": 8,
+      "phase": "repeat",
+      "ms": 158.6178749999999,
+      "openMs": 59.96945800000003,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 152120
+    },
+    {
+      "variant": "native",
+      "run": 0,
+      "z": 11,
+      "phase": "cold",
+      "ms": 344.19849999999997,
+      "openMs": 132.01383399999986,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 29,
+        "completed": 29,
+        "aborted": 0,
+        "bytes": 600801
+      },
+      "initialMs": 476.2123339999998,
+      "features": 4510
+    },
+    {
+      "variant": "native",
+      "run": 0,
+      "z": 11,
+      "phase": "pan",
+      "ms": 84.87833299999966,
+      "openMs": 132.01383399999986,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 4,
+        "completed": 4,
+        "aborted": 0,
+        "bytes": 57938
+      },
+      "features": 3373
+    },
+    {
+      "variant": "native",
+      "run": 0,
+      "z": 11,
+      "phase": "style",
+      "ms": 189.05508399999962,
+      "openMs": 132.01383399999986,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 8,
+        "completed": 8,
+        "aborted": 0,
+        "bytes": 8206
+      },
+      "features": 3373
+    },
+    {
+      "variant": "native",
+      "run": 0,
+      "z": 11,
+      "phase": "repeat",
+      "ms": 93.52795799999967,
+      "openMs": 132.01383399999986,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 3373
+    },
+    {
+      "variant": "indexed",
+      "run": 0,
+      "z": 11,
+      "phase": "cold",
+      "ms": 353.5419579999998,
+      "openMs": 60.64387499999975,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 25,
+        "completed": 25,
+        "aborted": 0,
+        "bytes": 616293
+      },
+      "initialMs": 414.18583299999955,
+      "features": 4510
+    },
+    {
+      "variant": "indexed",
+      "run": 0,
+      "z": 11,
+      "phase": "pan",
+      "ms": 138.34391700000015,
+      "openMs": 60.64387499999975,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 4,
+        "completed": 4,
+        "aborted": 0,
+        "bytes": 57938
+      },
+      "features": 3373
+    },
+    {
+      "variant": "indexed",
+      "run": 0,
+      "z": 11,
+      "phase": "style",
+      "ms": 151.38108300000022,
+      "openMs": 60.64387499999975,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 4,
+        "completed": 4,
+        "aborted": 0,
+        "bytes": 6591
+      },
+      "features": 3373
+    },
+    {
+      "variant": "indexed",
+      "run": 0,
+      "z": 11,
+      "phase": "repeat",
+      "ms": 87.43233400000008,
+      "openMs": 60.64387499999975,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 3373
+    },
+    {
+      "variant": "packed",
+      "run": 0,
+      "z": 11,
+      "phase": "cold",
+      "ms": 194.0296669999998,
+      "openMs": 59.73283300000003,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 6,
+        "completed": 6,
+        "aborted": 0,
+        "bytes": 372727
+      },
+      "initialMs": 253.76249999999982,
+      "features": 4510
+    },
+    {
+      "variant": "packed",
+      "run": 0,
+      "z": 11,
+      "phase": "pan",
+      "ms": 76.59345900000062,
+      "openMs": 59.73283300000003,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 35245
+      },
+      "features": 3373
+    },
+    {
+      "variant": "packed",
+      "run": 0,
+      "z": 11,
+      "phase": "style",
+      "ms": 149.12229200000002,
+      "openMs": 59.73283300000003,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 5,
+        "completed": 5,
+        "aborted": 0,
+        "bytes": 36096
+      },
+      "features": 3373
+    },
+    {
+      "variant": "packed",
+      "run": 0,
+      "z": 11,
+      "phase": "repeat",
+      "ms": 35.21891700000015,
+      "openMs": 59.73283300000003,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 3373
+    },
+    {
+      "variant": "ours",
+      "run": 0,
+      "z": 11,
+      "phase": "cold",
+      "ms": 268.5287499999995,
+      "openMs": 53.46812500000033,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 4,
+        "completed": 4,
+        "aborted": 0,
+        "bytes": 2113434
+      },
+      "initialMs": 321.9968749999998,
+      "features": 176700
+    },
+    {
+      "variant": "ours",
+      "run": 0,
+      "z": 11,
+      "phase": "pan",
+      "ms": 131.68070799999987,
+      "openMs": 53.46812500000033,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 226855
+      },
+      "features": 107096
+    },
+    {
+      "variant": "ours",
+      "run": 0,
+      "z": 11,
+      "phase": "style",
+      "ms": 407.2468339999996,
+      "openMs": 53.46812500000033,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 15,
+        "completed": 15,
+        "aborted": 0,
+        "bytes": 581408
+      },
+      "features": 107096
+    },
+    {
+      "variant": "ours",
+      "run": 0,
+      "z": 11,
+      "phase": "repeat",
+      "ms": 125.93304200000057,
+      "openMs": 53.46812500000033,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 107096
+    },
+    {
+      "variant": "native",
+      "run": 0,
+      "z": 14,
+      "phase": "cold",
+      "ms": 1499.60275,
+      "openMs": 137.1727919999994,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 163,
+        "completed": 163,
+        "aborted": 0,
+        "bytes": 3110468
+      },
+      "initialMs": 1636.7755419999994,
+      "features": 31361
+    },
+    {
+      "variant": "native",
+      "run": 0,
+      "z": 14,
+      "phase": "pan",
+      "ms": 666.1996250000002,
+      "openMs": 137.1727919999994,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 46,
+        "completed": 46,
+        "aborted": 0,
+        "bytes": 867112
+      },
+      "features": 30195
+    },
+    {
+      "variant": "native",
+      "run": 0,
+      "z": 14,
+      "phase": "style",
+      "ms": 828.483959000001,
+      "openMs": 137.1727919999994,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 44,
+        "completed": 44,
+        "aborted": 0,
+        "bytes": 48252
+      },
+      "features": 30195
+    },
+    {
+      "variant": "native",
+      "run": 0,
+      "z": 14,
+      "phase": "repeat",
+      "ms": 489.83137499999975,
+      "openMs": 137.1727919999994,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 30195
+    },
+    {
+      "variant": "indexed",
+      "run": 0,
+      "z": 14,
+      "phase": "cold",
+      "ms": 1522.5977079999993,
+      "openMs": 60.33575000000019,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 151,
+        "completed": 151,
+        "aborted": 0,
+        "bytes": 3123979
+      },
+      "initialMs": 1582.9334579999995,
+      "features": 31361
+    },
+    {
+      "variant": "indexed",
+      "run": 0,
+      "z": 14,
+      "phase": "pan",
+      "ms": 787.4602089999989,
+      "openMs": 60.33575000000019,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 46,
+        "completed": 46,
+        "aborted": 0,
+        "bytes": 867112
+      },
+      "features": 30195
+    },
+    {
+      "variant": "indexed",
+      "run": 0,
+      "z": 14,
+      "phase": "style",
+      "ms": 862.5908340000005,
+      "openMs": 60.33575000000019,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 34,
+        "completed": 34,
+        "aborted": 0,
+        "bytes": 25686
+      },
+      "features": 30195
+    },
+    {
+      "variant": "indexed",
+      "run": 0,
+      "z": 14,
+      "phase": "repeat",
+      "ms": 536.7690409999996,
+      "openMs": 60.33575000000019,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 30195
+    },
+    {
+      "variant": "packed",
+      "run": 0,
+      "z": 14,
+      "phase": "cold",
+      "ms": 358.45816600000035,
+      "openMs": 59.85133300000052,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 27,
+        "completed": 27,
+        "aborted": 0,
+        "bytes": 1708627
+      },
+      "initialMs": 418.30949900000087,
+      "features": 31361
+    },
+    {
+      "variant": "packed",
+      "run": 0,
+      "z": 14,
+      "phase": "pan",
+      "ms": 201.61429100000169,
+      "openMs": 59.85133300000052,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 8,
+        "completed": 8,
+        "aborted": 0,
+        "bytes": 286631
+      },
+      "features": 30195
+    },
+    {
+      "variant": "packed",
+      "run": 0,
+      "z": 14,
+      "phase": "style",
+      "ms": 557.685875000001,
+      "openMs": 59.85133300000052,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 33,
+        "completed": 33,
+        "aborted": 0,
+        "bytes": 197426
+      },
+      "features": 30195
+    },
+    {
+      "variant": "packed",
+      "run": 0,
+      "z": 14,
+      "phase": "repeat",
+      "ms": 189.5177500000009,
+      "openMs": 59.85133300000052,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 30195
+    },
+    {
+      "variant": "ours",
+      "run": 0,
+      "z": 14,
+      "phase": "cold",
+      "ms": 190.99275000000125,
+      "openMs": 53.35087500000009,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 5,
+        "completed": 5,
+        "aborted": 0,
+        "bytes": 1153127
+      },
+      "initialMs": 244.34362500000134,
+      "features": 69156
+    },
+    {
+      "variant": "ours",
+      "run": 0,
+      "z": 14,
+      "phase": "pan",
+      "ms": 111.76170900000034,
+      "openMs": 53.35087500000009,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 475979
+      },
+      "features": 77276
+    },
+    {
+      "variant": "ours",
+      "run": 0,
+      "z": 14,
+      "phase": "style",
+      "ms": 334.2935830000006,
+      "openMs": 53.35087500000009,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 7,
+        "completed": 7,
+        "aborted": 0,
+        "bytes": 317675
+      },
+      "features": 77276
+    },
+    {
+      "variant": "ours",
+      "run": 0,
+      "z": 14,
+      "phase": "repeat",
+      "ms": 93.8700000000008,
+      "openMs": 53.35087500000009,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 77276
+    },
+    {
+      "variant": "native",
+      "run": 0,
+      "z": 16,
+      "phase": "cold",
+      "ms": 845.8176660000026,
+      "openMs": 136.08866600000147,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 89,
+        "completed": 89,
+        "aborted": 0,
+        "bytes": 1196624
+      },
+      "initialMs": 981.9063320000041,
+      "features": 481
+    },
+    {
+      "variant": "native",
+      "run": 0,
+      "z": 16,
+      "phase": "pan",
+      "ms": 281.6389159999999,
+      "openMs": 136.08866600000147,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 10,
+        "completed": 10,
+        "aborted": 0,
+        "bytes": 114748
+      },
+      "features": 1093
+    },
+    {
+      "variant": "native",
+      "run": 0,
+      "z": 16,
+      "phase": "style",
+      "ms": 535.8153749999983,
+      "openMs": 136.08866600000147,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 40,
+        "completed": 40,
+        "aborted": 0,
+        "bytes": 46526
+      },
+      "features": 1093
+    },
+    {
+      "variant": "native",
+      "run": 0,
+      "z": 16,
+      "phase": "repeat",
+      "ms": 237.28562500000044,
+      "openMs": 136.08866600000147,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1093
+    },
+    {
+      "variant": "indexed",
+      "run": 0,
+      "z": 16,
+      "phase": "cold",
+      "ms": 876.9044170000016,
+      "openMs": 58.97245800000019,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 75,
+        "completed": 75,
+        "aborted": 0,
+        "bytes": 1238715
+      },
+      "initialMs": 935.8768750000017,
+      "features": 481
+    },
+    {
+      "variant": "indexed",
+      "run": 0,
+      "z": 16,
+      "phase": "pan",
+      "ms": 468.34300000000076,
+      "openMs": 58.97245800000019,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 10,
+        "completed": 10,
+        "aborted": 0,
+        "bytes": 114748
+      },
+      "features": 1093
+    },
+    {
+      "variant": "indexed",
+      "run": 0,
+      "z": 16,
+      "phase": "style",
+      "ms": 598.1738750000004,
+      "openMs": 58.97245800000019,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 26,
+        "completed": 26,
+        "aborted": 0,
+        "bytes": 9120
+      },
+      "features": 1093
+    },
+    {
+      "variant": "indexed",
+      "run": 0,
+      "z": 16,
+      "phase": "repeat",
+      "ms": 367.41975000000093,
+      "openMs": 58.97245800000019,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1093
+    },
+    {
+      "variant": "packed",
+      "run": 0,
+      "z": 16,
+      "phase": "cold",
+      "ms": 265.78554200000144,
+      "openMs": 57.18041599999924,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 18,
+        "completed": 18,
+        "aborted": 0,
+        "bytes": 552219
+      },
+      "initialMs": 322.9659580000007,
+      "features": 481
+    },
+    {
+      "variant": "packed",
+      "run": 0,
+      "z": 16,
+      "phase": "pan",
+      "ms": 105.2936669999981,
+      "openMs": 57.18041599999924,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 80300
+      },
+      "features": 1093
+    },
+    {
+      "variant": "packed",
+      "run": 0,
+      "z": 16,
+      "phase": "style",
+      "ms": 483.20845799999734,
+      "openMs": 57.18041599999924,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 31,
+        "completed": 31,
+        "aborted": 0,
+        "bytes": 264423
+      },
+      "features": 1093
+    },
+    {
+      "variant": "packed",
+      "run": 0,
+      "z": 16,
+      "phase": "repeat",
+      "ms": 126.22120899999936,
+      "openMs": 57.18041599999924,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1093
+    },
+    {
+      "variant": "ours",
+      "run": 0,
+      "z": 16,
+      "phase": "cold",
+      "ms": 113.33220900000015,
+      "openMs": 53.40579099999741,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 4,
+        "completed": 4,
+        "aborted": 0,
+        "bytes": 43342
+      },
+      "initialMs": 166.73799999999756,
+      "features": 489
+    },
+    {
+      "variant": "ours",
+      "run": 0,
+      "z": 16,
+      "phase": "pan",
+      "ms": 57.05566700000054,
+      "openMs": 53.40579099999741,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 15319
+      },
+      "features": 1091
+    },
+    {
+      "variant": "ours",
+      "run": 0,
+      "z": 16,
+      "phase": "style",
+      "ms": 231.25312499999927,
+      "openMs": 53.40579099999741,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 4,
+        "completed": 4,
+        "aborted": 0,
+        "bytes": 282632
+      },
+      "features": 1091
+    },
+    {
+      "variant": "ours",
+      "run": 0,
+      "z": 16,
+      "phase": "repeat",
+      "ms": 5.793166999999812,
+      "openMs": 53.40579099999741,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1091
+    },
+    {
+      "variant": "native",
+      "run": 0,
+      "phase": "route",
+      "ms": 2473.576709000001,
+      "network": {
+        "requests": 185,
+        "completed": 185,
+        "aborted": 0,
+        "bytes": 4463364,
+        "byFile": {
+          "data": {
+            "requests": 185,
+            "bytes": 4463364
+          }
+        }
+      },
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      }
+    },
+    {
+      "variant": "indexed",
+      "run": 0,
+      "phase": "route",
+      "ms": 2439.700458000003,
+      "network": {
+        "requests": 150,
+        "completed": 150,
+        "aborted": 0,
+        "bytes": 2925275,
+        "byFile": {
+          "data": {
+            "requests": 142,
+            "bytes": 2641056
+          },
+          "directory": {
+            "requests": 8,
+            "bytes": 284219
+          }
+        }
+      },
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      }
+    },
+    {
+      "variant": "packed",
+      "run": 0,
+      "phase": "route",
+      "ms": 1476.4503749999967,
+      "network": {
+        "requests": 77,
+        "completed": 77,
+        "aborted": 0,
+        "bytes": 2582305,
+        "byFile": {
+          "data": {
+            "requests": 50,
+            "bytes": 2493120
+          },
+          "directory": {
+            "requests": 27,
+            "bytes": 89185
+          }
+        }
+      },
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      }
+    },
+    {
+      "variant": "ours",
+      "run": 0,
+      "phase": "route",
+      "ms": 1044.7770410000012,
+      "network": {
+        "requests": 15,
+        "completed": 15,
+        "aborted": 0,
+        "bytes": 2315549,
+        "byFile": {
+          "data": {
+            "requests": 15,
+            "bytes": 2315549
+          }
+        }
+      },
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      }
+    },
+    {
+      "variant": "ours",
+      "run": 1,
+      "z": 8,
+      "phase": "cold",
+      "ms": 233.77520899999945,
+      "openMs": 52.371917000000394,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 5,
+        "completed": 5,
+        "aborted": 0,
+        "bytes": 1323262
+      },
+      "initialMs": 286.14712599999984,
+      "features": 209230
+    },
+    {
+      "variant": "ours",
+      "run": 1,
+      "z": 8,
+      "phase": "pan",
+      "ms": 125.1519580000022,
+      "openMs": 52.371917000000394,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 515
+      },
+      "features": 152120
+    },
+    {
+      "variant": "ours",
+      "run": 1,
+      "z": 8,
+      "phase": "style",
+      "ms": 679.5506249999999,
+      "openMs": 52.371917000000394,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 13,
+        "completed": 13,
+        "aborted": 0,
+        "bytes": 1879496
+      },
+      "features": 152120
+    },
+    {
+      "variant": "ours",
+      "run": 1,
+      "z": 8,
+      "phase": "repeat",
+      "ms": 153.07408299999952,
+      "openMs": 52.371917000000394,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 152120
+    },
+    {
+      "variant": "packed",
+      "run": 1,
+      "z": 8,
+      "phase": "cold",
+      "ms": 176.79650000000038,
+      "openMs": 57.39350000000195,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 3,
+        "completed": 3,
+        "aborted": 0,
+        "bytes": 119031
+      },
+      "initialMs": 234.19000000000233,
+      "features": 1885
+    },
+    {
+      "variant": "packed",
+      "run": 1,
+      "z": 8,
+      "phase": "pan",
+      "ms": 10.839916000000812,
+      "openMs": 57.39350000000195,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1526
+    },
+    {
+      "variant": "packed",
+      "run": 1,
+      "z": 8,
+      "phase": "style",
+      "ms": 120.6160000000018,
+      "openMs": 57.39350000000195,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 3,
+        "completed": 3,
+        "aborted": 0,
+        "bytes": 11659
+      },
+      "features": 1526
+    },
+    {
+      "variant": "packed",
+      "run": 1,
+      "z": 8,
+      "phase": "repeat",
+      "ms": 13.33100000000195,
+      "openMs": 57.39350000000195,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1526
+    },
+    {
+      "variant": "indexed",
+      "run": 1,
+      "z": 8,
+      "phase": "cold",
+      "ms": 222.21308399999907,
+      "openMs": 60.25483399999939,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 7,
+        "completed": 7,
+        "aborted": 0,
+        "bytes": 201815
+      },
+      "initialMs": 282.46791799999846,
+      "features": 1885
+    },
+    {
+      "variant": "indexed",
+      "run": 1,
+      "z": 8,
+      "phase": "pan",
+      "ms": 32.89316699999836,
+      "openMs": 60.25483399999939,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1526
+    },
+    {
+      "variant": "indexed",
+      "run": 1,
+      "z": 8,
+      "phase": "style",
+      "ms": 82.20154199999888,
+      "openMs": 60.25483399999939,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 2366
+      },
+      "features": 1526
+    },
+    {
+      "variant": "indexed",
+      "run": 1,
+      "z": 8,
+      "phase": "repeat",
+      "ms": 30.538791000002675,
+      "openMs": 60.25483399999939,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1526
+    },
+    {
+      "variant": "native",
+      "run": 1,
+      "z": 8,
+      "phase": "cold",
+      "ms": 201.31870799999888,
+      "openMs": 137.73366699999679,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 8,
+        "completed": 8,
+        "aborted": 0,
+        "bytes": 196347
+      },
+      "initialMs": 339.05237499999566,
+      "features": 1885
+    },
+    {
+      "variant": "native",
+      "run": 1,
+      "z": 8,
+      "phase": "pan",
+      "ms": 30.79308300000048,
+      "openMs": 137.73366699999679,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1526
+    },
+    {
+      "variant": "native",
+      "run": 1,
+      "z": 8,
+      "phase": "style",
+      "ms": 130.04045899999983,
+      "openMs": 137.73366699999679,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 4,
+        "completed": 4,
+        "aborted": 0,
+        "bytes": 2492
+      },
+      "features": 1526
+    },
+    {
+      "variant": "native",
+      "run": 1,
+      "z": 8,
+      "phase": "repeat",
+      "ms": 32.57866699999795,
+      "openMs": 137.73366699999679,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1526
+    },
+    {
+      "variant": "ours",
+      "run": 1,
+      "z": 11,
+      "phase": "cold",
+      "ms": 245.81320799999958,
+      "openMs": 52.262166000000434,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 4,
+        "completed": 4,
+        "aborted": 0,
+        "bytes": 2113434
+      },
+      "initialMs": 298.075374,
+      "features": 176700
+    },
+    {
+      "variant": "ours",
+      "run": 1,
+      "z": 11,
+      "phase": "pan",
+      "ms": 125.0683339999996,
+      "openMs": 52.262166000000434,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 226855
+      },
+      "features": 107096
+    },
+    {
+      "variant": "ours",
+      "run": 1,
+      "z": 11,
+      "phase": "style",
+      "ms": 401.50420900000245,
+      "openMs": 52.262166000000434,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 15,
+        "completed": 15,
+        "aborted": 0,
+        "bytes": 581408
+      },
+      "features": 107096
+    },
+    {
+      "variant": "ours",
+      "run": 1,
+      "z": 11,
+      "phase": "repeat",
+      "ms": 118.76549999999406,
+      "openMs": 52.262166000000434,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 107096
+    },
+    {
+      "variant": "packed",
+      "run": 1,
+      "z": 11,
+      "phase": "cold",
+      "ms": 198.3570830000026,
+      "openMs": 56.25458400000207,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 6,
+        "completed": 6,
+        "aborted": 0,
+        "bytes": 372727
+      },
+      "initialMs": 254.61166700000467,
+      "features": 4510
+    },
+    {
+      "variant": "packed",
+      "run": 1,
+      "z": 11,
+      "phase": "pan",
+      "ms": 74.1350420000017,
+      "openMs": 56.25458400000207,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 35245
+      },
+      "features": 3373
+    },
+    {
+      "variant": "packed",
+      "run": 1,
+      "z": 11,
+      "phase": "style",
+      "ms": 146.80166699999972,
+      "openMs": 56.25458400000207,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 5,
+        "completed": 5,
+        "aborted": 0,
+        "bytes": 36096
+      },
+      "features": 3373
+    },
+    {
+      "variant": "packed",
+      "run": 1,
+      "z": 11,
+      "phase": "repeat",
+      "ms": 33.663416999996116,
+      "openMs": 56.25458400000207,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 3373
+    },
+    {
+      "variant": "indexed",
+      "run": 1,
+      "z": 11,
+      "phase": "cold",
+      "ms": 356.58354099999997,
+      "openMs": 58.70783300000039,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 25,
+        "completed": 25,
+        "aborted": 0,
+        "bytes": 616293
+      },
+      "initialMs": 415.29137400000036,
+      "features": 4510
+    },
+    {
+      "variant": "indexed",
+      "run": 1,
+      "z": 11,
+      "phase": "pan",
+      "ms": 138.16308299999946,
+      "openMs": 58.70783300000039,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 4,
+        "completed": 4,
+        "aborted": 0,
+        "bytes": 57938
+      },
+      "features": 3373
+    },
+    {
+      "variant": "indexed",
+      "run": 1,
+      "z": 11,
+      "phase": "style",
+      "ms": 152.0457499999975,
+      "openMs": 58.70783300000039,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 4,
+        "completed": 4,
+        "aborted": 0,
+        "bytes": 6591
+      },
+      "features": 3373
+    },
+    {
+      "variant": "indexed",
+      "run": 1,
+      "z": 11,
+      "phase": "repeat",
+      "ms": 85.03399999999965,
+      "openMs": 58.70783300000039,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 3373
+    },
+    {
+      "variant": "native",
+      "run": 1,
+      "z": 11,
+      "phase": "cold",
+      "ms": 333.4381250000006,
+      "openMs": 138.86683300000004,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 29,
+        "completed": 29,
+        "aborted": 0,
+        "bytes": 600801
+      },
+      "initialMs": 472.3049580000006,
+      "features": 4510
+    },
+    {
+      "variant": "native",
+      "run": 1,
+      "z": 11,
+      "phase": "pan",
+      "ms": 83.82025000000431,
+      "openMs": 138.86683300000004,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 4,
+        "completed": 4,
+        "aborted": 0,
+        "bytes": 57938
+      },
+      "features": 3373
+    },
+    {
+      "variant": "native",
+      "run": 1,
+      "z": 11,
+      "phase": "style",
+      "ms": 184.14291599999706,
+      "openMs": 138.86683300000004,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 8,
+        "completed": 8,
+        "aborted": 0,
+        "bytes": 8206
+      },
+      "features": 3373
+    },
+    {
+      "variant": "native",
+      "run": 1,
+      "z": 11,
+      "phase": "repeat",
+      "ms": 90.32774999999674,
+      "openMs": 138.86683300000004,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 3373
+    },
+    {
+      "variant": "ours",
+      "run": 1,
+      "z": 14,
+      "phase": "cold",
+      "ms": 174.29979199999798,
+      "openMs": 53.3269999999975,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 5,
+        "completed": 5,
+        "aborted": 0,
+        "bytes": 1153127
+      },
+      "initialMs": 227.62679199999548,
+      "features": 69156
+    },
+    {
+      "variant": "ours",
+      "run": 1,
+      "z": 14,
+      "phase": "pan",
+      "ms": 110.58724999999686,
+      "openMs": 53.3269999999975,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 475979
+      },
+      "features": 77276
+    },
+    {
+      "variant": "ours",
+      "run": 1,
+      "z": 14,
+      "phase": "style",
+      "ms": 335.4889589999948,
+      "openMs": 53.3269999999975,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 7,
+        "completed": 7,
+        "aborted": 0,
+        "bytes": 317675
+      },
+      "features": 77276
+    },
+    {
+      "variant": "ours",
+      "run": 1,
+      "z": 14,
+      "phase": "repeat",
+      "ms": 89.71733299999323,
+      "openMs": 53.3269999999975,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 77276
+    },
+    {
+      "variant": "packed",
+      "run": 1,
+      "z": 14,
+      "phase": "cold",
+      "ms": 354.34058400000504,
+      "openMs": 57.575582999998005,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 27,
+        "completed": 27,
+        "aborted": 0,
+        "bytes": 1708627
+      },
+      "initialMs": 411.91616700000304,
+      "features": 31361
+    },
+    {
+      "variant": "packed",
+      "run": 1,
+      "z": 14,
+      "phase": "pan",
+      "ms": 204.72158299999865,
+      "openMs": 57.575582999998005,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 8,
+        "completed": 8,
+        "aborted": 0,
+        "bytes": 286631
+      },
+      "features": 30195
+    },
+    {
+      "variant": "packed",
+      "run": 1,
+      "z": 14,
+      "phase": "style",
+      "ms": 550.0532920000041,
+      "openMs": 57.575582999998005,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 33,
+        "completed": 33,
+        "aborted": 0,
+        "bytes": 197426
+      },
+      "features": 30195
+    },
+    {
+      "variant": "packed",
+      "run": 1,
+      "z": 14,
+      "phase": "repeat",
+      "ms": 192.096375000001,
+      "openMs": 57.575582999998005,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 30195
+    },
+    {
+      "variant": "indexed",
+      "run": 1,
+      "z": 14,
+      "phase": "cold",
+      "ms": 1519.0263330000016,
+      "openMs": 58.55520900000556,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 151,
+        "completed": 151,
+        "aborted": 0,
+        "bytes": 3123979
+      },
+      "initialMs": 1577.5815420000072,
+      "features": 31361
+    },
+    {
+      "variant": "indexed",
+      "run": 1,
+      "z": 14,
+      "phase": "pan",
+      "ms": 763.1582090000011,
+      "openMs": 58.55520900000556,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 46,
+        "completed": 46,
+        "aborted": 0,
+        "bytes": 867112
+      },
+      "features": 30195
+    },
+    {
+      "variant": "indexed",
+      "run": 1,
+      "z": 14,
+      "phase": "style",
+      "ms": 830.2673750000031,
+      "openMs": 58.55520900000556,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 34,
+        "completed": 34,
+        "aborted": 0,
+        "bytes": 25686
+      },
+      "features": 30195
+    },
+    {
+      "variant": "indexed",
+      "run": 1,
+      "z": 14,
+      "phase": "repeat",
+      "ms": 530.4262090000047,
+      "openMs": 58.55520900000556,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 30195
+    },
+    {
+      "variant": "native",
+      "run": 1,
+      "z": 14,
+      "phase": "cold",
+      "ms": 1518.4853749999966,
+      "openMs": 136.2694580000025,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 165,
+        "completed": 165,
+        "aborted": 0,
+        "bytes": 3126179
+      },
+      "initialMs": 1654.754832999999,
+      "features": 31361
+    },
+    {
+      "variant": "native",
+      "run": 1,
+      "z": 14,
+      "phase": "pan",
+      "ms": 660.4674159999995,
+      "openMs": 136.2694580000025,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 46,
+        "completed": 46,
+        "aborted": 0,
+        "bytes": 867112
+      },
+      "features": 30195
+    },
+    {
+      "variant": "native",
+      "run": 1,
+      "z": 14,
+      "phase": "style",
+      "ms": 805.8784589999996,
+      "openMs": 136.2694580000025,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 44,
+        "completed": 44,
+        "aborted": 0,
+        "bytes": 48252
+      },
+      "features": 30195
+    },
+    {
+      "variant": "native",
+      "run": 1,
+      "z": 14,
+      "phase": "repeat",
+      "ms": 440.3576249999969,
+      "openMs": 136.2694580000025,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 30195
+    },
+    {
+      "variant": "ours",
+      "run": 1,
+      "z": 16,
+      "phase": "cold",
+      "ms": 108.17804100000649,
+      "openMs": 53.32366699999693,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 4,
+        "completed": 4,
+        "aborted": 0,
+        "bytes": 43342
+      },
+      "initialMs": 161.50170800000342,
+      "features": 489
+    },
+    {
+      "variant": "ours",
+      "run": 1,
+      "z": 16,
+      "phase": "pan",
+      "ms": 55.66887499999575,
+      "openMs": 53.32366699999693,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 15319
+      },
+      "features": 1091
+    },
+    {
+      "variant": "ours",
+      "run": 1,
+      "z": 16,
+      "phase": "style",
+      "ms": 224.8861670000042,
+      "openMs": 53.32366699999693,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 4,
+        "completed": 4,
+        "aborted": 0,
+        "bytes": 282632
+      },
+      "features": 1091
+    },
+    {
+      "variant": "ours",
+      "run": 1,
+      "z": 16,
+      "phase": "repeat",
+      "ms": 5.584750000001804,
+      "openMs": 53.32366699999693,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1091
+    },
+    {
+      "variant": "packed",
+      "run": 1,
+      "z": 16,
+      "phase": "cold",
+      "ms": 270.4129580000008,
+      "openMs": 64.43612500000017,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 18,
+        "completed": 18,
+        "aborted": 0,
+        "bytes": 552219
+      },
+      "initialMs": 334.849083000001,
+      "features": 481
+    },
+    {
+      "variant": "packed",
+      "run": 1,
+      "z": 16,
+      "phase": "pan",
+      "ms": 106.09412499999598,
+      "openMs": 64.43612500000017,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 80300
+      },
+      "features": 1093
+    },
+    {
+      "variant": "packed",
+      "run": 1,
+      "z": 16,
+      "phase": "style",
+      "ms": 474.6933329999956,
+      "openMs": 64.43612500000017,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 31,
+        "completed": 31,
+        "aborted": 0,
+        "bytes": 264423
+      },
+      "features": 1093
+    },
+    {
+      "variant": "packed",
+      "run": 1,
+      "z": 16,
+      "phase": "repeat",
+      "ms": 127.43416699999943,
+      "openMs": 64.43612500000017,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1093
+    },
+    {
+      "variant": "indexed",
+      "run": 1,
+      "z": 16,
+      "phase": "cold",
+      "ms": 871.9879160000055,
+      "openMs": 57.96229199999652,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 75,
+        "completed": 75,
+        "aborted": 0,
+        "bytes": 1238715
+      },
+      "initialMs": 929.950208000002,
+      "features": 481
+    },
+    {
+      "variant": "indexed",
+      "run": 1,
+      "z": 16,
+      "phase": "pan",
+      "ms": 457.79070800000045,
+      "openMs": 57.96229199999652,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 10,
+        "completed": 10,
+        "aborted": 0,
+        "bytes": 114748
+      },
+      "features": 1093
+    },
+    {
+      "variant": "indexed",
+      "run": 1,
+      "z": 16,
+      "phase": "style",
+      "ms": 584.8572500000009,
+      "openMs": 57.96229199999652,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 26,
+        "completed": 26,
+        "aborted": 0,
+        "bytes": 9120
+      },
+      "features": 1093
+    },
+    {
+      "variant": "indexed",
+      "run": 1,
+      "z": 16,
+      "phase": "repeat",
+      "ms": 358.4000420000011,
+      "openMs": 57.96229199999652,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1093
+    },
+    {
+      "variant": "native",
+      "run": 1,
+      "z": 16,
+      "phase": "cold",
+      "ms": 849.1454169999997,
+      "openMs": 136.2322090000016,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 89,
+        "completed": 89,
+        "aborted": 0,
+        "bytes": 1196624
+      },
+      "initialMs": 985.3776260000013,
+      "features": 481
+    },
+    {
+      "variant": "native",
+      "run": 1,
+      "z": 16,
+      "phase": "pan",
+      "ms": 305.90008300000045,
+      "openMs": 136.2322090000016,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 10,
+        "completed": 10,
+        "aborted": 0,
+        "bytes": 114748
+      },
+      "features": 1093
+    },
+    {
+      "variant": "native",
+      "run": 1,
+      "z": 16,
+      "phase": "style",
+      "ms": 517.1149590000059,
+      "openMs": 136.2322090000016,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 40,
+        "completed": 40,
+        "aborted": 0,
+        "bytes": 46526
+      },
+      "features": 1093
+    },
+    {
+      "variant": "native",
+      "run": 1,
+      "z": 16,
+      "phase": "repeat",
+      "ms": 234.17220899999666,
+      "openMs": 136.2322090000016,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1093
+    },
+    {
+      "variant": "ours",
+      "run": 1,
+      "phase": "route",
+      "ms": 1028.5992500000066,
+      "network": {
+        "requests": 15,
+        "completed": 15,
+        "aborted": 0,
+        "bytes": 2315549,
+        "byFile": {
+          "data": {
+            "requests": 15,
+            "bytes": 2315549
+          }
+        }
+      },
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      }
+    },
+    {
+      "variant": "packed",
+      "run": 1,
+      "phase": "route",
+      "ms": 1486.7789159999957,
+      "network": {
+        "requests": 77,
+        "completed": 77,
+        "aborted": 0,
+        "bytes": 2582305,
+        "byFile": {
+          "data": {
+            "requests": 50,
+            "bytes": 2493120
+          },
+          "directory": {
+            "requests": 27,
+            "bytes": 89185
+          }
+        }
+      },
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      }
+    },
+    {
+      "variant": "indexed",
+      "run": 1,
+      "phase": "route",
+      "ms": 2419.149249999995,
+      "network": {
+        "requests": 150,
+        "completed": 150,
+        "aborted": 0,
+        "bytes": 2925275,
+        "byFile": {
+          "data": {
+            "requests": 142,
+            "bytes": 2641056
+          },
+          "directory": {
+            "requests": 8,
+            "bytes": 284219
+          }
+        }
+      },
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      }
+    },
+    {
+      "variant": "native",
+      "run": 1,
+      "phase": "route",
+      "ms": 2446.1027500000055,
+      "network": {
+        "requests": 185,
+        "completed": 185,
+        "aborted": 0,
+        "bytes": 4463364,
+        "byFile": {
+          "data": {
+            "requests": 185,
+            "bytes": 4463364
+          }
+        }
+      },
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      }
+    },
+    {
+      "variant": "native",
+      "run": 2,
+      "z": 8,
+      "phase": "cold",
+      "ms": 203.64179100000183,
+      "openMs": 137.44416700000147,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 8,
+        "completed": 8,
+        "aborted": 0,
+        "bytes": 196347
+      },
+      "initialMs": 341.0859580000033,
+      "features": 1885
+    },
+    {
+      "variant": "native",
+      "run": 2,
+      "z": 8,
+      "phase": "pan",
+      "ms": 33.68891600000643,
+      "openMs": 137.44416700000147,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1526
+    },
+    {
+      "variant": "native",
+      "run": 2,
+      "z": 8,
+      "phase": "style",
+      "ms": 131.71083300000464,
+      "openMs": 137.44416700000147,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 4,
+        "completed": 4,
+        "aborted": 0,
+        "bytes": 2492
+      },
+      "features": 1526
+    },
+    {
+      "variant": "native",
+      "run": 2,
+      "z": 8,
+      "phase": "repeat",
+      "ms": 38.10908300000301,
+      "openMs": 137.44416700000147,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1526
+    },
+    {
+      "variant": "indexed",
+      "run": 2,
+      "z": 8,
+      "phase": "cold",
+      "ms": 215.04962499999965,
+      "openMs": 59.11629199999879,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 7,
+        "completed": 7,
+        "aborted": 0,
+        "bytes": 201815
+      },
+      "initialMs": 274.16591699999844,
+      "features": 1885
+    },
+    {
+      "variant": "indexed",
+      "run": 2,
+      "z": 8,
+      "phase": "pan",
+      "ms": 34.218832999998995,
+      "openMs": 59.11629199999879,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1526
+    },
+    {
+      "variant": "indexed",
+      "run": 2,
+      "z": 8,
+      "phase": "style",
+      "ms": 86.4763329999987,
+      "openMs": 59.11629199999879,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 2366
+      },
+      "features": 1526
+    },
+    {
+      "variant": "indexed",
+      "run": 2,
+      "z": 8,
+      "phase": "repeat",
+      "ms": 29.509750000004715,
+      "openMs": 59.11629199999879,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1526
+    },
+    {
+      "variant": "packed",
+      "run": 2,
+      "z": 8,
+      "phase": "cold",
+      "ms": 172.91458300000522,
+      "openMs": 57.72595800000272,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 3,
+        "completed": 3,
+        "aborted": 0,
+        "bytes": 119031
+      },
+      "initialMs": 230.64054100000794,
+      "features": 1885
+    },
+    {
+      "variant": "packed",
+      "run": 2,
+      "z": 8,
+      "phase": "pan",
+      "ms": 10.575749999996333,
+      "openMs": 57.72595800000272,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1526
+    },
+    {
+      "variant": "packed",
+      "run": 2,
+      "z": 8,
+      "phase": "style",
+      "ms": 120.04166699999769,
+      "openMs": 57.72595800000272,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 3,
+        "completed": 3,
+        "aborted": 0,
+        "bytes": 11659
+      },
+      "features": 1526
+    },
+    {
+      "variant": "packed",
+      "run": 2,
+      "z": 8,
+      "phase": "repeat",
+      "ms": 14.37970900000073,
+      "openMs": 57.72595800000272,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1526
+    },
+    {
+      "variant": "ours",
+      "run": 2,
+      "z": 8,
+      "phase": "cold",
+      "ms": 225.72454200000357,
+      "openMs": 53.37345800000185,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 5,
+        "completed": 5,
+        "aborted": 0,
+        "bytes": 1323262
+      },
+      "initialMs": 279.0980000000054,
+      "features": 209230
+    },
+    {
+      "variant": "ours",
+      "run": 2,
+      "z": 8,
+      "phase": "pan",
+      "ms": 124.47320800000307,
+      "openMs": 53.37345800000185,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 515
+      },
+      "features": 152120
+    },
+    {
+      "variant": "ours",
+      "run": 2,
+      "z": 8,
+      "phase": "style",
+      "ms": 687.2670829999988,
+      "openMs": 53.37345800000185,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 13,
+        "completed": 13,
+        "aborted": 0,
+        "bytes": 1879496
+      },
+      "features": 152120
+    },
+    {
+      "variant": "ours",
+      "run": 2,
+      "z": 8,
+      "phase": "repeat",
+      "ms": 166.02804100000503,
+      "openMs": 53.37345800000185,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 152120
+    },
+    {
+      "variant": "native",
+      "run": 2,
+      "z": 11,
+      "phase": "cold",
+      "ms": 331.90720899999724,
+      "openMs": 140.4412500000035,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 29,
+        "completed": 29,
+        "aborted": 0,
+        "bytes": 600801
+      },
+      "initialMs": 472.34845900000073,
+      "features": 4510
+    },
+    {
+      "variant": "native",
+      "run": 2,
+      "z": 11,
+      "phase": "pan",
+      "ms": 84.42354200000409,
+      "openMs": 140.4412500000035,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 4,
+        "completed": 4,
+        "aborted": 0,
+        "bytes": 57938
+      },
+      "features": 3373
+    },
+    {
+      "variant": "native",
+      "run": 2,
+      "z": 11,
+      "phase": "style",
+      "ms": 184.24937499999942,
+      "openMs": 140.4412500000035,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 8,
+        "completed": 8,
+        "aborted": 0,
+        "bytes": 8206
+      },
+      "features": 3373
+    },
+    {
+      "variant": "native",
+      "run": 2,
+      "z": 11,
+      "phase": "repeat",
+      "ms": 82.30983299999934,
+      "openMs": 140.4412500000035,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 3373
+    },
+    {
+      "variant": "indexed",
+      "run": 2,
+      "z": 11,
+      "phase": "cold",
+      "ms": 350.447791999999,
+      "openMs": 58.68395799999416,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 25,
+        "completed": 25,
+        "aborted": 0,
+        "bytes": 616293
+      },
+      "initialMs": 409.1317499999932,
+      "features": 4510
+    },
+    {
+      "variant": "indexed",
+      "run": 2,
+      "z": 11,
+      "phase": "pan",
+      "ms": 145.7877920000028,
+      "openMs": 58.68395799999416,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 4,
+        "completed": 4,
+        "aborted": 0,
+        "bytes": 57938
+      },
+      "features": 3373
+    },
+    {
+      "variant": "indexed",
+      "run": 2,
+      "z": 11,
+      "phase": "style",
+      "ms": 161.72770799999853,
+      "openMs": 58.68395799999416,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 4,
+        "completed": 4,
+        "aborted": 0,
+        "bytes": 6591
+      },
+      "features": 3373
+    },
+    {
+      "variant": "indexed",
+      "run": 2,
+      "z": 11,
+      "phase": "repeat",
+      "ms": 103.16841599999316,
+      "openMs": 58.68395799999416,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 3373
+    },
+    {
+      "variant": "packed",
+      "run": 2,
+      "z": 11,
+      "phase": "cold",
+      "ms": 198.90308299999742,
+      "openMs": 57.463292000000365,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 6,
+        "completed": 6,
+        "aborted": 0,
+        "bytes": 372727
+      },
+      "initialMs": 256.3663749999978,
+      "features": 4510
+    },
+    {
+      "variant": "packed",
+      "run": 2,
+      "z": 11,
+      "phase": "pan",
+      "ms": 75.21862499999406,
+      "openMs": 57.463292000000365,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 35245
+      },
+      "features": 3373
+    },
+    {
+      "variant": "packed",
+      "run": 2,
+      "z": 11,
+      "phase": "style",
+      "ms": 149.45912499999395,
+      "openMs": 57.463292000000365,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 5,
+        "completed": 5,
+        "aborted": 0,
+        "bytes": 36096
+      },
+      "features": 3373
+    },
+    {
+      "variant": "packed",
+      "run": 2,
+      "z": 11,
+      "phase": "repeat",
+      "ms": 33.250583000000915,
+      "openMs": 57.463292000000365,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 3373
+    },
+    {
+      "variant": "ours",
+      "run": 2,
+      "z": 11,
+      "phase": "cold",
+      "ms": 249.89974999999686,
+      "openMs": 53.2725830000054,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 4,
+        "completed": 4,
+        "aborted": 0,
+        "bytes": 2113434
+      },
+      "initialMs": 303.17233300000225,
+      "features": 176700
+    },
+    {
+      "variant": "ours",
+      "run": 2,
+      "z": 11,
+      "phase": "pan",
+      "ms": 126.42787500000122,
+      "openMs": 53.2725830000054,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 226855
+      },
+      "features": 107096
+    },
+    {
+      "variant": "ours",
+      "run": 2,
+      "z": 11,
+      "phase": "style",
+      "ms": 399.541416,
+      "openMs": 53.2725830000054,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 15,
+        "completed": 15,
+        "aborted": 0,
+        "bytes": 581408
+      },
+      "features": 107096
+    },
+    {
+      "variant": "ours",
+      "run": 2,
+      "z": 11,
+      "phase": "repeat",
+      "ms": 120.5147500000021,
+      "openMs": 53.2725830000054,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 107096
+    },
+    {
+      "variant": "native",
+      "run": 2,
+      "z": 14,
+      "phase": "cold",
+      "ms": 1516.0463750000054,
+      "openMs": 132.5948339999959,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 165,
+        "completed": 165,
+        "aborted": 0,
+        "bytes": 3126179
+      },
+      "initialMs": 1648.6412090000013,
+      "features": 31361
+    },
+    {
+      "variant": "native",
+      "run": 2,
+      "z": 14,
+      "phase": "pan",
+      "ms": 671.7445420000004,
+      "openMs": 132.5948339999959,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 46,
+        "completed": 46,
+        "aborted": 0,
+        "bytes": 867112
+      },
+      "features": 30195
+    },
+    {
+      "variant": "native",
+      "run": 2,
+      "z": 14,
+      "phase": "style",
+      "ms": 809.2963750000054,
+      "openMs": 132.5948339999959,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 44,
+        "completed": 44,
+        "aborted": 0,
+        "bytes": 48252
+      },
+      "features": 30195
+    },
+    {
+      "variant": "native",
+      "run": 2,
+      "z": 14,
+      "phase": "repeat",
+      "ms": 458.02441699999326,
+      "openMs": 132.5948339999959,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 30195
+    },
+    {
+      "variant": "indexed",
+      "run": 2,
+      "z": 14,
+      "phase": "cold",
+      "ms": 1507.7795000000042,
+      "openMs": 58.842124999995576,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 151,
+        "completed": 151,
+        "aborted": 0,
+        "bytes": 3123979
+      },
+      "initialMs": 1566.6216249999998,
+      "features": 31361
+    },
+    {
+      "variant": "indexed",
+      "run": 2,
+      "z": 14,
+      "phase": "pan",
+      "ms": 801.6217500000057,
+      "openMs": 58.842124999995576,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 46,
+        "completed": 46,
+        "aborted": 0,
+        "bytes": 867112
+      },
+      "features": 30195
+    },
+    {
+      "variant": "indexed",
+      "run": 2,
+      "z": 14,
+      "phase": "style",
+      "ms": 857.1566670000029,
+      "openMs": 58.842124999995576,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 34,
+        "completed": 34,
+        "aborted": 0,
+        "bytes": 25686
+      },
+      "features": 30195
+    },
+    {
+      "variant": "indexed",
+      "run": 2,
+      "z": 14,
+      "phase": "repeat",
+      "ms": 527.8693749999948,
+      "openMs": 58.842124999995576,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 30195
+    },
+    {
+      "variant": "packed",
+      "run": 2,
+      "z": 14,
+      "phase": "cold",
+      "ms": 359.0677919999871,
+      "openMs": 56.38870799999859,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 27,
+        "completed": 27,
+        "aborted": 0,
+        "bytes": 1708627
+      },
+      "initialMs": 415.4564999999857,
+      "features": 31361
+    },
+    {
+      "variant": "packed",
+      "run": 2,
+      "z": 14,
+      "phase": "pan",
+      "ms": 206.15737499999523,
+      "openMs": 56.38870799999859,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 8,
+        "completed": 8,
+        "aborted": 0,
+        "bytes": 286631
+      },
+      "features": 30195
+    },
+    {
+      "variant": "packed",
+      "run": 2,
+      "z": 14,
+      "phase": "style",
+      "ms": 535.5906249999971,
+      "openMs": 56.38870799999859,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 33,
+        "completed": 33,
+        "aborted": 0,
+        "bytes": 197426
+      },
+      "features": 30195
+    },
+    {
+      "variant": "packed",
+      "run": 2,
+      "z": 14,
+      "phase": "repeat",
+      "ms": 185.66650000000664,
+      "openMs": 56.38870799999859,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 30195
+    },
+    {
+      "variant": "ours",
+      "run": 2,
+      "z": 14,
+      "phase": "cold",
+      "ms": 173.9291249999951,
+      "openMs": 53.26295800000662,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 5,
+        "completed": 5,
+        "aborted": 0,
+        "bytes": 1153127
+      },
+      "initialMs": 227.19208300000173,
+      "features": 69156
+    },
+    {
+      "variant": "ours",
+      "run": 2,
+      "z": 14,
+      "phase": "pan",
+      "ms": 109.73879199998919,
+      "openMs": 53.26295800000662,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 475979
+      },
+      "features": 77276
+    },
+    {
+      "variant": "ours",
+      "run": 2,
+      "z": 14,
+      "phase": "style",
+      "ms": 330.1513330000016,
+      "openMs": 53.26295800000662,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 7,
+        "completed": 7,
+        "aborted": 0,
+        "bytes": 317675
+      },
+      "features": 77276
+    },
+    {
+      "variant": "ours",
+      "run": 2,
+      "z": 14,
+      "phase": "repeat",
+      "ms": 91.36125000000175,
+      "openMs": 53.26295800000662,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 77276
+    },
+    {
+      "variant": "native",
+      "run": 2,
+      "z": 16,
+      "phase": "cold",
+      "ms": 845.8768330000021,
+      "openMs": 135.78929099999368,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 89,
+        "completed": 89,
+        "aborted": 0,
+        "bytes": 1196624
+      },
+      "initialMs": 981.6661239999958,
+      "features": 481
+    },
+    {
+      "variant": "native",
+      "run": 2,
+      "z": 16,
+      "phase": "pan",
+      "ms": 296.7634590000089,
+      "openMs": 135.78929099999368,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 10,
+        "completed": 10,
+        "aborted": 0,
+        "bytes": 114748
+      },
+      "features": 1093
+    },
+    {
+      "variant": "native",
+      "run": 2,
+      "z": 16,
+      "phase": "style",
+      "ms": 525.0309169999964,
+      "openMs": 135.78929099999368,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 40,
+        "completed": 40,
+        "aborted": 0,
+        "bytes": 46526
+      },
+      "features": 1093
+    },
+    {
+      "variant": "native",
+      "run": 2,
+      "z": 16,
+      "phase": "repeat",
+      "ms": 241.84370900000795,
+      "openMs": 135.78929099999368,
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1093
+    },
+    {
+      "variant": "indexed",
+      "run": 2,
+      "z": 16,
+      "phase": "cold",
+      "ms": 875.0692920000001,
+      "openMs": 57.837332999988575,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 75,
+        "completed": 75,
+        "aborted": 0,
+        "bytes": 1238715
+      },
+      "initialMs": 932.9066249999887,
+      "features": 481
+    },
+    {
+      "variant": "indexed",
+      "run": 2,
+      "z": 16,
+      "phase": "pan",
+      "ms": 475.68624999999884,
+      "openMs": 57.837332999988575,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 10,
+        "completed": 10,
+        "aborted": 0,
+        "bytes": 114748
+      },
+      "features": 1093
+    },
+    {
+      "variant": "indexed",
+      "run": 2,
+      "z": 16,
+      "phase": "style",
+      "ms": 600.7741669999959,
+      "openMs": 57.837332999988575,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 26,
+        "completed": 26,
+        "aborted": 0,
+        "bytes": 9120
+      },
+      "features": 1093
+    },
+    {
+      "variant": "indexed",
+      "run": 2,
+      "z": 16,
+      "phase": "repeat",
+      "ms": 358.19129200000316,
+      "openMs": 57.837332999988575,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1093
+    },
+    {
+      "variant": "packed",
+      "run": 2,
+      "z": 16,
+      "phase": "cold",
+      "ms": 267.9925419999927,
+      "openMs": 57.011916999996174,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 18,
+        "completed": 18,
+        "aborted": 0,
+        "bytes": 552219
+      },
+      "initialMs": 325.00445899998886,
+      "features": 481
+    },
+    {
+      "variant": "packed",
+      "run": 2,
+      "z": 16,
+      "phase": "pan",
+      "ms": 104.75008299999172,
+      "openMs": 57.011916999996174,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 80300
+      },
+      "features": 1093
+    },
+    {
+      "variant": "packed",
+      "run": 2,
+      "z": 16,
+      "phase": "style",
+      "ms": 478.8122919999878,
+      "openMs": 57.011916999996174,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 31,
+        "completed": 31,
+        "aborted": 0,
+        "bytes": 264423
+      },
+      "features": 1093
+    },
+    {
+      "variant": "packed",
+      "run": 2,
+      "z": 16,
+      "phase": "repeat",
+      "ms": 129.57325000000128,
+      "openMs": 57.011916999996174,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1093
+    },
+    {
+      "variant": "ours",
+      "run": 2,
+      "z": 16,
+      "phase": "cold",
+      "ms": 106.99608300000546,
+      "openMs": 53.21850000000268,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 4,
+        "completed": 4,
+        "aborted": 0,
+        "bytes": 43342
+      },
+      "initialMs": 160.21458300000813,
+      "features": 489
+    },
+    {
+      "variant": "ours",
+      "run": 2,
+      "z": 16,
+      "phase": "pan",
+      "ms": 54.693874999997206,
+      "openMs": 53.21850000000268,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 15319
+      },
+      "features": 1091
+    },
+    {
+      "variant": "ours",
+      "run": 2,
+      "z": 16,
+      "phase": "style",
+      "ms": 230.78287500000442,
+      "openMs": 53.21850000000268,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 4,
+        "completed": 4,
+        "aborted": 0,
+        "bytes": 282632
+      },
+      "features": 1091
+    },
+    {
+      "variant": "ours",
+      "run": 2,
+      "z": 16,
+      "phase": "repeat",
+      "ms": 5.399375000008149,
+      "openMs": 53.21850000000268,
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      },
+      "network": {
+        "requests": 0,
+        "completed": 0,
+        "aborted": 0,
+        "bytes": 0
+      },
+      "features": 1091
+    },
+    {
+      "variant": "native",
+      "run": 2,
+      "phase": "route",
+      "ms": 2471.960500000001,
+      "network": {
+        "requests": 185,
+        "completed": 185,
+        "aborted": 0,
+        "bytes": 4463364,
+        "byFile": {
+          "data": {
+            "requests": 185,
+            "bytes": 4463364
+          }
+        }
+      },
+      "opening": {
+        "requests": 2,
+        "completed": 2,
+        "aborted": 0,
+        "bytes": 1523332,
+        "byFile": {
+          "data": {
+            "requests": 2,
+            "bytes": 1523332
+          }
+        }
+      }
+    },
+    {
+      "variant": "indexed",
+      "run": 2,
+      "phase": "route",
+      "ms": 2413.6716670000023,
+      "network": {
+        "requests": 150,
+        "completed": 150,
+        "aborted": 0,
+        "bytes": 2925275,
+        "byFile": {
+          "data": {
+            "requests": 142,
+            "bytes": 2641056
+          },
+          "directory": {
+            "requests": 8,
+            "bytes": 284219
+          }
+        }
+      },
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      }
+    },
+    {
+      "variant": "packed",
+      "run": 2,
+      "phase": "route",
+      "ms": 1474.2023330000084,
+      "network": {
+        "requests": 77,
+        "completed": 77,
+        "aborted": 0,
+        "bytes": 2582305,
+        "byFile": {
+          "data": {
+            "requests": 50,
+            "bytes": 2493120
+          },
+          "directory": {
+            "requests": 27,
+            "bytes": 89185
+          }
+        }
+      },
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 0,
+            "bytes": 0
+          },
+          "directory": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      }
+    },
+    {
+      "variant": "ours",
+      "run": 2,
+      "phase": "route",
+      "ms": 1038.2069579999952,
+      "network": {
+        "requests": 15,
+        "completed": 15,
+        "aborted": 0,
+        "bytes": 2315549,
+        "byFile": {
+          "data": {
+            "requests": 15,
+            "bytes": 2315549
+          }
+        }
+      },
+      "opening": {
+        "requests": 1,
+        "completed": 1,
+        "aborted": 0,
+        "bytes": 16384,
+        "byFile": {
+          "data": {
+            "requests": 1,
+            "bytes": 16384
+          }
+        }
+      }
+    }
+  ]
+}

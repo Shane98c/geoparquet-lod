@@ -1,0 +1,12 @@
+{
+  "upstream": "https://github.com/Kanahiro/cloud-optimized-geoparquet.git",
+  "upstreamCommit": "44f29be34d303fbb1febb154413a5aa7aa568a91",
+  "experimentCommit": "1f44d789ed197ec3f4da58719555d132e9d68d40",
+  "referenceCommit": "6c3a4f9",
+  "uncompressedPatchSha256": "696aa1ccc0c7b41decc69963f13339d223de9ca8a81cfa4ad042402dbe95f83a",
+  "readerTests": 136,
+  "japanQueryComparisons": 68,
+  "tokyoQueryComparisons": 70,
+  "wholeSourceColumnsVerified": ["Japan", "Tokyo"],
+  "patchAppliesToPristineUpstream": true
+}
