@@ -4,7 +4,14 @@ import { once } from 'node:events'
 import { Worker } from 'node:worker_threads'
 import { VectorTile } from '@mapbox/vector-tile'
 import { PbfReader } from 'pbf'
-import { LodReader, SpatialReader, openReader, coalescing, renderTile } from '../dist/index.js'
+import {
+  GeometryBuilder,
+  LodReader,
+  SpatialReader,
+  openReader,
+  coalescing,
+  renderTile,
+} from '../dist/index.js'
 
 const [oldPath, newPath, casesPath] = process.argv.slice(2)
 if (!oldPath) throw new Error('spatial.test.mjs needs source, optimized file, and tile cases')
@@ -28,6 +35,13 @@ assert.ok(fast instanceof SpatialReader)
 assert.deepEqual(fast.bounds, old.bounds)
 assert.deepEqual(fast.scalarColumns(), old.scalarColumns())
 assert.deepEqual(optimized.reads, [[0, 16384]], 'one small open, no footer')
+const nested = new Proxy(fast, {
+  get(target, key) {
+    if (key === 'readGeometryByTile') return undefined
+    const value = Reflect.get(target, key)
+    return typeof value === 'function' ? value.bind(target) : value
+  },
+})
 const legacy = await LodReader.open(coalescing(await makeSource(newPath)))
 const canonical = (buffer) => {
   const tile = new VectorTile(new PbfReader(new Uint8Array(buffer)))
@@ -44,9 +58,24 @@ const { cases, expected } = JSON.parse(await readFile(casesPath, 'utf8'))
 for (const [i, [z, x, y]] of cases.entries()) {
   const [a, b, c] = await Promise.all([old, fast, legacy].map((r) => renderTile(r, z, x, y)))
   assert.deepEqual(canonical(c), canonical(a), `standard reader of relocated pages ${z}/${x}/${y}`)
+  assert.deepEqual(
+    new Uint8Array(b),
+    new Uint8Array(await renderTile(nested, z, x, y)),
+    `direct decoding preserves MVT bytes ${z}/${x}/${y}`,
+  )
   if (expected[i]) {
     const attrs = fast.lod.attributes.map((a) => a.name)
     const rows = await fast.readLodByTile(fast.lodForZoom(z), z, x, y, attrs)
+    const direct = await fast.readGeometryByTile(fast.lodForZoom(z), z, x, y, attrs)
+    const builder = new GeometryBuilder()
+    for (const coords of rows.coords) builder.add(fast.lodForZoom(z).geometry_type, coords)
+    const lod = fast.lodForZoom(z)
+    assert.deepEqual(direct.rows, rows.rows)
+    assert.deepEqual(direct.columns, rows.columns)
+    assert.deepEqual(direct.geometry, builder.finish(lod.scale, lod.offset))
+    const unstyled = await fast.readGeometryByTile(lod, z, x, y, [])
+    assert.deepEqual(unstyled.rows, direct.rows)
+    assert.deepEqual(unstyled.geometry, direct.geometry)
     const actual = rows.rows.map((id, i) => [
       id,
       rows.coords[i],

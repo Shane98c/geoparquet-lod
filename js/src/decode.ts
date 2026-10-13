@@ -5,7 +5,7 @@
  * trailing in order.
  */
 
-import type { GeometryType } from './geometry.js'
+import { GeometryBuilder, type GeometryType } from './geometry.js'
 
 export type AttributeKind = 'int' | 'float32' | 'float64' | 'bool' | 'string' | 'enum'
 
@@ -157,4 +157,118 @@ export const decodeRow = (
     c.pos += length
   }
   return { geometry: own, attrs, spill }
+}
+
+/** Decode selected geometry directly into columnar buffers. Unwanted copies
+ * are scanned without allocating geometry arrays; trailing strings still
+ * follow the original row-wide payload order. */
+export const decodeSelectedRow = (
+  bytes: Uint8Array,
+  type: GeometryType,
+  fields: AttributeField[],
+  builder: GeometryBuilder,
+  own: boolean,
+  id: number,
+  tile: number,
+  add: (id: number, attrs: unknown[]) => void,
+  withAttributes = true,
+): void => {
+  const c = new Cursor(bytes)
+  if (!withAttributes) {
+    const ownGeometry = geometryInto(c, type, own ? builder : undefined)
+    skipAttributes(c, fields)
+    if (own && ownGeometry) add(id, NO_ATTRIBUTES)
+    const count = c.varint()
+    for (let k = 0; k < count; k++) {
+      const copyTile = c.varint(),
+        copyId = c.varint()
+      const nonempty = geometryInto(c, type, copyTile === tile ? builder : undefined)
+      if (copyTile === tile && !nonempty) {
+        builder.begin(type)
+        if (type === 'MultiLineString') builder.startPolygon()
+      }
+      skipAttributes(c, fields)
+      if (copyTile === tile) add(copyId, NO_ATTRIBUTES)
+    }
+    // All string bytes trail the row's varints; no requested attributes means
+    // they can be left untouched after geometry and copy selection.
+    return
+  }
+  const strings: [unknown[], number, number][] = []
+  const selected: [number, unknown[]][] = []
+  const keep = geometryInto(c, type, own ? builder : undefined)
+  const attrs = attributes(c, fields, strings)
+  if (own && keep) selected.push([id, attrs])
+  const count = c.varint()
+  for (let k = 0; k < count; k++) {
+    const copyTile = c.varint()
+    const copyId = c.varint()
+    const nonempty = geometryInto(c, type, copyTile === tile ? builder : undefined)
+    if (copyTile === tile && !nonempty) {
+      builder.begin(type)
+      if (type === 'MultiLineString') builder.startPolygon()
+    }
+    const copyAttrs = attributes(c, fields, strings)
+    if (copyTile === tile) selected.push([copyId, copyAttrs])
+  }
+  for (const [slot, i, length] of strings) {
+    slot[i] = textDecoder.decode(bytes.subarray(c.pos, c.pos + length))
+    c.pos += length
+  }
+  for (const [row, values] of selected) add(row, values)
+}
+
+function geometryInto(c: Cursor, type: GeometryType, builder?: GeometryBuilder): boolean {
+  if (type === 'Point') {
+    const x = unzigzag(c.varint()),
+      y = unzigzag(c.varint())
+    if (builder) {
+      builder.begin(type)
+      builder.startPolygon()
+      builder.startRing()
+      const i = builder.reserveCoordinates(1)
+      builder.x[i] = x
+      builder.y[i] = y
+    }
+    return true
+  }
+  const parts = c.varint()
+  // Empty host geometries are omitted by the own-row path. Copies are never
+  // empty in files produced by the writer.
+  if (parts && builder) builder.begin(type)
+  if (type === 'MultiLineString') {
+    if (parts && builder) builder.startPolygon()
+    for (let i = 0; i < parts; i++) ringInto(c, builder)
+  } else {
+    for (let i = 0; i < parts; i++) {
+      builder?.startPolygon()
+      const rings = c.varint()
+      for (let j = 0; j < rings; j++) ringInto(c, builder)
+    }
+  }
+  return parts > 0
+}
+
+function ringInto(c: Cursor, builder?: GeometryBuilder) {
+  const n = c.varint()
+  if (!builder) {
+    for (let i = 0; i < n * 2; i++) c.varint()
+    return
+  }
+  builder.startRing()
+  const start = builder.reserveCoordinates(n)
+  let x = 0,
+    y = 0
+  for (let i = start; i < start + n; i++) {
+    x += unzigzag(c.varint())
+    y += unzigzag(c.varint())
+    builder.x[i] = x
+    builder.y[i] = y
+  }
+}
+
+const NO_ATTRIBUTES: unknown[] = []
+function skipAttributes(c: Cursor, fields: AttributeField[]) {
+  const present = c.varint()
+  for (let i = 0; i < fields.length; i++) if (Math.floor(present / 2 ** i) % 2) c.varint()
 }

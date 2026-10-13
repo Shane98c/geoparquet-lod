@@ -24,14 +24,7 @@ export class GeometryBuilder {
 
   /** One row of the coordinate leaf: a pair for a point, rings of pairs for shapes. */
   add(type: GeometryType, coords: unknown): void {
-    if (this.length + 1 >= this.types.length) {
-      const t = new Uint8Array(this.types.length * 2)
-      t.set(this.types)
-      this.types = t
-    }
-    this.types[this.length] = TYPE_CODE[type]
-    this.geometryOffsets = ensure(this.geometryOffsets, this.length + 2)
-    this.geometryOffsets[this.length] = this.polygons
+    this.begin(type)
     if (type === 'Point') {
       this.startPolygon()
       this.startRing()
@@ -51,17 +44,38 @@ export class GeometryBuilder {
         }
       }
     }
+  }
+
+  /** Begin one feature when decoding directly into the coordinate buffers. */
+  begin(type: GeometryType) {
+    if (this.length + 1 >= this.types.length) {
+      const t = new Uint8Array(this.types.length * 2)
+      t.set(this.types)
+      this.types = t
+    }
+    this.types[this.length] = TYPE_CODE[type]
+    this.geometryOffsets = ensure(this.geometryOffsets, this.length + 2)
+    this.geometryOffsets[this.length] = this.polygons
     this.length++
   }
 
-  private startPolygon() {
+  startPolygon() {
     this.polygonOffsets = ensure(this.polygonOffsets, this.polygons + 2)
     this.polygonOffsets[this.polygons++] = this.rings
   }
 
-  private startRing() {
+  startRing() {
     this.ringOffsets = ensure(this.ringOffsets, this.rings + 2)
     this.ringOffsets[this.rings++] = this.coords
+  }
+
+  /** Reserve a ring once, then fill its coordinates without pair arrays. */
+  reserveCoordinates(count: number): number {
+    const start = this.coords
+    this.x = ensure(this.x, start + count)
+    this.y = ensure(this.y, start + count)
+    this.coords += count
+    return start
   }
 
   private push(ring: [number, number][]) {

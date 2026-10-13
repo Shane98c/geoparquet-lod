@@ -83,6 +83,20 @@ def test_spatial_roundtrip(tmp_path, monkeypatch, family, prefix, tile_pages, le
         workers=1,
         log=lambda *_: None,
     )
+    if family == 'point':
+        # Keep-pages must retain support for standard v2 pages through the
+        # general decoder when the sparse v1/PLAIN fast path doesn't apply.
+        table = pq.read_table(old)
+        pq.write_table(
+            table,
+            old,
+            row_group_size=256,
+            compression='zstd',
+            use_dictionary=False,
+            write_page_index=True,
+            data_page_version='2.0',
+            max_rows_per_page=32,
+        )
     before = old.read_bytes()
     size = int.from_bytes(before[-8:-4], 'little')
     footer = before[-8 - size : -8]

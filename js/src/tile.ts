@@ -1,4 +1,5 @@
-import { MVT_BUFFER, MVT_EXTENT, geometryColumnFromWkb, toMvt } from '@cogp/reader'
+import { toMvt } from './mvt.js'
+import { MVT_BUFFER, MVT_EXTENT, geometryColumnFromWkb, toMvt as primaryToMvt } from '@cogp/reader'
 import { GeometryBuilder } from './geometry.js'
 import type { Bbox } from './reader.js'
 import type { TileReader } from './spatial.js'
@@ -55,8 +56,45 @@ export const renderTile = async (
     // finer than any LOD: the exact primary geometry of the rows in the tile
     const { rows, wkb, columns } = await reader.readPrimary(bbox, names, signal)
     signal?.throwIfAborted()
-    return toMvt(
+    return primaryToMvt(
       { geometry: geometryColumnFromWkb(wkb), rowIndex: rows, columns },
+      { z, x, y, layer, signal },
+    )
+  }
+  if (reader.readGeometryByTile) {
+    const data = await reader.readGeometryByTile(lod, z, x, y, names, signal)
+    const { rows, columns } = data
+    let { geometry } = data
+    signal?.throwIfAborted()
+    if (pointFamily) {
+      // Keep the existing lon/lat bbox rule before projection. Point offsets
+      // are the identity sequence; compact coordinates and attributes in place.
+      let count = 0
+      for (let i = 0; i < rows.length; i++) {
+        const lon = lod.offset[0] + lod.scale[0] * geometry.x[i]
+        const lat = lod.offset[1] + lod.scale[1] * geometry.y[i]
+        if (lon < bbox[0] || lon > bbox[2] || lat < bbox[1] || lat > bbox[3]) continue
+        geometry.x[count] = geometry.x[i]
+        geometry.y[count] = geometry.y[i]
+        rows[count] = rows[i]
+        for (const name of names) columns[name][count] = columns[name][i]
+        count++
+      }
+      rows.length = count
+      for (const name of names) columns[name].length = count
+      geometry = {
+        ...geometry,
+        length: count,
+        x: geometry.x.subarray(0, count),
+        y: geometry.y.subarray(0, count),
+        types: geometry.types.subarray(0, count),
+        geometryOffsets: geometry.geometryOffsets.subarray(0, count + 1),
+        polygonOffsets: geometry.polygonOffsets.subarray(0, count + 1),
+        ringOffsets: geometry.ringOffsets.subarray(0, count + 1),
+      }
+    }
+    return toMvt(
+      { geometry: geometry as never, rowIndex: rows, columns },
       { z, x, y, layer, signal },
     )
   }

@@ -2,7 +2,9 @@ import { readColumn } from 'hyparquet/src/column.js'
 import { DEFAULT_PARSERS } from 'hyparquet/src/convert.js'
 import { getSchemaPath } from 'hyparquet/src/schema.js'
 import { compressors } from 'hyparquet-compressors'
-import { attributeKind, decodeRow, type AttributeField } from './decode.js'
+import { attributeKind, decodeRow, decodeSelectedRow, type AttributeField } from './decode.js'
+import { visitPlainPage } from './pages.js'
+import { GeometryBuilder } from './geometry.js'
 import { tileInterval } from './key.js'
 import {
   LodReader,
@@ -53,7 +55,7 @@ export type TileReader = Pick<
   | 'readLodByTile'
   | 'readPrimary'
   | 'readRow'
->
+> & { readGeometryByTile?: SpatialReader['readGeometryByTile'] }
 
 export async function openReader(file: RangeSource): Promise<TileReader> {
   const head = await file.slice(0, Math.min(BOOTSTRAP_BYTES, file.byteLength))
@@ -248,6 +250,19 @@ export class SpatialReader implements TileReader {
     return Promise.all(pages.map((p) => wanted.get(p[2])!))
   }
 
+  async readGeometryByTile(
+    lod: Lod,
+    z: number,
+    x: number,
+    y: number,
+    attributes: string[] = [],
+    signal?: AbortSignal,
+  ) {
+    const builder = new GeometryBuilder()
+    const { rows, columns } = await this.readTile(lod, z, x, y, attributes, signal, builder)
+    return { rows, columns, geometry: builder.finish(lod.scale, lod.offset) }
+  }
+
   async readLodByTile(
     lod: Lod,
     z: number,
@@ -255,6 +270,18 @@ export class SpatialReader implements TileReader {
     y: number,
     attributes: string[] = [],
     signal?: AbortSignal,
+  ): Promise<LodRows> {
+    return this.readTile(lod, z, x, y, attributes, signal)
+  }
+
+  private async readTile(
+    lod: Lod,
+    z: number,
+    x: number,
+    y: number,
+    attributes: string[] = [],
+    signal?: AbortSignal,
+    builder?: GeometryBuilder,
   ): Promise<LodRows> {
     signal?.throwIfAborted()
     const [start, end] = tileInterval(this.lod.key!.depth, z, x, y)
@@ -319,31 +346,52 @@ export class SpatialReader implements TileReader {
       out.coords.push(geometry)
       attributes.forEach((a, i) => out.columns[a].push(attrs[wanted[i]]))
     }
+    const addColumnar = (id: number, attrs: unknown[]) => {
+      out.rows.push(id)
+      attributes.forEach((a, i) => out.columns[a].push(attrs[wanted[i]]))
+    }
     for (let i = 0; i < pages.length; i++) {
       const page = pages[i]
+      let fence = 0
+      const visit = (relative: number, value: Uint8Array) => {
+        const row = page[4] + relative
+        while (fence + 2 < page[6].length && page[6][fence + 3] <= relative) fence += 2
+        const cell = page[6][fence]
+        const own = (!coarse || prefixPages.has(page[2])) && cell >= firstCell && cell < endCell
+        if (!own && row !== hostRow) return
+        if (builder) {
+          decodeSelectedRow(
+            value,
+            lod.geometry_type,
+            this.fields,
+            builder,
+            own,
+            row,
+            tile,
+            addColumnar,
+            attributes.length > 0,
+          )
+        } else {
+          const decoded = decodeRow(value, lod.geometry_type, this.fields)
+          if (own && (lod.geometry_type === 'Point' || (decoded.geometry as unknown[]).length))
+            add(row, decoded.geometry, decoded.attrs)
+          for (const copy of decoded.spill)
+            if (copy.tile === tile) add(copy.id, copy.geometry, copy.attrs)
+        }
+      }
+      if (visitPlainPage(payloads[i], this.root.codecs[lod.name], page[5], visit)) continue
       const { data } = readColumn(
         { view: new DataView(payloads[i]), offset: 0 },
         { groupStart: page[4], selectStart: 0, selectEnd: page[5] } as never,
         decoder as never,
       )
-      let row = page[4]
-      let fence = 0
-      for (const values of data) {
+      let row = 0
+      for (const values of data)
         for (let value of values) {
-          while (fence + 2 < page[6].length && page[6][fence + 3] <= row - page[4]) fence += 2
-          const cell = page[6][fence]
-          const own = (!coarse || prefixPages.has(page[2])) && cell >= firstCell && cell < endCell
           while (Array.isArray(value)) value = value[0]
-          if ((own || row === hostRow) && value instanceof Uint8Array) {
-            const decoded = decodeRow(value, lod.geometry_type, this.fields)
-            if (own && (lod.geometry_type === 'Point' || (decoded.geometry as unknown[]).length))
-              add(row, decoded.geometry, decoded.attrs)
-            for (const copy of decoded.spill)
-              if (copy.tile === tile) add(copy.id, copy.geometry, copy.attrs)
-          }
+          if (value instanceof Uint8Array) visit(row, value)
           row++
         }
-      }
     }
     return out
   }
