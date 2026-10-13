@@ -1,11 +1,17 @@
 /// <reference lib="webworker" />
 import type { Transfer, WorkerRequest, WorkerResponse } from './maplibre.js'
 import { coalescing, httpSource, s3Mirrors } from './range-buffer.js'
-import { openReader, type TileReader } from './spatial.js'
-import { renderTile } from './tile.js'
+import { openReader, SpatialReader, type TileReader } from './spatial.js'
+import { renderPreparedTile, renderTile } from './tile.js'
+import { TilePool } from './tile-pool.js'
+import type { CpuRequest, TileReply } from './tile-protocol.js'
 
 const scope = self as unknown as DedicatedWorkerGlobalScope
 const readers = new Map<string, Promise<TileReader>>()
+let workerCount = 2
+let pool: TilePool | undefined
+let started = false
+const getPool = () => (workerCount === 1 ? undefined : (pool ??= new TilePool(workerCount)))
 const stats: Record<string, Transfer> = {}
 
 const fetched = scope.fetch.bind(scope)
@@ -29,8 +35,46 @@ const getReader = (url: string): Promise<TileReader> => {
   return reader
 }
 
-scope.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
+scope.addEventListener('message', (event: MessageEvent<WorkerRequest | CpuRequest>) => {
   const request = event.data
+  // CPU workers reuse this same URL, so the pool adds no second JS bundle.
+  // They receive only prepared pages and never open their own reader/cache.
+  if (request.type === 'cpu-init') {
+    scope.postMessage({ ready: true } satisfies TileReply)
+    return
+  }
+  if (request.type === 'render') {
+    try {
+      const data = renderPreparedTile(request.task, request.options)
+      scope.postMessage({ id: request.id, data } satisfies TileReply, [data])
+    } catch (error) {
+      scope.postMessage({
+        id: request.id,
+        error: String(error),
+        name: (error as Error).name ?? 'Error',
+      } satisfies TileReply)
+    }
+    return
+  }
+  if (request.type === 'configure') {
+    if (
+      started ||
+      !Number.isInteger(request.workers) ||
+      request.workers < 1 ||
+      request.workers > 4
+    ) {
+      scope.postMessage({
+        id: request.id,
+        ok: false,
+        name: 'Error',
+        error: 'Configure 1–4 workers before opening a source',
+      } satisfies WorkerResponse)
+    } else {
+      workerCount = request.workers
+      scope.postMessage({ id: request.id, ok: true, configured: true } satisfies WorkerResponse)
+    }
+    return
+  }
   if (request.type === 'cancel') {
     controllers.get(request.id)?.abort()
     return
@@ -40,7 +84,9 @@ scope.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
     return
   }
   if (request.type === 'open') {
-    getReader(request.url)
+    started = true
+    Promise.all([getReader(request.url), getPool()?.ready])
+      .then(([reader]) => reader)
       .then((reader) =>
         scope.postMessage({
           id: request.id,
@@ -59,6 +105,7 @@ scope.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
       )
     return
   }
+  started = true
   const controller = new AbortController()
   controllers.set(request.id, controller)
   const work =
@@ -69,14 +116,26 @@ scope.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
             scope.postMessage({ id: request.id, ok: true, row } satisfies WorkerResponse),
           )
       : getReader(request.config.url)
-          .then((reader) =>
-            renderTile(reader, request.z, request.x, request.y, {
+          .then(async (reader) => {
+            const options = {
               layer: request.config.layer,
               pointLayer: request.config.pointLayer,
               properties: request.config.properties,
               signal: controller.signal,
-            }),
-          )
+            }
+            const cpu = getPool()
+            if (cpu && reader instanceof SpatialReader && request.z <= reader.finestZoom) {
+              const task = await reader.prepareTile(
+                reader.lodForZoom(request.z),
+                request.z,
+                request.x,
+                request.y,
+                controller.signal,
+              )
+              return cpu.run(task, options)
+            }
+            return renderTile(reader, request.z, request.x, request.y, options)
+          })
           .then((data) =>
             scope.postMessage({ id: request.id, ok: true, data } satisfies WorkerResponse, [data]),
           )

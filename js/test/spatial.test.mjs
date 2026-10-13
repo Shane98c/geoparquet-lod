@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { once } from 'node:events'
-import { Worker } from 'node:worker_threads'
+import { workerClient } from './worker-client.mjs'
 import { VectorTile } from '@mapbox/vector-tile'
 import { PbfReader } from 'pbf'
 import {
@@ -110,35 +109,55 @@ await assert.rejects(renderTile(cached, z, x, y, { signal: aborted.signal }), {
 })
 console.log(`spatial tests passed: ${cases.length} tiles, analytical rows, legacy reads and cache`)
 
-const worker = new Worker(new URL('./worker-harness.mjs', import.meta.url), {
-  workerData: { path: newPath },
-})
-try {
-  assert.deepEqual((await once(worker, 'message'))[0], { ready: true })
-  let nextId = 0
-  const call = async (message) => {
-    const reply = once(worker, 'message')
-    worker.postMessage({ id: ++nextId, ...message })
-    const [response] = await reply
-    assert.equal(response.id, nextId)
-    assert.equal(response.ok, true, response.error)
-    return response
+for (const workers of [1, 2, 4]) {
+  const client = await workerClient(newPath, workers)
+  const { call } = client
+  try {
+    const url = 'https://example.test/features.parquet'
+    const opened = await call({ type: 'open', url })
+    assert.deepEqual(opened.metadata.bounds, old.bounds)
+    assert.deepEqual(opened.metadata.columns, old.scalarColumns())
+    assert.deepEqual(
+      (await call({ type: 'stats' })).stats[url],
+      { bytes: 16384, requests: 1 },
+      'one bootstrap regardless of worker count',
+    )
+    const cancelled = call({ type: 'tile', config: { url }, z, x, y })
+    const rejection = assert.rejects(cancelled, { name: 'AbortError' })
+    client.cancel(cancelled.id)
+    await rejection
+    const concurrent = cases
+      .slice(0, 16)
+      .map(([z, x, y]) =>
+        call({ type: 'tile', config: { url, properties: ['height', 'name'] }, z, x, y }),
+      )
+    const replies = await Promise.all(concurrent)
+    for (const [i, reply] of replies.entries()) {
+      const [z, x, y] = cases[i]
+      assert.deepEqual(
+        new Uint8Array(reply.data),
+        new Uint8Array(await renderTile(fast, z, x, y, { properties: ['height', 'name'] })),
+        `worker ${workers} preserves tile bytes, ids and properties`,
+      )
+    }
+    const before = (await call({ type: 'stats' })).stats[url]
+    await Promise.all(
+      cases.slice(0, 16).map(([z, x, y]) => call({ type: 'tile', config: { url }, z, x, y })),
+    )
+    assert.deepEqual(
+      (await call({ type: 'stats' })).stats[url],
+      before,
+      'transfers never detach the shared page cache',
+    )
+    const tile = await call({ type: 'tile', config: { url }, z, x, y })
+    assert.deepEqual(new Uint8Array(tile.data), new Uint8Array(await renderTile(fast, z, x, y)))
+    const [ez, ex, ey] = cases.find(([z]) => z > fast.finestZoom)
+    const exact = await call({ type: 'tile', config: { url }, z: ez, x: ex, y: ey })
+    assert.deepEqual(new Uint8Array(exact.data), new Uint8Array(await renderTile(fast, ez, ex, ey)))
+    const row = await call({ type: 'row', url, rowIndex: 100, columns: ['name', 'height'] })
+    assert.deepEqual(row.row, await old.readRow(100, ['name', 'height']))
+  } finally {
+    await client.close()
   }
-  const url = 'https://example.test/features.parquet'
-  const opened = await call({ type: 'open', url })
-  assert.deepEqual(opened.metadata.bounds, old.bounds)
-  assert.deepEqual(opened.metadata.columns, old.scalarColumns())
-  const stats = await call({ type: 'stats' })
-  assert.deepEqual(
-    stats.stats[url],
-    { bytes: 16384, requests: 1 },
-    'worker and map metadata share one bootstrap',
-  )
-  const tile = await call({ type: 'tile', config: { url }, z, x, y })
-  assert.deepEqual(canonical(tile.data), canonical(await renderTile(fast, z, x, y)))
-  const row = await call({ type: 'row', url, rowIndex: 100, columns: ['name', 'height'] })
-  assert.deepEqual(row.row, await old.readRow(100, ['name', 'height']))
-} finally {
-  await worker.terminate()
 }
-console.log('worker metadata, rendering and exact-row integration passed')
+console.log('1/2/4-worker concurrency, cancellation, metadata, rendering and exact rows passed')

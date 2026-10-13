@@ -54,7 +54,9 @@ export type WorkerRequest =
   | { id: number; type: 'stats' }
   | { id: number; type: 'open'; url: string }
   | { id: number; type: 'cancel' }
+  | { id: number; type: 'configure'; workers: number }
 export type WorkerResponse =
+  | { id: number; ok: true; configured: true }
   | { id: number; ok: true; data: ArrayBuffer }
   | { id: number; ok: true; row: Record<string, unknown> }
   | { id: number; ok: true; stats: Record<string, Transfer> }
@@ -67,6 +69,15 @@ export type WorkerResponse =
   | { id: number; ok: false; error: string; name: string }
 
 let worker: Worker | undefined
+let workerCount = Math.min(2, Math.max(1, (globalThis.navigator?.hardwareConcurrency ?? 4) - 1))
+/** Set 1–4 tile CPU workers before prefetch, readMetadata, or registerProtocol.
+ * One disables the pool. Indexed sources share one I/O coordinator in all modes.
+ */
+export const setWorkerCount = (count: number): void => {
+  if (!Number.isInteger(count) || count < 1 || count > 4) throw new Error('Expected 1–4 workers')
+  if (worker) throw new Error('Set worker count before opening a source')
+  workerCount = count
+}
 let nextId = 0
 const pending = new Map<
   number,
@@ -76,6 +87,18 @@ const pending = new Map<
 const getWorker = (): Worker => {
   if (worker) return worker
   worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' })
+  worker.postMessage({ id: 0, type: 'configure', workers: workerCount } satisfies WorkerRequest)
+  const current = worker
+  const fail = (event: ErrorEvent | MessageEvent) => {
+    if (worker !== current) return
+    const error = new Error('message' in event ? event.message : 'Worker transport failed')
+    for (const request of pending.values()) request.reject(error)
+    pending.clear()
+    current.terminate()
+    worker = undefined
+  }
+  worker.addEventListener('error', fail)
+  worker.addEventListener('messageerror', fail)
   worker.addEventListener('message', (event: MessageEvent<WorkerResponse>) => {
     const response = event.data
     const request = pending.get(response.id)
@@ -96,13 +119,34 @@ type Request = WorkerRequest extends infer R ? (R extends unknown ? Omit<R, 'id'
 const call = (request: Request, signal?: AbortSignal): Promise<WorkerResponse> =>
   new Promise((resolve, reject) => {
     const id = ++nextId
-    pending.set(id, { resolve, reject })
-    signal?.addEventListener('abort', () => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'))
+      return
+    }
+    const abort = () => {
       if (!pending.delete(id)) return
       worker?.postMessage({ id, type: 'cancel' } satisfies WorkerRequest)
       reject(new DOMException('Aborted', 'AbortError'))
+    }
+    const cleanup = () => signal?.removeEventListener('abort', abort)
+    pending.set(id, {
+      resolve: (response) => {
+        cleanup()
+        resolve(response)
+      },
+      reject: (error) => {
+        cleanup()
+        reject(error)
+      },
     })
-    getWorker().postMessage({ ...request, id } as WorkerRequest)
+    signal?.addEventListener('abort', abort, { once: true })
+    try {
+      getWorker().postMessage({ ...request, id } as WorkerRequest)
+    } catch (error) {
+      pending.delete(id)
+      cleanup()
+      reject(error)
+    }
   })
 
 /** Values of flat parquet columns for one feature, by its MVT feature id (the file row). */

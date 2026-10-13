@@ -22,16 +22,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.parametrize(
-    'family,prefix,tile_pages,leaf_pages',
+    'family,prefix,tile_pages,leaf_pages,page_bytes',
     [
-        ('polygon', 11, True, 16),
-        ('polygon', None, True, 1),
-        ('point', None, False, 16),
-        ('point', None, True, 16),
-        ('line', None, True, 16),
+        ('polygon', 11, True, 16, 16384),
+        ('polygon', None, True, 1, 32768),
+        ('point', None, False, 16, 16384),
+        ('point', None, True, 16, 65536),
+        ('line', None, True, 16, 131072),
     ],
 )
-def test_spatial_roundtrip(tmp_path, monkeypatch, family, prefix, tile_pages, leaf_pages):
+def test_spatial_roundtrip(
+    tmp_path, monkeypatch, family, prefix, tile_pages, leaf_pages, page_bytes
+):
     rng = np.random.default_rng(913)
     sparse = family == 'point' and tile_pages
     n = 12000 if sparse else 1200
@@ -107,7 +109,14 @@ def test_spatial_roundtrip(tmp_path, monkeypatch, family, prefix, tile_pages, le
         monkeypatch.setattr(
             importlib.import_module('geoparquet_lod.optimize'), '_ROOT_TARGET_BYTES', 800
         )
-    optimize(old, new, leaf_pages=leaf_pages, tile_pages=tile_pages, log=lambda *_: None)
+    optimize(
+        old,
+        new,
+        leaf_pages=leaf_pages,
+        tile_pages=tile_pages,
+        page_bytes=page_bytes,
+        log=lambda *_: None,
+    )
     if sparse:
         raw = new.read_bytes()
         root = json.loads(gzip.decompress(raw[16 : 16 + int.from_bytes(raw[12:16], 'little')]))

@@ -1,5 +1,7 @@
 # Single Hilbert order and rendering CPU experiment
 
+Follow-up: [shared-cache tile workers and compression page sizes](parity-workers.md).
+
 This follows the [spatial page index experiment](parity-experiment.md) on the
 same 53,742,978 Japan buildings. It tests removing the coarse-prefix/main split
 and reducing the cost of turning packed overviews into MVT. No stored MVT layer

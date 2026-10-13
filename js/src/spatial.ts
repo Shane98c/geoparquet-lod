@@ -274,15 +274,13 @@ export class SpatialReader implements TileReader {
     return this.readTile(lod, z, x, y, attributes, signal)
   }
 
-  private async readTile(
+  async prepareTile(
     lod: Lod,
     z: number,
     x: number,
     y: number,
-    attributes: string[] = [],
     signal?: AbortSignal,
-    builder?: GeometryBuilder,
-  ): Promise<LodRows> {
+  ): Promise<PreparedTile> {
     signal?.throwIfAborted()
     const [start, end] = tileInterval(this.lod.key!.depth, z, x, y)
     const streams = this.root.streams[lod.name]
@@ -312,87 +310,159 @@ export class SpatialReader implements TileReader {
           ? fences[fence + 1]
           : (hostPage[7] ?? hostPage[5]) - 1)
     }
-    const wanted = attributes.map((a) => this.fields.findIndex((f) => f.name === a))
-    if (wanted.includes(-1))
-      throw new Error(`attribute ${attributes[wanted.indexOf(-1)]} is not carried`)
-    const out: LodRows = {
-      rows: [],
-      coords: [],
-      columns: Object.fromEntries(attributes.map((a) => [a, []])),
-    }
     const payloads = await this.pageData(pages)
     signal?.throwIfAborted()
-    const element = { name: lod.name, type: 'BYTE_ARRAY', repetition_type: 'OPTIONAL' }
-    const decoder = {
-      type: 'BYTE_ARRAY',
+    return {
+      lod,
+      z,
+      x,
+      y,
+      fields: this.fields,
+      column: this.lod.column,
       codec: this.root.codecs[lod.name],
-      element,
-      pathInSchema: [this.lod.column, lod.name],
-      schemaPath: getSchemaPath(
-        [
-          { name: 'schema', num_children: 1 },
-          { name: this.lod.column, repetition_type: 'REQUIRED', num_children: 1 },
-          element,
-        ] as never,
-        [this.lod.column, lod.name],
-      ),
-      compressors,
-      parsers: DEFAULT_PARSERS,
-      utf8: false,
+      pages,
+      prefixPages: [...prefixPages],
+      coarse: !!coarse,
+      firstCell,
+      endCell,
+      hostRow,
+      payloads,
     }
-    const tile = z * 2 ** 48 + x * 2 ** z + y
-    const add = (id: number, geometry: unknown, attrs: unknown[]) => {
-      out.rows.push(id)
-      out.coords.push(geometry)
-      attributes.forEach((a, i) => out.columns[a].push(attrs[wanted[i]]))
-    }
-    const addColumnar = (id: number, attrs: unknown[]) => {
-      out.rows.push(id)
-      attributes.forEach((a, i) => out.columns[a].push(attrs[wanted[i]]))
-    }
-    for (let i = 0; i < pages.length; i++) {
-      const page = pages[i]
-      let fence = 0
-      const visit = (relative: number, value: Uint8Array) => {
-        const row = page[4] + relative
-        while (fence + 2 < page[6].length && page[6][fence + 3] <= relative) fence += 2
-        const cell = page[6][fence]
-        const own = (!coarse || prefixPages.has(page[2])) && cell >= firstCell && cell < endCell
-        if (!own && row !== hostRow) return
-        if (builder) {
-          decodeSelectedRow(
-            value,
-            lod.geometry_type,
-            this.fields,
-            builder,
-            own,
-            row,
-            tile,
-            addColumnar,
-            attributes.length > 0,
-          )
-        } else {
-          const decoded = decodeRow(value, lod.geometry_type, this.fields)
-          if (own && (lod.geometry_type === 'Point' || (decoded.geometry as unknown[]).length))
-            add(row, decoded.geometry, decoded.attrs)
-          for (const copy of decoded.spill)
-            if (copy.tile === tile) add(copy.id, copy.geometry, copy.attrs)
-        }
-      }
-      if (visitPlainPage(payloads[i], this.root.codecs[lod.name], page[5], visit)) continue
-      const { data } = readColumn(
-        { view: new DataView(payloads[i]), offset: 0 },
-        { groupStart: page[4], selectStart: 0, selectEnd: page[5] } as never,
-        decoder as never,
-      )
-      let row = 0
-      for (const values of data)
-        for (let value of values) {
-          while (Array.isArray(value)) value = value[0]
-          if (value instanceof Uint8Array) visit(row, value)
-          row++
-        }
-    }
-    return out
   }
+
+  private async readTile(
+    lod: Lod,
+    z: number,
+    x: number,
+    y: number,
+    attributes: string[] = [],
+    signal?: AbortSignal,
+    builder?: GeometryBuilder,
+  ): Promise<LodRows> {
+    const prepared = await this.prepareTile(lod, z, x, y, signal)
+    return decodeTile(prepared, attributes, builder, signal)
+  }
+}
+
+export interface PreparedTile {
+  lod: Lod
+  z: number
+  x: number
+  y: number
+  fields: AttributeField[]
+  column: string
+  codec: string
+  pages: Page[]
+  prefixPages: number[]
+  coarse: boolean
+  firstCell: number
+  endCell: number
+  hostRow: number
+  payloads: ArrayBuffer[]
+}
+
+/** Pure CPU stage: no reader, cache, or network access is needed in a tile worker. */
+export function decodeTile(
+  task: PreparedTile,
+  attributes: string[],
+  builder?: GeometryBuilder,
+  signal?: AbortSignal,
+): LodRows {
+  signal?.throwIfAborted()
+  const {
+    lod,
+    z,
+    x,
+    y,
+    fields,
+    column,
+    codec,
+    pages,
+    coarse,
+    firstCell,
+    endCell,
+    hostRow,
+    payloads,
+  } = task
+  const prefixPages = new Set(task.prefixPages)
+  const wanted = attributes.map((a) => fields.findIndex((f) => f.name === a))
+  if (wanted.includes(-1))
+    throw new Error(`attribute ${attributes[wanted.indexOf(-1)]} is not carried`)
+  const out: LodRows = {
+    rows: [],
+    coords: [],
+    columns: Object.fromEntries(attributes.map((a) => [a, []])),
+  }
+  const element = { name: lod.name, type: 'BYTE_ARRAY', repetition_type: 'OPTIONAL' }
+  const decoder = {
+    type: 'BYTE_ARRAY',
+    codec,
+    element,
+    pathInSchema: [column, lod.name],
+    schemaPath: getSchemaPath(
+      [
+        { name: 'schema', num_children: 1 },
+        { name: column, repetition_type: 'REQUIRED', num_children: 1 },
+        element,
+      ] as never,
+      [column, lod.name],
+    ),
+    compressors,
+    parsers: DEFAULT_PARSERS,
+    utf8: false,
+  }
+  const tile = z * 2 ** 48 + x * 2 ** z + y
+  const add = (id: number, geometry: unknown, attrs: unknown[]) => {
+    out.rows.push(id)
+    out.coords.push(geometry)
+    attributes.forEach((a, i) => out.columns[a].push(attrs[wanted[i]]))
+  }
+  const addColumnar = (id: number, attrs: unknown[]) => {
+    out.rows.push(id)
+    attributes.forEach((a, i) => out.columns[a].push(attrs[wanted[i]]))
+  }
+  for (let i = 0; i < pages.length; i++) {
+    const page = pages[i]
+    let fence = 0
+    const visit = (relative: number, value: Uint8Array) => {
+      const row = page[4] + relative
+      while (fence + 2 < page[6].length && page[6][fence + 3] <= relative) fence += 2
+      const cell = page[6][fence]
+      const own = (!coarse || prefixPages.has(page[2])) && cell >= firstCell && cell < endCell
+      if (!own && row !== hostRow) return
+      if (builder) {
+        decodeSelectedRow(
+          value,
+          lod.geometry_type,
+          fields,
+          builder,
+          own,
+          row,
+          tile,
+          addColumnar,
+          attributes.length > 0,
+        )
+      } else {
+        const decoded = decodeRow(value, lod.geometry_type, fields)
+        if (own && (lod.geometry_type === 'Point' || (decoded.geometry as unknown[]).length))
+          add(row, decoded.geometry, decoded.attrs)
+        for (const copy of decoded.spill)
+          if (copy.tile === tile) add(copy.id, copy.geometry, copy.attrs)
+      }
+    }
+    if (visitPlainPage(payloads[i], codec, page[5], visit)) continue
+    const { data } = readColumn(
+      { view: new DataView(payloads[i]), offset: 0 },
+      { groupStart: page[4], selectStart: 0, selectEnd: page[5] } as never,
+      decoder as never,
+    )
+    let row = 0
+    for (const values of data)
+      for (let value of values) {
+        while (Array.isArray(value)) value = value[0]
+        if (value instanceof Uint8Array) visit(row, value)
+        row++
+      }
+  }
+  return out
 }

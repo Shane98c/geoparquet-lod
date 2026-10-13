@@ -188,7 +188,14 @@ def inspect_cmd(path):
     show_default=True,
     help='Size sparse LOD pages by present values, or cap all pages at 2048 source rows',
 )
-def optimize_cmd(src, out, leaf_pages, tile_pages, sparse_pages):
+@click.option(
+    '--page-bytes',
+    default=65536,
+    type=click.IntRange(min=1),
+    show_default=True,
+    help='Uncompressed LOD page target; used only with --tile-pages',
+)
+def optimize_cmd(src, out, leaf_pages, tile_pages, sparse_pages, page_bytes):
     """Cluster LOD pages and add a spatial directory; preserve every table value."""
     from .optimize import optimize
 
@@ -198,5 +205,6 @@ def optimize_cmd(src, out, leaf_pages, tile_pages, sparse_pages):
         leaf_pages=leaf_pages,
         tile_pages=tile_pages,
         sparse_pages=sparse_pages,
+        page_bytes=page_bytes,
         log=click.echo,
     )

@@ -1,8 +1,8 @@
 import { toMvt } from './mvt.js'
 import { MVT_BUFFER, MVT_EXTENT, geometryColumnFromWkb, toMvt as primaryToMvt } from '@cogp/reader'
 import { GeometryBuilder } from './geometry.js'
-import type { Bbox } from './reader.js'
-import type { TileReader } from './spatial.js'
+import type { Bbox, Lod } from './reader.js'
+import { decodeTile, type PreparedTile, type TileReader } from './spatial.js'
 
 const VECTOR_TILE_SIZE = 512
 
@@ -63,40 +63,7 @@ export const renderTile = async (
   }
   if (reader.readGeometryByTile) {
     const data = await reader.readGeometryByTile(lod, z, x, y, names, signal)
-    const { rows, columns } = data
-    let { geometry } = data
-    signal?.throwIfAborted()
-    if (pointFamily) {
-      // Keep the existing lon/lat bbox rule before projection. Point offsets
-      // are the identity sequence; compact coordinates and attributes in place.
-      let count = 0
-      for (let i = 0; i < rows.length; i++) {
-        const lon = lod.offset[0] + lod.scale[0] * geometry.x[i]
-        const lat = lod.offset[1] + lod.scale[1] * geometry.y[i]
-        if (lon < bbox[0] || lon > bbox[2] || lat < bbox[1] || lat > bbox[3]) continue
-        geometry.x[count] = geometry.x[i]
-        geometry.y[count] = geometry.y[i]
-        rows[count] = rows[i]
-        for (const name of names) columns[name][count] = columns[name][i]
-        count++
-      }
-      rows.length = count
-      for (const name of names) columns[name].length = count
-      geometry = {
-        ...geometry,
-        length: count,
-        x: geometry.x.subarray(0, count),
-        y: geometry.y.subarray(0, count),
-        types: geometry.types.subarray(0, count),
-        geometryOffsets: geometry.geometryOffsets.subarray(0, count + 1),
-        polygonOffsets: geometry.polygonOffsets.subarray(0, count + 1),
-        ringOffsets: geometry.ringOffsets.subarray(0, count + 1),
-      }
-    }
-    return toMvt(
-      { geometry: geometry as never, rowIndex: rows, columns },
-      { z, x, y, layer, signal },
-    )
+    return renderGeometryTile(lod, data, z, x, y, options)
   }
   const { rows, coords, columns } = await reader.readLodByTile(lod, z, x, y, names, signal)
   signal?.throwIfAborted()
@@ -142,4 +109,64 @@ export const renderTile = async (
 export const tileResolution = (z: number, y: number) => {
   const latitude = tileYToLatitude(y + 0.5, 2 ** z)
   return (360 * Math.cos((latitude * Math.PI) / 180)) / (VECTOR_TILE_SIZE * 2 ** z)
+}
+
+export function renderPreparedTile(task: PreparedTile, options: TileOptions = {}): ArrayBuffer {
+  const builder = new GeometryBuilder()
+  const names = options.properties ?? task.fields.map((field) => field.name)
+  const { rows, columns } = decodeTile(task, names, builder, options.signal)
+  return renderGeometryTile(
+    task.lod,
+    { rows, columns, geometry: builder.finish(task.lod.scale, task.lod.offset) },
+    task.z,
+    task.x,
+    task.y,
+    options,
+  )
+}
+
+function renderGeometryTile(
+  lod: Lod,
+  data: Awaited<ReturnType<NonNullable<TileReader['readGeometryByTile']>>>,
+  z: number,
+  x: number,
+  y: number,
+  options: TileOptions,
+): ArrayBuffer {
+  const { signal } = options
+  const bbox = tileBounds(z, x, y)
+  const names = Object.keys(data.columns)
+  const pointFamily = lod.geometry_type === 'Point'
+  const layer = (pointFamily ? options.pointLayer : undefined) ?? options.layer ?? 'features'
+  const { rows, columns } = data
+  let { geometry } = data
+  signal?.throwIfAborted()
+  if (pointFamily) {
+    // Keep the existing lon/lat bbox rule before projection. Point offsets
+    // are the identity sequence; compact coordinates and attributes in place.
+    let count = 0
+    for (let i = 0; i < rows.length; i++) {
+      const lon = lod.offset[0] + lod.scale[0] * geometry.x[i]
+      const lat = lod.offset[1] + lod.scale[1] * geometry.y[i]
+      if (lon < bbox[0] || lon > bbox[2] || lat < bbox[1] || lat > bbox[3]) continue
+      geometry.x[count] = geometry.x[i]
+      geometry.y[count] = geometry.y[i]
+      rows[count] = rows[i]
+      for (const name of names) columns[name][count] = columns[name][i]
+      count++
+    }
+    rows.length = count
+    for (const name of names) columns[name].length = count
+    geometry = {
+      ...geometry,
+      length: count,
+      x: geometry.x.subarray(0, count),
+      y: geometry.y.subarray(0, count),
+      types: geometry.types.subarray(0, count),
+      geometryOffsets: geometry.geometryOffsets.subarray(0, count + 1),
+      polygonOffsets: geometry.polygonOffsets.subarray(0, count + 1),
+      ringOffsets: geometry.ringOffsets.subarray(0, count + 1),
+    }
+  }
+  return toMvt({ geometry: geometry as never, rowIndex: rows, columns }, { z, x, y, layer, signal })
 }

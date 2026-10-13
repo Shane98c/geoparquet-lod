@@ -25,7 +25,7 @@
     "prepublishOnly": "npm run build",
     "check": "tsc -p tsconfig.json --noEmit",
     "measure": "node test/measure.mjs",
-    "test": "node test/decode.test.mjs && node test/mvt.test.mjs && node test/pages.test.mjs && node test/http.test.mjs && node test/spill.test.mjs",
+    "test": "node test/decode.test.mjs && node test/mvt.test.mjs && node test/pages.test.mjs && node test/http.test.mjs && node test/tile-pool.test.mjs && node test/spill.test.mjs",
     "demo": "npm run demo:bundle && cd .. && npx -y http-server -p 8091 --cors -c-1 -o '/demo/?url=/buildings.lod.parquet' .",
     "demo:bundle": "esbuild src/index.ts src/maplibre.ts src/worker.ts --bundle --format=esm --outdir=../demo/dist && esbuild node_modules/@cogp/maplibre/dist/index.js node_modules/@cogp/maplibre/dist/worker.js --bundle --format=esm --outdir=../demo/dist/cogp && esbuild vendor/esri-sop/index.ts --bundle --format=esm --outfile=../demo/dist/esri.js"
   },

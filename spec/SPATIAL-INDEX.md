@@ -24,7 +24,10 @@ chunks are optionally re-encoded using the original row order, nullable binary
 schema, and zstd, with page breaks at the LOD's finest tile grid. Multiple
 pages may serve a dense tile; a row-group boundary can also split a tile.
 The row cap scales with the chunk's LOD density to target 2,048 present values,
-up to 262,144 analytical rows per page, alongside the 16 KiB byte target.
+up to 262,144 analytical rows per page, alongside a configurable uncompressed
+byte target (64 KiB by default; `--page-bytes 16384` restores the earlier target).
+The target is advisory: write batches and individual large values may exceed it.
+The bootstrap remains 16 KiB, independent of the compression page size.
 `--fixed-pages` keeps the previous 2,048-row cap. Neither changes table values.
 Runs of entirely null tiles are encoded together and omitted from the spatial
 directory. Standard offset indexes still describe every page.
@@ -105,3 +108,20 @@ it. The reference optimizer writes to a temporary file and publishes only
 after the completed footer is readable. It requires a distinct output path
 and rejects encrypted/external chunks, bloom filters, and legacy index pages.
 Keep-pages mode additionally rejects dictionary-encoded LOD chunks.
+
+## Parallel rendering
+
+The MapLibre adapter keeps directory lookup, range coalescing, pending-fetch
+sharing, and the compressed-page LRU in one coordinator. It sends selected
+compressed page copies and their row/key fences to a bounded set of CPU workers.
+Those workers decompress, decode packed values, and encode MVT without fetching
+anything. Cached originals are never transferred/detached. Queued jobs hold
+references; copies are made only when a worker is available. Cancellation drops
+queued work or discards an active result, leaving shared fetches intact.
+
+The default uses two CPU workers, or local rendering on devices reporting at
+most two logical cores. The public `setWorkerCount` accepts 1–4 before the first
+worker is created; one retains the serial path. Exact-primary fallback and
+analytical reads remain on the coordinator. Each CPU worker has its own decoder
+and bounded projection cache, so more workers consume more memory. They reuse the coordinator’s `worker.js` URL
+to avoid an additional JavaScript asset. This is a reader change, with no file-format change.

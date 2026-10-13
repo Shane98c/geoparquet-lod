@@ -42,6 +42,13 @@ straight into coordinate buffers and streams MVT output. See the
 [single-order and rendering results](docs/parity-followup.md) for request parity
 in six sampled tiles, faster rendering, and the remaining coarse-zoom tradeoff.
 
+The optimizer uses a 64 KiB uncompressed page target (`--page-bytes 65536`);
+`--page-bytes 16384` reproduces the earlier layout. Tile boundaries and row
+caps still apply. Indexed map tiles now share one fetch/cache coordinator and
+two CPU workers (one on devices reporting two or fewer logical cores).
+See [worker and page-size results](docs/parity-workers.md) for the measured
+latency, byte savings, and startup/memory tradeoffs.
+
 This is experimental and remains behind PMTiles in some workloads. The Japan
 measurements, tradeoffs, and reproduction commands are in
 [the parity experiment](docs/parity-experiment.md); the physical layout is in
@@ -204,8 +211,15 @@ map.addLayer({ id: 'fill', type: 'fill', source: 'buildings', 'source-layer': 'b
 const row = await readRow(url, feature.id, ['name', 'risk'])
 ```
 
-Tiles are read and encoded in a Web Worker. The server must answer HTTP
-range requests with CORS, which plain S3 does. `tileUrl` also takes
+Indexed tiles are fetched through one shared worker and decoded/encoded in a
+small worker pool. `setWorkerCount(1 | 2 | 3 | 4)` from the MapLibre entry point
+can override the default before calling `prefetch`, `readMetadata`, or
+`registerProtocol`; one disables the pool. Four helps dense viewports but costs
+more memory. Ordinary files, exact geometry, and analytical row reads stay on
+the coordinator. CPU workers reuse
+the same `worker.js` URL, so there is no additional worker asset to deploy.
+
+The server must answer HTTP range requests with CORS, which plain S3 does. `tileUrl` also takes
 `pointLayer` for point datasets.
 Opening probes the first 16 KiB for the optional spatial index. Indexed files
 need only that request; ordinary files then read a 64 KiB tail and any missing

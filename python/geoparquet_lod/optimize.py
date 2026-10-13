@@ -65,7 +65,7 @@ def _copy(src, dst, start, size):
         size -= len(data)
 
 
-def _tile_pages(parquet, group, name, lod, keys, work, target, sparse_pages):
+def _tile_pages(parquet, group, name, lod, keys, work, target, sparse_pages, page_bytes):
     """Use Arrow to encode tile-aligned pages, then concatenate its temporary
     column chunks into one ordinary chunk in the original row group. Dictionary
     encoding is disabled so every page is independently decodable. Consecutive
@@ -94,7 +94,7 @@ def _tile_pages(parquet, group, name, lod, keys, work, target, sparse_pages):
         use_dictionary=False,
         write_statistics=False,
         write_page_index=True,
-        data_page_size=16384,
+        data_page_size=page_bytes,
         max_rows_per_page=page_rows,
         write_batch_size=128,
     ) as writer:
@@ -143,7 +143,9 @@ def _tile_pages(parquet, group, name, lod, keys, work, target, sparse_pages):
     return combined, {1: (9, (12, pages))}, present
 
 
-def optimize(src, out, *, leaf_pages=1024, tile_pages=True, sparse_pages=True, log=print):
+def optimize(
+    src, out, *, leaf_pages=1024, tile_pages=True, sparse_pages=True, page_bytes=65536, log=print
+):
     """Write a separate optimized copy, atomically. Working memory is bounded by
     one row group of LOD values plus the file's page directory and indexes; keys
     are staged in a disk mmap. Encrypted/external chunks and bloom filters are
@@ -154,6 +156,8 @@ def optimize(src, out, *, leaf_pages=1024, tile_pages=True, sparse_pages=True, l
         raise ValueError('optimize requires a separate output path')
     if leaf_pages < 1:
         raise ValueError('leaf_pages must be positive')
+    if page_bytes < 1:
+        raise ValueError('page_bytes must be positive')
     parquet = pq.ParquetFile(src)
     geo = json.loads(parquet.schema_arrow.metadata[b'geo'])
     lod = geo['lod_columns']
@@ -250,7 +254,15 @@ def optimize(src, out, *, leaf_pages=1024, tile_pages=True, sparse_pages=True, l
                         if name and tile_pages:
                             local_keys = keys[starts[g] : starts[g] + get(group, 3)]
                             cm, index, present = _tile_pages(
-                                parquet, g, name, lod, local_keys, work, target, sparse_pages
+                                parquet,
+                                g,
+                                name,
+                                lod,
+                                local_keys,
+                                work,
+                                target,
+                                sparse_pages,
+                                page_bytes,
                             )
                             set_value(chunk, 3, cm)
                             set_value(chunk, 2, 0)
