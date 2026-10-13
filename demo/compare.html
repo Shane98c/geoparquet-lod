@@ -20,6 +20,17 @@
         grid-auto-columns: 1fr;
         height: 100%;
       }
+      #panes.multiple {
+        grid-auto-flow: row;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-rows: repeat(2, minmax(0, 1fr));
+      }
+      #readers {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 12px;
+        align-items: center;
+      }
       .pane {
         position: relative;
         border-right: 1px solid #999;
@@ -77,6 +88,8 @@
   <body>
     <div id="panes"></div>
     <div id="bar">
+      <div id="readers" role="group" aria-label="Comparison readers"></div>
+      <button id="apply-readers">Apply readers</button>
       <label
         >View
         <select id="view">
@@ -116,22 +129,17 @@
     <script type="module">
       // One pane per file given in the query string, all on the same view, each with a
       // tally of the bytes and requests its reader has made:
-      //   ?url=        this layout, read through its page indexes (required)
+      //   ?url=        this layout, read through its page indexes
       //   ?tiledir=    the same file through a tile directory sidecar
       //   ?pmtiles=    a PMTiles archive; ?pmtiles_layer= names its layer (default: buildings)
       //   ?cogp=       a COGP file, read with @cogp/maplibre
       //   ?esri=       a Spatially Optimized Parquet file, read with Esri's MapLibre reference reader
       //   ?center=lon,lat ?zoom=  the starting view
+      //   ?panes=lod,pmtiles,cogp,esri  selected readers; only these request data
       import { registerProtocol, tileUrl, parseTileUrl, readStats } from './dist/maplibre.js'
 
       const params = new URLSearchParams(location.search)
       const url = params.get('url')
-      if (!url) {
-        document.body.innerHTML =
-          '<p style="padding:1em">Pass <code>?url=</code> for a file in this layout, and any of ' +
-          '<code>tiledir=</code>, <code>pmtiles=</code>, <code>cogp=</code>, <code>esri=</code> for the panes beside it.</p>'
-        throw new Error('no ?url=')
-      }
       const localServer = params.get('demoServer') === '1'
       const delay = Number(params.get('latency') ?? 50)
       const abs = (u) => {
@@ -146,14 +154,46 @@
         return result.href
       }
       const fileUrl = abs(url)
-      const dirFile = new URL(fileUrl)
-      dirFile.searchParams.set('dir', '1')
-      const dirFileUrl = dirFile.href
+      const dirFile = fileUrl ? new URL(fileUrl) : null
+      dirFile?.searchParams.set('dir', '1')
+      const dirFileUrl = dirFile?.href
       const tiledir = abs(params.get('tiledir'))
       const pmtilesUrl = abs(params.get('pmtiles'))
       const pmtilesLayer = params.get('pmtiles_layer') ?? 'buildings'
       const cogpUrl = abs(params.get('cogp'))
       const esriUrl = abs(params.get('esri'))
+      const available = [
+        ['lod', 'GeoParquet LOD', fileUrl],
+        ['pmtiles', 'PMTiles', pmtilesUrl],
+        ['cogp', 'COGP (released)', cogpUrl],
+        ['esri', 'Esri SOP', esriUrl],
+        ['tiledir', 'LOD tile directory', fileUrl && tiledir],
+      ].filter(([, , source]) => source)
+      const chosen = new Set(
+        params.has('panes') ? params.get('panes').split(',') : available.map(([id]) => id),
+      )
+      const enabled = (id) => chosen.has(id) && available.some(([key]) => key === id)
+      const checkboxes = available.map(([id, name]) => {
+        const label = document.createElement('label')
+        const input = Object.assign(document.createElement('input'), {
+          type: 'checkbox',
+          value: id,
+          checked: enabled(id),
+        })
+        label.append(input, name)
+        document.getElementById('readers').append(label)
+        return input
+      })
+      const applyReaders = document.getElementById('apply-readers')
+      const updateSelection = () => {
+        applyReaders.disabled = !checkboxes.some((input) => input.checked)
+      }
+      checkboxes.forEach((input) => input.addEventListener('change', updateSelection))
+      updateSelection()
+      if (enabled('esri'))
+        document.getElementById('notes').textContent +=
+          ' Esri reference reader displays geometry only; its feature limit is reported in its panel.'
+
       const start = {
         center: (params.get('center') ?? '139.76,35.68').split(',').map(Number),
         zoom: Number(params.get('zoom') ?? 12),
@@ -260,9 +300,11 @@
           return result
         })
 
-      registerProtocol(maplibregl)
-      const protocol = new pmtiles.Protocol()
-      maplibregl.addProtocol('pmtiles', protocol.tile)
+      if (enabled('lod') || enabled('tiledir')) registerProtocol(maplibregl)
+      if (enabled('pmtiles')) {
+        const protocol = new pmtiles.Protocol()
+        maplibregl.addProtocol('pmtiles', protocol.tile)
+      }
 
       const fill = (source, layer) => ({
         id: `${source}-fill`,
@@ -297,17 +339,17 @@
       })
 
       // a query string on the second LOD pane's URL keeps its tally apart from the first
-      const panes = [
-        {
+      const panes = []
+      if (enabled('lod'))
+        panes.push({
           title: 'GeoParquet LOD · current reader',
           keys: [fileUrl],
           tile: (u) => u.startsWith('lod://') && parseTileUrl(u).config.url === fileUrl,
           lodUrl: fileUrl,
           sources: { lod: lodSource(fileUrl) },
           layers: [fill('lod', 'shapes'), dots('lod', 'points')],
-        },
-      ]
-      if (tiledir)
+        })
+      if (enabled('tiledir'))
         panes.push({
           title: 'LOD columns, tile directory',
           keys: [dirFileUrl, tiledir],
@@ -317,29 +359,38 @@
           sources: { lod: lodSource(dirFileUrl, { tiledir }) },
           layers: [fill('lod', 'shapes'), dots('lod', 'points')],
         })
-      if (cogpUrl) {
+      if (enabled('cogp')) {
         const {
           cogpUrl: cogpTiles,
           registerCogpProtocol,
           getCogpStats,
         } = await import('./dist/cogp/index.js')
         registerCogpProtocol(maplibregl)
+        const cogpSource = () => ({
+          type: 'vector',
+          tiles: [
+            cogpTiles({
+              shapes: {
+                url: cogpUrl,
+                properties: Object.fromEntries(properties().map((name) => [name, name])),
+              },
+            }),
+          ],
+          maxzoom: 22,
+        })
         panes.push({
-          title: 'COGP, @cogp/maplibre',
+          title: 'COGP · released reader 2.1.4',
+          cogpSource,
           keys: [cogpUrl],
           tile: (u) => u.startsWith('cogp://'),
           sources: {
-            cogp: {
-              type: 'vector',
-              tiles: [cogpTiles({ shapes: { url: cogpUrl, properties: {} } })],
-              maxzoom: 22,
-            },
+            cogp: cogpSource(),
           },
           layers: [fill('cogp', 'shapes')],
           stats: async () => ({ [cogpUrl]: await getCogpStats(cogpUrl) }),
         })
       }
-      if (pmtilesUrl)
+      if (enabled('pmtiles'))
         panes.push({
           title: 'PMTiles',
           keys: [pmtilesUrl],
@@ -347,22 +398,27 @@
           sources: { shapes: { type: 'vector', url: 'pmtiles://' + pmtilesUrl } },
           layers: [fill('shapes', pmtilesLayer)],
         })
-      if (esriUrl) {
+      if (enabled('esri')) {
         const { MapLibreParquetLayer } = await import('./dist/esri.js')
-        const head = await fetch(esriUrl, { method: 'HEAD' })
-        const byteSize = Number(head.headers.get('content-length'))
-        panes.push({
-          title: 'SOP, Esri reference reader',
+        const esriPane = {
+          title: 'Esri SOP · reference reader (geometry)',
+          geometryOnly: true,
+          ready: false,
           keys: [esriUrl],
           sources: {},
           layers: [],
-          attach: (map, hud) => {
+          attach: async (map, hud) => {
+            const head = await fetch(esriUrl, { method: 'HEAD' })
+            if (!head.ok) throw new Error(`Esri metadata request failed: ${head.status}`)
+            const byteSize = Number(head.headers.get('content-length'))
             // the reader converts each view to GeoJSON on moveend and owns its layers
             const layer = new MapLibreParquetLayer(
               map,
               { parquet: { url: esriUrl }, byteSize },
               {
                 onStatusChange: (status) => {
+                  esriPane.ready = status.type === 'ready'
+                  if (status.type === 'loading') esriPane.pendingSince ??= performance.now()
                   hud.dataset.status =
                     status.type === 'ready'
                       ? `level ${status.lod}, ${status.featureCount.toLocaleString()} features${status.featureLimitReached ? ' (limit)' : ''}`
@@ -379,12 +435,15 @@
               },
             )
             layer.initialize()
-            map.on('load', () => layer.refresh())
+            if (map.isStyleLoaded()) layer.refresh()
           },
-        })
+        }
+        panes.push(esriPane)
       }
 
       const container = document.getElementById('panes')
+      container.classList.toggle('multiple', panes.length > 2)
+      if (!panes.length) container.textContent = 'Select at least one reader and apply.'
       for (const pane of panes) {
         const div = document.createElement('div')
         div.className = 'pane'
@@ -424,11 +483,14 @@
           for (const [id, source] of Object.entries(pane.sources)) map.addSource(id, source)
           for (const layer of pane.layers) map.addLayer(layer)
         })
-        pane.attach?.(map, hud)
+        pane.attach?.(map, hud)?.catch((error) => {
+          hud.dataset.status = error.message
+        })
         map.on('movestart', () => {
           pane.pendingSince = performance.now()
         })
         map.on('idle', () => {
+          if (pane.ready === false) return
           if (!Object.keys(pane.sources).every((id) => map.getSource(id))) return
           pane.firstIdle ??= performance.now() - pane.started
           if (pane.pendingSince !== undefined) pane.lastIdle = performance.now() - pane.pendingSince
@@ -450,17 +512,23 @@
       document.getElementById('view').onchange = (event) => {
         if (!event.target.value) return
         const [lon, lat, zoom] = event.target.value.split(',').map(Number)
-        maps[0].map.jumpTo({ center: [lon, lat], zoom })
+        maps[0]?.map.jumpTo({ center: [lon, lat], zoom })
       }
       document.getElementById('style').onchange = (event) => {
         selectedStyle = event.target.value
         for (const { map, pane } of maps) {
+          if (pane.geometryOnly) continue
           pane.pendingSince = performance.now()
           if (pane.lodUrl) {
             const source = lodSource(pane.lodUrl, pane.lodOptions)
             map.getSource('lod')?.setTiles(source.tiles)
             // Also handle a style choice made before style.load.
             pane.sources.lod = source
+          }
+          if (pane.cogpSource) {
+            const source = pane.cogpSource()
+            map.getSource('cogp')?.setTiles(source.tiles)
+            pane.sources.cogp = source
           }
           for (const layer of pane.layers) {
             const property = layer.type === 'circle' ? 'circle-color' : 'fill-color'
@@ -470,11 +538,23 @@
         }
       }
       const reload = () => {
-        const view = maps[0].map
-        params.set('center', [view.getCenter().lng, view.getCenter().lat].join(','))
-        params.set('zoom', String(view.getZoom()))
+        const view = maps[0]?.map
+        if (view) {
+          params.set('center', [view.getCenter().lng, view.getCenter().lat].join(','))
+          params.set('zoom', String(view.getZoom()))
+        }
         params.set('style', selectedStyle)
         location.search = params.toString()
+      }
+      applyReaders.onclick = () => {
+        params.set(
+          'panes',
+          checkboxes
+            .filter((input) => input.checked)
+            .map((input) => input.value)
+            .join(','),
+        )
+        reload()
       }
       document.getElementById('reload').onclick = reload
       if (localServer) {
@@ -485,7 +565,7 @@
           reload()
         }
         document.getElementById('notes').textContent +=
-          ' Delay applies equally to both data files; no bandwidth cap. Fresh load clears reader caches. Subtype is stored in PMTiles and fetched from source rows in GeoParquet.'
+          ' Delay applies equally to all data files; no bandwidth cap. Fresh load clears reader caches. Subtype is stored in PMTiles and fetched from source rows in GeoParquet.'
       }
 
       // keep the views together
@@ -531,7 +611,10 @@
         return n
       }
       const current = async () => {
-        const stats = { ...(await readStats()), ...mainStats }
+        const stats = {
+          ...(maps.some(({ pane }) => pane.lodUrl) ? await readStats() : {}),
+          ...mainStats,
+        }
         for (const { pane } of maps) if (pane.stats) Object.assign(stats, await pane.stats())
         return stats
       }
@@ -553,7 +636,9 @@
           ]
           hud.replaceChildren(...children)
         }
-        document.getElementById('zoom').textContent = ` zoom ${maps[0].map.getZoom().toFixed(1)}`
+        document.getElementById('zoom').textContent = maps.length
+          ? ` zoom ${maps[0].map.getZoom().toFixed(1)}`
+          : ''
       }
       document.getElementById('reset').onclick = async () => {
         baseline = structuredClone(await current())

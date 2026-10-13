@@ -1,4 +1,4 @@
-// Local comparison server: expose only the demo and the two explicitly supplied files.
+// Local comparison server: expose only the demo and explicitly supplied files.
 // npm --prefix js run demo:compare -- --lod /path/file.parquet --pmtiles /path/file.pmtiles
 import { createServer } from 'node:http'
 import { createReadStream } from 'node:fs'
@@ -12,6 +12,8 @@ const { values } = parseArgs({
   options: {
     lod: { type: 'string' },
     pmtiles: { type: 'string' },
+    cogp: { type: 'string' },
+    esri: { type: 'string' },
     port: { type: 'string', default: '8094' },
   },
 })
@@ -22,6 +24,8 @@ const files = new Map([
   ['/data/current.parquet', resolve(values.lod)],
   ['/data/baseline.pmtiles', resolve(values.pmtiles)],
 ])
+if (values.cogp) files.set('/data/baseline.cogp.parquet', resolve(values.cogp))
+if (values.esri) files.set('/data/baseline.sop.parquet', resolve(values.esri))
 for (const path of files.values()) {
   if (!(await stat(path)).isFile()) throw new Error(`Not a file: ${path}`)
 }
@@ -35,7 +39,10 @@ const params = new URLSearchParams({
   basemap: '0',
   demoServer: '1',
   latency: '50',
+  panes: 'lod,pmtiles',
 })
+if (values.cogp) params.set('cogp', '/data/baseline.cogp.parquet')
+if (values.esri) params.set('esri', '/data/baseline.sop.parquet')
 const comparePath = '/demo/compare.html?' + params
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' }
 const server = createServer(async (req, res) => {
@@ -114,5 +121,5 @@ const server = createServer(async (req, res) => {
 })
 server.listen(port, '127.0.0.1', () => {
   console.log(`Compare: http://127.0.0.1:${port}${comparePath}`)
-  console.log('Both data files use the selected per-request delay; bandwidth is not limited.')
+  console.log('All data files use the selected per-request delay; bandwidth is not limited.')
 })

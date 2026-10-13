@@ -10,17 +10,22 @@ const { values } = parseArgs({
     out: { type: 'string' },
     url: { type: 'string' },
     pmtiles: { type: 'string' },
+    cogp: { type: 'string' },
+    esri: { type: 'string' },
     release: { type: 'string' },
   },
 })
 if (!values.out || !values.url || !values.pmtiles || !values.release)
   throw new Error('Supply --out DIRECTORY --url HTTPS_URL --pmtiles HTTPS_URL --release COMMIT')
-for (const value of [values.url, values.pmtiles]) {
+for (const value of [values.url, values.pmtiles, values.cogp, values.esri].filter(Boolean)) {
   if (new URL(value).protocol !== 'https:') throw new Error('Public datasets must use HTTPS')
 }
 const defaults = {
   url: values.url,
   pmtiles: values.pmtiles,
+  ...(values.cogp ? { cogp: values.cogp } : {}),
+  ...(values.esri ? { esri: values.esri } : {}),
+  panes: 'lod,pmtiles',
   center: '139.76,35.68',
   zoom: '11',
   basemap: '0',
@@ -48,7 +53,13 @@ await writeFile(
   JSON.stringify(
     {
       release: values.release,
-      datasets: { geoparquet: values.url, pmtiles: values.pmtiles },
+      datasets: {
+        geoparquet: values.url,
+        pmtiles: values.pmtiles,
+        cogp: values.cogp,
+        esri: values.esri,
+      },
+      defaultPanes: ['lod', 'pmtiles'],
       artificialLatencyMs: 0,
     },
     null,
