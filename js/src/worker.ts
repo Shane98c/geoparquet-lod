@@ -1,4 +1,4 @@
-import { VisibleTileCache, waitForTile } from './visible-cache.js'
+import { VisibleTileCache } from './visible-cache.js'
 import { decodeProjection } from './projection.js'
 /// <reference lib="webworker" />
 import type { Transfer, WorkerRequest, WorkerResponse } from './maplibre.js'
@@ -33,7 +33,11 @@ const controllers = new Map<number, AbortController>()
 const getReader = (url: string): Promise<TileReader> => {
   let reader = readers.get(url)
   if (!reader) {
-    reader = httpSource(s3Mirrors(url)).then((file) => openReader(coalescing(file)))
+    // Batch neighbouring tile messages and directory completions across microtasks.
+    // Cancelled slices are removed before this short window dispatches its ranges.
+    reader = httpSource(s3Mirrors(url)).then((file) =>
+      openReader(coalescing(file, { windowMs: 1 })),
+    )
     readers.set(url, reader)
     reader.catch(() => readers.delete(url))
   }
@@ -172,27 +176,29 @@ scope.addEventListener('message', (event: MessageEvent<WorkerRequest | CpuReques
               )
               const key = JSON.stringify([request.config.url, request.z, request.x, request.y])
               let rendered: ArrayBuffer | undefined
-              const tile = await waitForTile(
-                visible.getOrLoad(key, async () => {
-                  // Shared work outlives any one cancelled style request. Cache
-                  // all carried values already in the fetched packed pages.
+              const tile = await visible.getOrLoad(
+                key,
+                async (sharedSignal) => {
+                  // Keep shared work only while at least one tile still needs it.
                   const task = await reader.prepareTile(
                     reader.lodForZoom(request.z),
                     request.z,
                     request.x,
                     request.y,
+                    sharedSignal,
                   )
                   geometryDecodes++
                   const settings = source.length ? undefined : { ...options, signal: undefined }
                   if (cpu) {
-                    const result = await cpu.decode(task, settings)
+                    const result = await cpu.decode(task, settings, sharedSignal)
                     rendered = result.data
                     return result.tile
                   }
+                  sharedSignal.throwIfAborted()
                   const decoded = decodePreparedTile(task)
                   if (settings) rendered = renderDecodedTile(decoded, settings)
                   return decoded
-                }),
+                },
                 controller.signal,
               )
               if (rendered) return rendered

@@ -1,3 +1,4 @@
+import { SharedLoad } from './shared-load.js'
 import {
   parquetMetadataAsync,
   parquetSchema,
@@ -110,7 +111,7 @@ export class LodReader {
   private readonly cache = new Map<string, Promise<unknown>>()
   private readonly pages = new Map<
     string,
-    { bytes: number; values: Promise<Map<number, unknown>> }
+    { bytes: number; values: SharedLoad<Map<number, unknown>> }
   >()
   private pageBytes = 0
   // Cache requested scalar values, not whole decoded source pages. Sparse LOD
@@ -200,13 +201,13 @@ export class LodReader {
     return bounds[0] <= bounds[2] ? bounds : [-180, -85.051129, 180, 85.051129]
   }
 
-  static async open(file: RangeSource): Promise<LodReader> {
+  static async open(file: RangeSource, signal?: AbortSignal): Promise<LodReader> {
     let footer: ArrayBuffer | undefined
     const end = file.byteLength - 8
     const capturing: RangeSource = {
       byteLength: file.byteLength,
-      async slice(start, stop, signal) {
-        const buffer = await file.slice(start, stop, signal)
+      async slice(start, stop, sliceSignal) {
+        const buffer = await file.slice(start, stop, sliceSignal ?? signal)
         if (stop === end && start < end) footer = buffer
         return buffer
       },
@@ -215,6 +216,7 @@ export class LodReader {
     const metadata = await parquetMetadataAsync(capturing as unknown as AsyncBuffer, {
       initialFetchSize: 8,
     })
+    signal?.throwIfAborted()
     const reader = new LodReader(file, metadata, footer)
     reader.warmPrefix()
     return reader
@@ -687,12 +689,13 @@ export class LodReader {
    * fetched as one range. Decoded bbox pages are kept, since neighbouring
    * tiles refine against the same ones; LOD pages decode too large to keep.
    */
-  private pageValues(
+  private async pageValues(
     g: number,
     leaf: string,
     pages: PageLocation[],
     signal?: AbortSignal,
   ): Promise<Map<number, unknown>[]> {
+    signal?.throwIfAborted()
     const key = (page: PageLocation) => `p:${g}:${leaf}:${page.byteStart}`
     const keep = (BBOX_LEAVES as readonly string[]).includes(leaf)
     const ordered = [...pages].sort((a, b) => a.byteStart - b.byteStart)
@@ -700,9 +703,13 @@ export class LodReader {
     const runs: PageLocation[][] = []
     for (const page of ordered) {
       const cached = this.pages.get(key(page))
-      if (cached) {
-        wanted.set(key(page), cached.values)
+      if (cached && !cached.values.abandoned) {
+        wanted.set(key(page), cached.values.get(signal))
         continue
+      }
+      if (cached) {
+        this.pages.delete(key(page))
+        this.pageBytes -= cached.bytes
       }
       const last = runs[runs.length - 1]
       if (last && last[last.length - 1].byteEnd === page.byteStart) last.push(page)
@@ -716,31 +723,40 @@ export class LodReader {
     }
     for (const run of runs) {
       const dictionary = this.dictionaryPage(g, leaf)
-      const buffer = this.file.slice(run[0].byteStart, run[run.length - 1].byteEnd, signal)
+      // Page subscriptions keep the range alive until its last caller leaves.
+      const buffer = new SharedLoad((signal) =>
+        this.file.slice(run[0].byteStart, run[run.length - 1].byteEnd, signal),
+      )
       for (const page of run) {
-        const decoded = Promise.all([buffer, dictionary]).then(([bytes, dict]) => {
-          const slice = bytes.slice(
-            page.byteStart - run[0].byteStart,
-            page.byteEnd - run[0].byteStart,
-          )
-          const values = new Map<number, unknown>()
-          let row = page.rowStart
-          for (const data of this.decodePages(slice, g, leaf, row, page.rowEnd - row, dict)) {
-            for (let i = 0; i < data.length; i++, row++) values.set(row, data[i])
-          }
-          return values
-        })
-        wanted.set(key(page), decoded)
+        const decoded = new SharedLoad((signal) =>
+          Promise.all([buffer.get(signal), dictionary]).then(([bytes, dict]) => {
+            const slice = bytes.slice(
+              page.byteStart - run[0].byteStart,
+              page.byteEnd - run[0].byteStart,
+            )
+            const values = new Map<number, unknown>()
+            let row = page.rowStart
+            for (const data of this.decodePages(slice, g, leaf, row, page.rowEnd - row, dict)) {
+              for (let i = 0; i < data.length; i++, row++) values.set(row, data[i])
+            }
+            return values
+          }),
+        )
+        wanted.set(key(page), decoded.get(signal))
         if (!keep) continue
         const bytes = page.byteEnd - page.byteStart
         while (this.pages.size && this.pageBytes + bytes > PAGE_CACHE_BYTES)
           forget(this.pages.keys().next().value!)
         this.pages.set(key(page), { bytes, values: decoded })
         this.pageBytes += bytes
-        decoded.catch(() => forget(key(page)))
+        decoded.promise.catch(() => {
+          if (this.pages.get(key(page))?.values === decoded) forget(key(page))
+        })
       }
     }
-    return Promise.all(pages.map((page) => wanted.get(key(page))!))
+    const values = await Promise.all(pages.map((page) => wanted.get(key(page))!))
+    signal?.throwIfAborted()
+    return values
   }
 
   /**

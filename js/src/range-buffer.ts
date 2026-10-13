@@ -132,20 +132,32 @@ interface Pending {
 }
 
 /**
- * Merge slices requested within one microtask when the bytes between them are
+ * Merge slices requested within one microtask (or a short configured window) when the bytes between them are
  * cheaper than another round trip. Page readers ask for pages one by one, and
  * the pages a tile needs from one column are usually short runs with gaps.
  */
 export const coalescing = (
   source: RangeSource,
-  { maxGap = 32 * 1024, minGap = 4 * 1024, gapRatio = 0.5, maxRun = 4 * 1024 * 1024 } = {},
+  {
+    maxGap = 32 * 1024,
+    minGap = 4 * 1024,
+    gapRatio = 0.5,
+    maxRun = 4 * 1024 * 1024,
+    windowMs = 0,
+  } = {},
 ): RangeSource => {
   let pending: Pending[] = []
   let scheduled = false
 
   const flush = () => {
     scheduled = false
-    const batch = pending.sort((a, b) => a.start - b.start)
+    const batch = pending
+      .filter((p) => {
+        if (!p.signal?.aborted) return true
+        p.reject(p.signal.reason)
+        return false
+      })
+      .sort((a, b) => a.start - b.start)
     pending = []
     let run: Pending[] = []
     let runStart = 0
@@ -157,24 +169,31 @@ export const coalescing = (
       const [start, end] = [runStart, runEnd]
       const controller = new AbortController()
       const live = new Set(members.filter((m) => m.signal && !m.signal.aborted))
+      const cleanups: (() => void)[] = []
       for (const m of live) {
-        m.signal!.addEventListener('abort', () => {
+        const abort = () => {
           live.delete(m)
+          m.reject(m.signal!.reason)
           if (!live.size && members.every((x) => x.signal)) controller.abort()
-        })
+        }
+        m.signal!.addEventListener('abort', abort, { once: true })
+        cleanups.push(() => m.signal!.removeEventListener('abort', abort))
       }
-      source.slice(start, end, members.every((m) => m.signal) ? controller.signal : undefined).then(
-        (buffer) => {
-          for (const m of members) {
-            m.resolve(
-              m.start === start && m.end === end
-                ? buffer
-                : buffer.slice(m.start - start, m.end - start),
-            )
-          }
-        },
-        (error) => members.forEach((m) => m.reject(error)),
-      )
+      source
+        .slice(start, end, members.every((m) => m.signal) ? controller.signal : undefined)
+        .then(
+          (buffer) => {
+            for (const m of members) {
+              m.resolve(
+                m.start === start && m.end === end
+                  ? buffer
+                  : buffer.slice(m.start - start, m.end - start),
+              )
+            }
+          },
+          (error) => members.forEach((m) => m.reject(error)),
+        )
+        .finally(() => cleanups.forEach((cleanup) => cleanup()))
       run = []
       useful = 0
     }
@@ -202,7 +221,8 @@ export const coalescing = (
         pending.push({ start, end, signal, resolve, reject })
         if (!scheduled) {
           scheduled = true
-          queueMicrotask(flush)
+          if (windowMs > 0) setTimeout(flush, windowMs)
+          else queueMicrotask(flush)
         }
       })
     },

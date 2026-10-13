@@ -55,14 +55,61 @@
         border-radius: 4px;
         box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
         z-index: 2;
+        right: 8px;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px 12px;
+      }
+      #bar label:not([hidden]) {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+      #bar small {
+        display: block;
+        color: #555;
+        margin-top: 4px;
+        flex-basis: 100%;
       }
     </style>
   </head>
   <body>
     <div id="panes"></div>
     <div id="bar">
-      <button id="reset">reset counters</button>
+      <label
+        >View
+        <select id="view">
+          <option value="">Custom</option>
+          <option value="139.76,35.68,8">Tokyo metro</option>
+          <option value="139.76,35.68,11">Tokyo city</option>
+          <option value="139.76,35.68,14">Tokyo street</option>
+          <option value="135.5,34.69,14">Osaka street</option>
+        </select></label
+      >
+      <label
+        >Style
+        <select id="style">
+          <option value="geometry">Geometry</option>
+          <option value="height">Height (carried)</option>
+          <option value="subtype">Subtype (source column)</option>
+        </select></label
+      >
+      <label id="latency-control" hidden
+        >Data request delay
+        <select id="latency">
+          <option value="0">Local / 0 ms</option>
+          <option value="50">50 ms</option>
+          <option value="100">100 ms</option>
+        </select></label
+      >
+      <button id="reload">Fresh load</button>
+      <button id="reset">Reset counters (keep caches)</button>
       <span id="zoom"></span>
+      <small id="notes"
+        >Synchronized views; counts include tile boundary copies, not unique buildings. Different
+        thinning and overzoom rules still apply.</small
+      >
     </div>
     <script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
     <script src="https://unpkg.com/pmtiles@4.5.0/dist/pmtiles.js"></script>
@@ -75,7 +122,7 @@
       //   ?cogp=       a COGP file, read with @cogp/maplibre
       //   ?esri=       a Spatially Optimized Parquet file, read with Esri's MapLibre reference reader
       //   ?center=lon,lat ?zoom=  the starting view
-      import { registerProtocol, tileUrl, readStats } from './dist/maplibre.js'
+      import { registerProtocol, tileUrl, parseTileUrl, readStats } from './dist/maplibre.js'
 
       const params = new URLSearchParams(location.search)
       const url = params.get('url')
@@ -85,8 +132,23 @@
           '<code>tiledir=</code>, <code>pmtiles=</code>, <code>cogp=</code>, <code>esri=</code> for the panes beside it.</p>'
         throw new Error('no ?url=')
       }
-      const abs = (u) => (u ? new URL(u, location.href).href : null)
+      const localServer = params.get('demoServer') === '1'
+      const delay = Number(params.get('latency') ?? 50)
+      const abs = (u) => {
+        if (!u) return null
+        const result = new URL(u, location.href)
+        if (
+          localServer &&
+          result.origin === location.origin &&
+          result.pathname.startsWith('/data/')
+        )
+          result.searchParams.set('latency', String(delay))
+        return result.href
+      }
       const fileUrl = abs(url)
+      const dirFile = new URL(fileUrl)
+      dirFile.searchParams.set('dir', '1')
+      const dirFileUrl = dirFile.href
       const tiledir = abs(params.get('tiledir'))
       const pmtilesUrl = abs(params.get('pmtiles'))
       const pmtilesLayer = params.get('pmtiles_layer') ?? 'buildings'
@@ -101,6 +163,40 @@
         'fill-opacity': 0.5,
         'fill-outline-color': '#7a1f08',
       }
+      let selectedStyle = params.get('style') ?? 'geometry'
+      if (!['geometry', 'height', 'subtype'].includes(selectedStyle)) selectedStyle = 'geometry'
+      document.getElementById('style').value = selectedStyle
+      const properties = () => (selectedStyle === 'geometry' ? [] : [selectedStyle])
+      const color = () =>
+        selectedStyle === 'height'
+          ? [
+              'interpolate',
+              ['linear'],
+              ['to-number', ['get', 'height'], 0],
+              0,
+              '#d8c9b7',
+              10,
+              '#f0a24d',
+              40,
+              '#d0421b',
+              150,
+              '#55215a',
+            ]
+          : selectedStyle === 'subtype'
+            ? [
+                'match',
+                ['get', 'subtype'],
+                'residential',
+                '#d0421b',
+                'commercial',
+                '#3b75af',
+                'industrial',
+                '#8960a6',
+                'civic',
+                '#369b75',
+                '#aaa',
+              ]
+            : '#d0421b'
 
       // main-thread fetches (PMTiles, Esri) tallied the same way as the workers'
       const mainStats = {}
@@ -158,9 +254,8 @@
       maplibregl.addProtocol = (scheme, handler) =>
         addProtocol(scheme, async (request, abort) => {
           const result = await handler(request, abort)
-          if (result?.data instanceof ArrayBuffer) {
-            const key = decodeURIComponent(request.url)
-            tileCounts[key] = (tileCounts[key] ?? 0) + mvtFeatures(result.data)
+          if (result?.data instanceof ArrayBuffer || ArrayBuffer.isView(result?.data)) {
+            tileCounts[request.url] = (tileCounts[request.url] ?? 0) + mvtFeatures(result.data)
           }
           return result
         })
@@ -174,7 +269,7 @@
         type: 'fill',
         source,
         'source-layer': layer,
-        paint,
+        paint: { ...paint, 'fill-color': color() },
       })
       const dots = (source, layer) => ({
         id: `${source}-dots`,
@@ -182,23 +277,32 @@
         source,
         'source-layer': layer,
         paint: {
-          'circle-color': '#d0421b',
+          'circle-color': color(),
           'circle-opacity': 0.8,
           'circle-radius': ['interpolate', ['linear'], ['zoom'], 2, 1.5, 14, 3],
         },
       })
       const lodSource = (u, options) => ({
         type: 'vector',
-        tiles: [tileUrl({ url: u, layer: 'shapes', pointLayer: 'points', ...options })],
+        tiles: [
+          tileUrl({
+            url: u,
+            layer: 'shapes',
+            pointLayer: 'points',
+            properties: properties(),
+            ...options,
+          }),
+        ],
         maxzoom: 22,
       })
 
       // a query string on the second LOD pane's URL keeps its tally apart from the first
       const panes = [
         {
-          title: 'LOD columns, page indexes',
+          title: 'GeoParquet LOD · current reader',
           keys: [fileUrl],
-          tile: (u) => u.includes(fileUrl) && !u.includes(fileUrl + '?dir'),
+          tile: (u) => u.startsWith('lod://') && parseTileUrl(u).config.url === fileUrl,
+          lodUrl: fileUrl,
           sources: { lod: lodSource(fileUrl) },
           layers: [fill('lod', 'shapes'), dots('lod', 'points')],
         },
@@ -206,9 +310,11 @@
       if (tiledir)
         panes.push({
           title: 'LOD columns, tile directory',
-          keys: [fileUrl + '?dir', tiledir],
-          tile: (u) => u.includes(fileUrl + '?dir'),
-          sources: { lod: lodSource(fileUrl + '?dir', { tiledir }) },
+          keys: [dirFileUrl, tiledir],
+          tile: (u) => u.startsWith('lod://') && parseTileUrl(u).config.url === dirFileUrl,
+          lodUrl: dirFileUrl,
+          lodOptions: { tiledir },
+          sources: { lod: lodSource(dirFileUrl, { tiledir }) },
           layers: [fill('lod', 'shapes'), dots('lod', 'points')],
         })
       if (cogpUrl) {
@@ -292,9 +398,24 @@
       const maps = []
       for (const pane of panes) {
         const { hud } = pane
+        pane.started = performance.now()
+        pane.pendingSince = pane.started
         const map = new maplibregl.Map({
           container: pane.mapDiv,
-          style: 'https://basemaps.cartocdn.com/gl/positron-nolabels-gl-style/style.json',
+          style:
+            params.get('basemap') === '0'
+              ? {
+                  version: 8,
+                  sources: {},
+                  layers: [
+                    {
+                      id: 'background',
+                      type: 'background',
+                      paint: { 'background-color': '#f3f1ed' },
+                    },
+                  ],
+                }
+              : 'https://basemaps.cartocdn.com/gl/positron-nolabels-gl-style/style.json',
           ...start,
           attributionControl: false,
         })
@@ -304,11 +425,68 @@
           for (const layer of pane.layers) map.addLayer(layer)
         })
         pane.attach?.(map, hud)
-        map.on('error', (e) => console.error(pane.title, e.error ?? e))
+        map.on('movestart', () => {
+          pane.pendingSince = performance.now()
+        })
+        map.on('idle', () => {
+          if (!Object.keys(pane.sources).every((id) => map.getSource(id))) return
+          pane.firstIdle ??= performance.now() - pane.started
+          if (pane.pendingSince !== undefined) pane.lastIdle = performance.now() - pane.pendingSince
+          pane.pendingSince = undefined
+        })
+        map.on('error', (e) => {
+          // MapLibre 5 also emits a plain Error('AbortError') when setTiles
+          // interrupts a preceding style update. Cancellation is expected;
+          // retain real transport/decoder failures in the HUD.
+          if (e.error?.name === 'AbortError' || e.error?.message === 'AbortError') return
+          hud.dataset.status = String(e.error?.message ?? e.error ?? e)
+          console.error(pane.title, e.error ?? e)
+        })
         maps.push({ map, hud, pane })
       }
 
       window.maps = maps.map((m) => m.map)
+
+      document.getElementById('view').onchange = (event) => {
+        if (!event.target.value) return
+        const [lon, lat, zoom] = event.target.value.split(',').map(Number)
+        maps[0].map.jumpTo({ center: [lon, lat], zoom })
+      }
+      document.getElementById('style').onchange = (event) => {
+        selectedStyle = event.target.value
+        for (const { map, pane } of maps) {
+          pane.pendingSince = performance.now()
+          if (pane.lodUrl) {
+            const source = lodSource(pane.lodUrl, pane.lodOptions)
+            map.getSource('lod')?.setTiles(source.tiles)
+            // Also handle a style choice made before style.load.
+            pane.sources.lod = source
+          }
+          for (const layer of pane.layers) {
+            const property = layer.type === 'circle' ? 'circle-color' : 'fill-color'
+            layer.paint[property] = color()
+            if (map.getLayer(layer.id)) map.setPaintProperty(layer.id, property, color())
+          }
+        }
+      }
+      const reload = () => {
+        const view = maps[0].map
+        params.set('center', [view.getCenter().lng, view.getCenter().lat].join(','))
+        params.set('zoom', String(view.getZoom()))
+        params.set('style', selectedStyle)
+        location.search = params.toString()
+      }
+      document.getElementById('reload').onclick = reload
+      if (localServer) {
+        document.getElementById('latency-control').hidden = false
+        document.getElementById('latency').value = String(delay)
+        document.getElementById('latency').onchange = (event) => {
+          params.set('latency', event.target.value)
+          reload()
+        }
+        document.getElementById('notes').textContent +=
+          ' Delay applies equally to both data files; no bandwidth cap. Fresh load clears reader caches. Subtype is stored in PMTiles and fetched from source rows in GeoParquet.'
+      }
 
       // keep the views together
       let syncing = false
@@ -367,7 +545,10 @@
             Object.assign(document.createElement('small'), {
               textContent: hud.dataset.status
                 ? hud.dataset.status
-                : `${features(pane).toLocaleString()} features in tiles`,
+                : `${features(pane).toLocaleString()} features delivered (cumulative)`,
+            }),
+            Object.assign(document.createElement('small'), {
+              textContent: `First map idle: ${pane.firstIdle === undefined ? 'loading…' : Math.round(pane.firstIdle) + ' ms'} · Last view/style: ${pane.pendingSince !== undefined ? 'loading…' : Math.round(pane.lastIdle ?? 0) + ' ms'}`,
             }),
           ]
           hud.replaceChildren(...children)

@@ -1,12 +1,13 @@
 import type { DecodedTile } from './tile.js'
+import { SharedLoad } from './shared-load.js'
 
 /** One coordinator owns a bounded, source-qualified LRU of decoded overview
- * tiles. Pending loads are shared; cancelling one waiter does not cancel them.
+ * tiles. Pending loads survive until their last consumer cancels.
  * Typed buffer backing stores are counted in full; JS storage is estimated. */
 export class VisibleTileCache {
   private entries = new Map<
     string,
-    { promise: Promise<DecodedTile>; bytes: number; tile?: DecodedTile }
+    { task: SharedLoad<DecodedTile>; bytes: number; tile?: DecodedTile }
   >()
   bytes = 0
   constructor(
@@ -16,20 +17,26 @@ export class VisibleTileCache {
   get size() {
     return this.entries.size
   }
-  getOrLoad(key: string, load: () => Promise<DecodedTile>): Promise<DecodedTile> {
+  getOrLoad(
+    key: string,
+    load: (signal: AbortSignal) => Promise<DecodedTile>,
+    signal?: AbortSignal,
+  ): Promise<DecodedTile> {
+    if (signal?.aborted) return Promise.reject(signal.reason)
     const existing = this.entries.get(key)
-    if (existing) {
+    if (existing && !existing.task.abandoned) {
       this.entries.delete(key)
       this.entries.set(key, existing)
-      return existing.promise
+      return existing.task.get(signal)
     }
-    const entry: { promise: Promise<DecodedTile>; bytes: number; tile?: DecodedTile } = {
-      promise: Promise.resolve().then(load),
+    if (existing) this.delete(key)
+    const entry: { task: SharedLoad<DecodedTile>; bytes: number; tile?: DecodedTile } = {
+      task: new SharedLoad(load),
       bytes: 0,
     }
     this.entries.set(key, entry)
     this.trim()
-    entry.promise.then(
+    entry.task.promise.then(
       (tile) => {
         if (this.entries.get(key) !== entry) return
         entry.tile = tile
@@ -42,7 +49,7 @@ export class VisibleTileCache {
         if (this.entries.get(key) === entry) this.delete(key)
       },
     )
-    return entry.promise
+    return entry.task.get(signal)
   }
   addColumns(key: string, tile: DecodedTile, columns: Record<string, unknown[]>): void {
     const entry = this.entries.get(key)

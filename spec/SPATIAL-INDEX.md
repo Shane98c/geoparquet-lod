@@ -102,6 +102,11 @@ shards, including pending requests. A tile cancellation does not cancel a
 request shared with another tile. Exact source-row reads and tiles beyond the
 finest LOD lazily open the normal Parquet reader.
 
+Pending work tracks independent consumers. The last consumer leaving aborts
+the shared transport, including directory and bbox page reads and analytical
+footer opening. Abandoned entries are replaced on lookup; a late failure may
+remove only the entry it belongs to. Completed cache entries stay reusable.
+
 Publish files immutably. This physical profile is specific to one file write;
 ordinary Parquet writers need not preserve it. Optimizing again reconstructs
 it. The reference optimizer writes to a temporary file and publishes only
@@ -191,7 +196,8 @@ the CPU pool decodes them and returns only selected values. Hydrated scalar
 columns count toward the decoded-tile budget and avoid repeated source joins.
 One-worker mode executes these stages locally. Eviction or an oversized tile
 causes a later geometry read to decode again. Shared pending loads can finish
-after one requester cancels; failed loads are removed.
+after one requester cancels while another still needs them; the last departure
+cancels pending work. Failed or abandoned loads are removed or replaced.
 
 No stored data, page lookup rules, feature IDs, or analytical semantics change.
 See [measurements and limits](../docs/parity-styles.md) for the cold-load and

@@ -76,3 +76,26 @@ await growing.getOrLoad('grow', async () => growth)
 growing.addColumns('grow', growth, { extra: ['x'.repeat(1024)] })
 assert.equal(growing.bytes, 0)
 assert.equal(growing.size, 0, 'hydration growth obeys the cache budget')
+
+// Reacquire an abandoned key before the old transport finishes. Its late
+// rejection must not evict the replacement or corrupt byte accounting.
+const retryCache = new VisibleTileCache(size * 2)
+const departing = new AbortController()
+let finishOld
+const old = retryCache.getOrLoad(
+  'retry',
+  () =>
+    new Promise((r) => {
+      finishOld = r
+    }),
+  departing.signal,
+)
+const oldRejected = assert.rejects(old, { name: 'AbortError' })
+await Promise.resolve()
+departing.abort()
+await oldRejected
+assert.equal(await retryCache.getOrLoad('retry', async () => tile), tile)
+finishOld(tile)
+await new Promise(setImmediate)
+assert.equal(retryCache.bytes, size)
+assert.equal(await retryCache.getOrLoad('retry', () => assert.fail('replacement evicted')), tile)

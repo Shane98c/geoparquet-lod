@@ -84,11 +84,12 @@ export class TilePool {
   async decode(
     task: PreparedTile,
     options?: TileOptions,
+    sharedSignal?: AbortSignal,
   ): Promise<{ tile: DecodedTile; data?: ArrayBuffer }> {
     const { signal, ...settings } = options ?? {}
     return (await this.submit(
       { type: 'decode', task, options: options ? settings : undefined },
-      signal,
+      sharedSignal ?? signal,
     )) as { tile: DecodedTile; data?: ArrayBuffer }
   }
   async render(tile: DecodedTile, options: TileOptions): Promise<ArrayBuffer> {

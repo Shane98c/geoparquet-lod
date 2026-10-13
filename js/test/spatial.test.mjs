@@ -54,6 +54,117 @@ const canonical = (buffer) => {
   return [...new Set(features)].sort()
 }
 const { cases, expected } = JSON.parse(await readFile(casesPath, 'utf8'))
+
+// Exact-geometry neighbours share bbox pages. Abort the caller that starts a
+// read while a second caller still needs those bytes, as during rapid zooming.
+for (const cancelBoth of [false, true]) {
+  const data = await readFile(newPath)
+  const bboxRanges = legacy.metadata.row_groups.flatMap((group) =>
+    group.columns
+      .filter((c) => c.meta_data.path_in_schema[0] === 'bbox')
+      .map((c) => {
+        const m = c.meta_data
+        const start = Number(m.dictionary_page_offset ?? m.data_page_offset)
+        return [start, start + Number(m.total_compressed_size)]
+      }),
+  )
+  let hold = true
+  let abortedReads = 0
+  let started
+  const firstPage = new Promise((resolve) => {
+    started = resolve
+  })
+  const releases = []
+  const reader = await openReader({
+    byteLength: data.length,
+    async slice(a, b = data.length, signal) {
+      signal?.throwIfAborted()
+      if (hold && bboxRanges.some(([lo, hi]) => a < hi && b > lo)) {
+        started()
+        await new Promise((resolve, reject) => {
+          const abort = () => {
+            abortedReads++
+            reject(signal.reason)
+          }
+          signal?.addEventListener('abort', abort, { once: true })
+          releases.push(() => {
+            signal?.removeEventListener('abort', abort)
+            resolve()
+          })
+        })
+      }
+      return Uint8Array.from(data.subarray(a, b)).buffer
+    },
+  })
+  const cancelled = new AbortController()
+  const a = reader.readPrimary(legacy.bounds, [], cancelled.signal)
+  const rejected = assert.rejects(a, { name: 'AbortError' })
+  await firstPage
+  const other = new AbortController()
+  const b = reader.readPrimary(legacy.bounds, [], other.signal)
+  const secondRejected = cancelBoth ? assert.rejects(b, { name: 'AbortError' }) : undefined
+  // All ungated source reads resolve immediately. Drain them so b reaches
+  // the shared pages before cancelling a.
+  await new Promise(setImmediate)
+  cancelled.abort()
+  if (cancelBoth) other.abort()
+  hold = false
+  for (const release of releases) release()
+  const [, live] = await Promise.all([rejected, secondRejected ?? b])
+  const control = await legacy.readPrimary(legacy.bounds)
+  if (cancelBoth) assert.ok(abortedReads > 0, 'last neighbour departure stops shared bbox reads')
+  else {
+    assert.equal(abortedReads, 0, 'live neighbour keeps shared reads alive')
+    assert.ok(live.rows.length, 'live neighbour retains exact features')
+    assert.deepEqual(live, control, 'cancelled neighbour cannot poison shared bbox pages')
+  }
+  assert.deepEqual(await reader.readPrimary(legacy.bounds), control, 'cache remains reusable')
+}
+
+// Leaving exact-detail view while its analytical footer opens must stop that
+// work too, and a later inspection must be able to open it afresh.
+{
+  const data = await readFile(newPath)
+  let hold = true,
+    started,
+    release,
+    aborted = false
+  const trailer = new Promise((resolve) => {
+    started = resolve
+  })
+  const reader = await openReader({
+    byteLength: data.length,
+    async slice(a, b = data.length, signal) {
+      signal?.throwIfAborted()
+      if (hold && a === data.length - 8) {
+        started()
+        await new Promise((resolve, reject) => {
+          const cancel = () => {
+            aborted = true
+            reject(signal.reason)
+          }
+          signal?.addEventListener('abort', cancel, { once: true })
+          release = () => {
+            signal?.removeEventListener('abort', cancel)
+            resolve()
+          }
+        })
+      }
+      return Uint8Array.from(data.subarray(a, b)).buffer
+    },
+  })
+  const controller = new AbortController()
+  const request = reader.readPrimary(legacy.bounds, [], controller.signal)
+  const rejected = assert.rejects(request, { name: 'AbortError' })
+  await trailer
+  controller.abort()
+  hold = false
+  release()
+  await rejected
+  assert.ok(aborted, 'abandoned analytical opening aborts its transport')
+  assert.deepEqual(await reader.readPrimary(legacy.bounds), await legacy.readPrimary(legacy.bounds))
+}
+
 for (const [i, [z, x, y]] of cases.entries()) {
   const [a, b, c] = await Promise.all([old, fast, legacy].map((r) => renderTile(r, z, x, y)))
   assert.deepEqual(canonical(c), canonical(a), `standard reader of relocated pages ${z}/${x}/${y}`)

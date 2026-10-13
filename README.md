@@ -66,6 +66,12 @@ and tile encoding in its CPU pool. A Tokyo city style change improved from
 requests and bytes. Cold styled loads were slightly slower. See
 [style-change results and memory costs](docs/parity-styles.md).
 
+Shared navigation work now stops when its last consumer leaves, including
+compressed pages, decoded tiles, and unused analytical footer reads. In a
+controlled pan/zoom route this reduced completed payload by 30–76%; fully
+loaded views retained the same bytes and output. See
+[navigation results and cancellation tradeoffs](docs/parity-navigation.md).
+
 The packed path now supports styling with source scalar columns that were not
 carried at write time. These are batched by source row ID and cached on demand;
 the first read can be substantially slower than reading carried attributes.
@@ -278,6 +284,29 @@ That bundles the reader into `demo/dist`, serves the repo at
 in the repo root; pass `?url=` for another file, such as the
 `overture_denver.lod.parquet` written above. The page must be served; module
 scripts do not load from `file://`.
+
+To compare the latest reader with a local PMTiles archive:
+
+```bash
+npm --prefix js run demo:compare -- --lod /path/current.parquet --pmtiles /path/baseline.pmtiles
+```
+
+Open the printed localhost URL. The server supports range reads without copying
+the files, binds to loopback, and adds the same selectable 0/50/100 ms delay to
+each data request. It does not simulate a bandwidth cap. The synchronized panes
+show transferred bytes, requests, tile feature counts, and map idle times.
+The default blank background keeps basemap loading out of those timings;
+add `basemap=1` for a basemap. Map idle includes rendering and is not a precise
+first-paint measurement. These controls target the Japan building fixtures:
+height is carried in both formats, while subtype is fetched from GeoParquet
+source rows and is already stored in this PMTiles archive.
+
+Use **Fresh load** to recreate readers at the current location and style;
+**Reset counters** keeps caches warm. Pan away and return, then switch between
+geometry, height, and subtype to feel navigation and attribute reuse. The files
+have different thinning and overzoom rules, so compare visual coverage as well
+as speed. GeoParquet retains whole overview features and original source rows;
+this PMTiles archive stops at z14 and overzooms beyond it.
 
 ## Measured
 

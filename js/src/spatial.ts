@@ -1,3 +1,4 @@
+import { SharedLoad } from './shared-load.js'
 import type { ProjectionExecutor } from './projection.js'
 import { readColumn } from 'hyparquet/src/column.js'
 import { DEFAULT_PARSERS } from 'hyparquet/src/convert.js'
@@ -118,10 +119,10 @@ export class SpatialReader implements TileReader {
   readonly primary: string
   readonly finestZoom: number
   private readonly fields: AttributeField[]
-  private readonly directories = new Map<number, Promise<Page[] | Shard[]>>()
-  private readonly pages = new Map<number, { size: number; data: Promise<ArrayBuffer> }>()
+  private readonly directories = new Map<number, SharedLoad<Page[] | Shard[]>>()
+  private readonly pages = new Map<number, { size: number; data: SharedLoad<ArrayBuffer> }>()
   private pageBytes = 0
-  private fallback?: Promise<LodReader>
+  private fallback?: SharedLoad<LodReader>
 
   constructor(
     private readonly file: RangeSource,
@@ -150,18 +151,19 @@ export class SpatialReader implements TileReader {
     return this.root.columns ?? this.lod.attributes.map((a) => a.name)
   }
 
-  private analytical(): Promise<LodReader> {
-    if (!this.fallback) {
-      this.fallback = LodReader.open(this.file)
-      this.fallback.catch(() => {
-        this.fallback = undefined
+  private analytical(signal?: AbortSignal): Promise<LodReader> {
+    if (!this.fallback || this.fallback.abandoned) {
+      const current = new SharedLoad((signal) => LodReader.open(this.file, signal))
+      this.fallback = current
+      current.promise.catch(() => {
+        if (this.fallback === current) this.fallback = undefined
       })
     }
-    return this.fallback
+    return this.fallback.get(signal)
   }
 
   async readRow(row: number, columns: string[], signal?: AbortSignal) {
-    return (await this.analytical()).readRow(row, columns, signal)
+    return (await this.analytical(signal)).readRow(row, columns, signal)
   }
 
   async readColumns(
@@ -170,30 +172,32 @@ export class SpatialReader implements TileReader {
     signal?: AbortSignal,
     execute?: ProjectionExecutor,
   ) {
-    return (await this.analytical()).readColumns(rows, columns, signal, execute)
+    return (await this.analytical(signal)).readColumns(rows, columns, signal, execute)
   }
 
   async readPrimary(bbox: Bbox, attributes: string[] = [], signal?: AbortSignal) {
-    return (await this.analytical()).readPrimary(bbox, attributes, signal)
+    return (await this.analytical(signal)).readPrimary(bbox, attributes, signal)
   }
 
-  private directory(shard: Shard): Promise<Page[] | Shard[]> {
+  private directory(shard: Shard, signal?: AbortSignal): Promise<Page[] | Shard[]> {
     const [, , offset, length] = shard
     let result = this.directories.get(offset)
-    if (!result) {
-      result = this.file.slice(offset, offset + length).then(gunzipJson<Page[] | Shard[]>)
+    if (!result || result.abandoned) {
+      result = new SharedLoad((signal) =>
+        this.file.slice(offset, offset + length, signal).then(gunzipJson<Page[] | Shard[]>),
+      )
       while (this.directories.size >= 128)
         this.directories.delete(this.directories.keys().next().value!)
       this.directories.set(offset, result)
       const current = result
-      result.catch(() => {
+      result.promise.catch(() => {
         if (this.directories.get(offset) === current) this.directories.delete(offset)
       })
     } else {
       this.directories.delete(offset)
       this.directories.set(offset, result)
     }
-    return result
+    return result.get(signal)
   }
 
   private async lookup(
@@ -202,13 +206,15 @@ export class SpatialReader implements TileReader {
     end: number,
     own: boolean,
     hosted: boolean,
+    signal?: AbortSignal,
   ): Promise<Page[]> {
     const host = hosted ? (shards.find((s) => s[1] >= start) ?? shards.at(-1)) : undefined
     const hits = shards.filter((s) => (own && s[0] < end && s[1] >= start) || s === host)
     const selected = await Promise.all(
       hits.map(async (shard) => {
-        const children = await this.directory(shard)
-        if (shard[4]) return this.lookup(children as Shard[], start, end, own, shard === host)
+        const children = await this.directory(shard, signal)
+        if (shard[4])
+          return this.lookup(children as Shard[], start, end, own, shard === host, signal)
         const pages = children as Page[]
         const hostPage =
           shard === host ? (pages.find((p) => p[1] >= start) ?? pages.at(-1)) : undefined
@@ -218,10 +224,16 @@ export class SpatialReader implements TileReader {
     return selected.flat()
   }
 
-  private pageData(pages: Page[]): Promise<ArrayBuffer[]> {
+  private pageData(pages: Page[], signal?: AbortSignal): Promise<ArrayBuffer[]> {
+    signal?.throwIfAborted()
     const runs: Page[][] = []
     for (const p of [...pages].sort((a, b) => a[2] - b[2])) {
-      if (this.pages.has(p[2])) continue
+      const cached = this.pages.get(p[2])
+      if (cached && !cached.data.abandoned) continue
+      if (cached) {
+        this.pages.delete(p[2])
+        this.pageBytes -= cached.size
+      }
       const last = runs.at(-1)
       if (last && last.at(-1)![2] + last.at(-1)![3] === p[2]) last.push(p)
       else runs.push([p])
@@ -232,18 +244,19 @@ export class SpatialReader implements TileReader {
       if (cached) {
         this.pages.delete(p[2])
         this.pages.set(p[2], cached)
-        wanted.set(p[2], cached.data)
+        wanted.set(p[2], cached.data.get(signal))
       }
     }
     for (const run of runs) {
       const start = run[0][2],
         last = run.at(-1)!
-      // Shared requests outlive any one tile cancellation. Aborted callers are
-      // checked before decoding; an aborted tile cannot poison its neighbours.
-      const fetched = this.file.slice(start, last[2] + last[3])
+      // Each page subscribes to the run; the last departing page aborts I/O.
+      const fetched = new SharedLoad((signal) => this.file.slice(start, last[2] + last[3], signal))
       for (const p of run) {
-        const data = fetched.then((bytes) => bytes.slice(p[2] - start, p[2] - start + p[3]))
-        wanted.set(p[2], data)
+        const data = new SharedLoad((signal) =>
+          fetched.get(signal).then((bytes) => bytes.slice(p[2] - start, p[2] - start + p[3])),
+        )
+        wanted.set(p[2], data.get(signal))
         while (this.pages.size && this.pageBytes + p[3] > 16 * 1024 * 1024) {
           const oldest = this.pages.keys().next().value!
           this.pageBytes -= this.pages.get(oldest)!.size
@@ -252,7 +265,7 @@ export class SpatialReader implements TileReader {
         if (p[3] <= 16 * 1024 * 1024) {
           this.pages.set(p[2], { size: p[3], data })
           this.pageBytes += p[3]
-          data.catch(() => {
+          data.promise.catch(() => {
             if (this.pages.get(p[2])?.data === data) {
               this.pages.delete(p[2])
               this.pageBytes -= p[3]
@@ -304,7 +317,14 @@ export class SpatialReader implements TileReader {
     const coarse = this.lod.prefix && Math.max(...lod.zooms) <= this.lod.prefix.zoom
     const selected = await Promise.all(
       streams.map((shards, section) =>
-        this.lookup(shards, start, end, !(coarse && section === 1), section === hostSection),
+        this.lookup(
+          shards,
+          start,
+          end,
+          !(coarse && section === 1),
+          section === hostSection,
+          signal,
+        ),
       ),
     )
     signal?.throwIfAborted()
@@ -328,7 +348,7 @@ export class SpatialReader implements TileReader {
     const carried = this.lod.attributes
     const companions = this.lod.attribute_columns?.[lod.name]
     const [payloads, attributePages] = await Promise.all([
-      this.pageData(pages),
+      this.pageData(pages, signal),
       Promise.all(
         (companions ? attributes : []).map(async (name) => {
           const index = carried.findIndex((a) => a.name === name)
@@ -345,7 +365,7 @@ export class SpatialReader implements TileReader {
             name,
             type: carried[index].type,
             column: companions![name],
-            payloads: await this.pageData(selected),
+            payloads: await this.pageData(selected, signal),
           }
         }),
       ),
