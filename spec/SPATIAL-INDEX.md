@@ -125,3 +125,50 @@ worker is created; one retains the serial path. Exact-primary fallback and
 analytical reads remain on the coordinator. Each CPU worker has its own decoder
 and bounded projection cache, so more workers consume more memory. They reuse the coordinator’s `worker.js` URL
 to avoid an additional JavaScript asset. This is a reader change, with no file-format change.
+
+## Optional separated-attribute ablation
+
+`separate` converts a logical packed file to experimental
+`geo.lod_columns.encoding = "packed_geometry"` with `pack_version: 1`.
+Older packed-only readers must reject this encoding. It adds
+`attribute_columns: {LOD_name: {attribute_name: physical_column_name}}`.
+`attributes` continues to describe all carried display values in their original
+order. Geometry blobs use the existing packing with **zero attribute fields**:
+every own/copy attribute presence bitmap is zero, and there are no trailing
+attribute strings. Geometry bytes and copy tile/source IDs are otherwise
+unchanged. Original source columns and row order are preserved.
+
+Every companion is a standard nullable Parquet three-level
+`LIST<nullable original_scalar_type>`, with path `column.list.element`.
+A null geometry row has a null list. A present row has exactly `1 + spill_count`
+slots: own display value first, then copy values in blob order. An empty own
+geometry still has slot zero. Null values, per-LOD overrides, and existing copy
+values are preserved; looking up the source row alone cannot reproduce all
+of those values. Dictionary-coded string attributes become ordinary string
+lists. The lists are accessible to standard Parquet readers.
+
+Optimization requires tile pages for this encoding. Each companion has exactly
+one v1 PLAIN, ZSTD-compressed data page per geometry-page row span, without a
+Parquet dictionary. Nullable LIST levels use the ordinary Parquet encoding.
+Standard footer column chunks and offset indexes include every row. Pages for
+null geometry spans remain in the table even when absent from the spatial
+lookup directory. A single very large record may exceed the page byte target.
+
+Separated directory page records append a ninth field:
+
+```text
+[..., valid_key_rows, [[attr0_offset, attr0_length], [attr1_offset, attr1_length], ...]]
+```
+
+The companion references follow metadata `attributes` order. Each inherits the
+geometry page's `first_global_row` and `row_count`. Readers fetch only requested
+companions, alongside geometry; CPU workers receive their compressed page
+copies. Companion columns remain physically clustered by column, so fetching
+more columns may require more ranges. The standard packed profile has no ninth
+field and retains its original access path.
+
+This ablation is not the default. See [measured tradeoffs](../docs/parity-separate.md):
+modest geometry-only byte savings did not outweigh companion decode and request
+costs for styled views. Arbitrary source-column projection and whole-feature
+queries work with either profile. Source projection loads the ordinary footer
+and indexes lazily; it does not require companions.

@@ -30,7 +30,7 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
     ours = LOD_VERSION.split('.')
     if major != ours[0] or (major == '0' and minor != ours[1]):
         raise ValidationError(f'version {lod.get("version")} is not compatible with {LOD_VERSION}')
-    if lod.get('encoding') != ENCODING:
+    if lod.get('encoding') not in (ENCODING, 'packed_geometry'):
         raise ValidationError(f'geometry encoding {lod.get("encoding")!r} is not {ENCODING}')
     if lod.get('pack_version') != PACK_VERSION:
         raise ValidationError(f'pack_version {lod.get("pack_version")!r} is not {PACK_VERSION}')
@@ -102,19 +102,47 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
                     f'prefix row group {g} holds rows not shown by z{prefix["zoom"]}'
                 )
 
+    separate = lod.get('encoding') == 'packed_geometry'
+    companions = lod.get('attribute_columns', {})
+    if separate:
+        for name in lods:
+            for attr in lod.get('attributes', []):
+                column_name = companions.get(name, {}).get(attr['name'])
+                if not column_name or column_name not in f.schema_arrow.names:
+                    raise ValidationError(f'lod {name}: missing companion for {attr["name"]}')
+                typ = f.schema_arrow.field(column_name).type
+                if not pa.types.is_list(typ) or typ.value_type != pa.type_for_alias(attr['type']):
+                    raise ValidationError(f'lod {name}: invalid companion type for {attr["name"]}')
+
     # a sample of every LOD: non-empty parts, closed rings
-    head = f.read_row_group(0, columns=[column]).slice(0, sample_rows)
+    projected = [column] + (
+        [c for cols in companions.values() for c in cols.values()] if separate else []
+    )
+    head = f.read_row_group(0, columns=projected).slice(0, sample_rows)
     fields = [pa.field(a['name'], pa.type_for_alias(a['type'])) for a in lod.get('attributes', [])]
     dictionaries = {a['name']: a['values'] for a in lod.get('attributes', []) if 'values' in a}
+    if separate:
+        fields = []
     checked = {}
     for name, child in lods.items():
         values = head.column(column).combine_chunks().field(name)
         shown = values.filter(values.is_valid())
-        for blob in shown.slice(0, 200).to_pylist():
+        for index, blob in enumerate(values.slice(0, 200).to_pylist()):
+            if blob is None:
+                if separate and any(
+                    head[c][index].as_py() is not None for c in companions[name].values()
+                ):
+                    raise ValidationError(f'lod {name}: attributes on an absent geometry row')
+                continue
             u = Unpacker(blob, child['geometry_type'], fields, dictionaries)
             row = u.row()
             if u.pos != len(blob):
                 raise ValidationError(f'lod {name}: a packed row has trailing bytes')
+            if separate:
+                for c in companions[name].values():
+                    value = head[c][index].as_py()
+                    if value is None or len(value) != 1 + len(row['spill']):
+                        raise ValidationError(f'lod {name}: companion slots do not match geometry')
             _check_geometry(name, child['geometry_type'], row['geometry'], bool(row['spill']))
             for copy in row['spill']:
                 _check_geometry(name, child['geometry_type'], copy['geometry'])

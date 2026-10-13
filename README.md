@@ -56,6 +56,36 @@ measurements, tradeoffs, and reproduction commands are in
 can read the optimized file without understanding that profile. A general
 Parquet rewrite will discard the directory; run the optimizer again afterward.
 
+### Whole-feature reads and runtime attributes
+
+The packed path now supports styling with source scalar columns that were not
+carried at write time. These are batched by source row ID and cached on demand;
+the first read can be substantially slower than reading carried attributes.
+A file rewrite is useful for making a new attribute fast, but is not required
+to use it. `readColumns` also projects original source values directly.
+
+```js
+import { readFeatures } from 'geoparquet-lod'
+
+const features = await readFeatures(reader, {
+  bbox: [139.7, 35.6, 139.8, 35.7],
+  resolution: 360 / (512 * 2 ** 12), // longitude degrees per pixel
+  columns: ['height', 'version'],
+  geometry: 'overview',
+})
+// features.coords are whole quantized geometries; apply features.lod.scale/offset.
+// geometry: 'primary' instead returns original WKB and original source values.
+```
+
+Overview queries return bbox-overlapping, deduplicated features and retain LOD
+thinning. They do not perform exact intersection tests. The current implementation
+uses up to 256 tiles by default; see the API's `maxTiles` option.
+
+`geoparquet-lod separate packed.parquet split.parquet`, followed by `optimize`,
+is an opt-in experiment with independently selectable display-attribute columns.
+It preserved functionality but lost styled-map performance in the Tokyo ablation,
+so **packed remains the default**. See [results and limitations](docs/parity-separate.md).
+
 ## How it works
 
 Rows are sorted once along a Hilbert curve over the Web Mercator world
@@ -63,9 +93,9 @@ square in large row groups, so a tile's rows are one contiguous run and a
 city tile touches one or two row groups. The rows shown at the coarsest zooms come
 first in their own order, so a view of the whole dataset reads one row group.
 A float32 bbox covering with page statistics lets a reader pick pages without
-reading data. One nullable struct per LOD, a zoom or a run of zooms, holds for
-exactly the rows shown there the geometry on that LOD's grid and the carried
-attributes as ordinary typed columns.
+reading geometry. Each LOD is a nullable binary child of the required `lod`
+struct. Present values pack whole quantized geometry, carried attributes, and
+boundary copies; the spatial index selects these pages directly.
 
 Which rows appear at which zoom is a _thinning function_, one shape:
 
@@ -115,15 +145,16 @@ tracts, complete from 4.
 ### Attributes
 
 Source columns are kept as they are and stay queryable. Separately, the
-writer copies the attributes a renderer styles with into every LOD struct,
+writer copies the attributes a renderer styles with into every LOD payload,
 chosen with `carry=`. Below the complete zoom only a fraction of rows is
 shown, and the primary attribute columns hold every row, so a tile reading
 them would fetch pages that are mostly unwanted rows; the LOD copies are
 dense in exactly the shown rows. From the complete zoom up the copies
 duplicate the primary values, which costs file size but nothing per tile.
-Carry a few scalar columns; everything else is read per feature on demand
-with `readRow`. Adding a new styling attribute means rewriting the LOD
-structs. Thinning functions can read any source column via `columns=`
+Carry a few frequently used scalar columns. Other attributes can be read with
+`readRow`, batched with `readColumns`, or requested in `renderTile` properties
+on demand. Adding one to the packed fast path requires rewriting the LOD
+payloads. Thinning functions can read any source column via `columns=`
 without carrying it.
 
 ## Geometry

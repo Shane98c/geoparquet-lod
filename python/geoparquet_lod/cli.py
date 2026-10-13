@@ -208,3 +208,13 @@ def optimize_cmd(src, out, leaf_pages, tile_pages, sparse_pages, page_bytes):
         page_bytes=page_bytes,
         log=click.echo,
     )
+
+
+@cli.command('separate')
+@click.argument('src', type=click.Path(exists=True, dir_okay=False))
+@click.argument('out', type=click.Path(dir_okay=False))
+def separate_cmd(src, out):
+    """Experimental: separate packed overview geometry and typed attributes."""
+    from .separate import separate
+
+    separate(src, out, log=click.echo)

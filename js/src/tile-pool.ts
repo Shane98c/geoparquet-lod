@@ -109,14 +109,18 @@ export class TilePool {
       slot.job = job
       try {
         const payloads = job.task.payloads.map((bytes) => bytes.slice(0))
+        const attributePages = job.task.attributePages?.map((attr) => ({
+          ...attr,
+          payloads: attr.payloads.map((bytes) => bytes.slice(0)),
+        }))
         slot.worker.postMessage(
           {
             type: 'render',
             id: job.id,
-            task: { ...job.task, payloads },
+            task: { ...job.task, payloads, attributePages },
             options: job.options,
           } satisfies TileJob,
-          payloads,
+          [...payloads, ...(attributePages ?? []).flatMap((attr) => attr.payloads)],
         )
       } catch (error) {
         slot.job = undefined

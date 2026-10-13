@@ -113,7 +113,8 @@ export const tileResolution = (z: number, y: number) => {
 
 export function renderPreparedTile(task: PreparedTile, options: TileOptions = {}): ArrayBuffer {
   const builder = new GeometryBuilder()
-  const names = options.properties ?? task.fields.map((field) => field.name)
+  const names =
+    options.properties ?? task.defaultAttributes ?? task.fields.map((field) => field.name)
   const { rows, columns } = decodeTile(task, names, builder, options.signal)
   return renderGeometryTile(
     task.lod,

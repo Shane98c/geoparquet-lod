@@ -50,6 +50,26 @@ class Cursor {
   pos = 0
   constructor(readonly bytes: Uint8Array) {}
 
+  /** Read an IEEE-754 bit pattern without passing its 64 bits through Number. */
+  float64(): number {
+    let low = 0,
+      high = 0,
+      shift = 0
+    for (;;) {
+      const byte = this.bytes[this.pos++],
+        bits = byte & 0x7f
+      if (shift < 32) {
+        low |= bits << shift
+        if (shift > 25) high |= bits >>> (32 - shift)
+      } else high |= bits << (shift - 32)
+      if (!(byte & 0x80)) break
+      shift += 7
+    }
+    f32.setUint32(0, low >>> 0, true)
+    f32.setUint32(4, high >>> 0, true)
+    return f32.getFloat64(0, true)
+  }
+
   varint(): number {
     let out = 0
     let scale = 1
@@ -108,6 +128,10 @@ const attributes = (
       out[i] = null
       continue
     }
+    if (fields[i].kind === 'float64') {
+      out[i] = c.float64()
+      continue
+    }
     const v = c.varint()
     switch (fields[i].kind) {
       case 'int':
@@ -116,10 +140,6 @@ const attributes = (
       case 'float32':
         f32.setUint32(0, v, true)
         out[i] = f32.getFloat32(0, true)
-        break
-      case 'float64':
-        f32.setBigUint64(0, BigInt(v), true)
-        out[i] = f32.getFloat64(0, true)
         break
       case 'bool':
         out[i] = v !== 0
@@ -170,14 +190,14 @@ export const decodeSelectedRow = (
   own: boolean,
   id: number,
   tile: number,
-  add: (id: number, attrs: unknown[]) => void,
+  add: (id: number, attrs: unknown[], slot: number) => void,
   withAttributes = true,
 ): void => {
   const c = new Cursor(bytes)
   if (!withAttributes) {
     const ownGeometry = geometryInto(c, type, own ? builder : undefined)
     skipAttributes(c, fields)
-    if (own && ownGeometry) add(id, NO_ATTRIBUTES)
+    if (own && ownGeometry) add(id, NO_ATTRIBUTES, 0)
     const count = c.varint()
     for (let k = 0; k < count; k++) {
       const copyTile = c.varint(),
@@ -188,17 +208,17 @@ export const decodeSelectedRow = (
         if (type === 'MultiLineString') builder.startPolygon()
       }
       skipAttributes(c, fields)
-      if (copyTile === tile) add(copyId, NO_ATTRIBUTES)
+      if (copyTile === tile) add(copyId, NO_ATTRIBUTES, k + 1)
     }
     // All string bytes trail the row's varints; no requested attributes means
     // they can be left untouched after geometry and copy selection.
     return
   }
   const strings: [unknown[], number, number][] = []
-  const selected: [number, unknown[]][] = []
+  const selected: [number, unknown[], number][] = []
   const keep = geometryInto(c, type, own ? builder : undefined)
   const attrs = attributes(c, fields, strings)
-  if (own && keep) selected.push([id, attrs])
+  if (own && keep) selected.push([id, attrs, 0])
   const count = c.varint()
   for (let k = 0; k < count; k++) {
     const copyTile = c.varint()
@@ -209,13 +229,13 @@ export const decodeSelectedRow = (
       if (type === 'MultiLineString') builder.startPolygon()
     }
     const copyAttrs = attributes(c, fields, strings)
-    if (copyTile === tile) selected.push([copyId, copyAttrs])
+    if (copyTile === tile) selected.push([copyId, copyAttrs, k + 1])
   }
   for (const [slot, i, length] of strings) {
     slot[i] = textDecoder.decode(bytes.subarray(c.pos, c.pos + length))
     c.pos += length
   }
-  for (const [row, values] of selected) add(row, values)
+  for (const [row, values, slot] of selected) add(row, values, slot)
 }
 
 function geometryInto(c: Cursor, type: GeometryType, builder?: GeometryBuilder): boolean {

@@ -123,3 +123,30 @@ assert.deepEqual(
   'beyond the depth, the depth cell',
 )
 console.log('key tests passed')
+
+// Float64 packing stores raw bits, including low mantissa bits above Number’s
+// integer precision. Both the row and direct geometry decoders use this parser.
+for (const value of [
+  0.1,
+  -13.37,
+  Number.MIN_VALUE,
+  Number.MAX_VALUE,
+  -0,
+  Infinity,
+  -Infinity,
+  NaN,
+]) {
+  const view = new DataView(new ArrayBuffer(8))
+  view.setFloat64(0, value, true)
+  let bits = view.getBigUint64(0, true)
+  const encoded = []
+  do {
+    const byte = Number(bits & 127n)
+    bits >>= 7n
+    encoded.push(byte | (bits ? 128 : 0))
+  } while (bits)
+  const row = Uint8Array.from([0, 0, 1, ...encoded, 0]) // point(0,0), one attr, no copies
+  assert.ok(
+    Object.is(decodeRow(row, 'Point', [{ name: 'value', kind: 'float64' }]).attrs[0], value),
+  )
+}

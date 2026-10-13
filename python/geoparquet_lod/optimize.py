@@ -113,6 +113,11 @@ def _tile_pages(parquet, group, name, lod, keys, work, target, sparse_pages, pag
             writer.write_table(table.slice(first, end - first), row_group_size=end - first)
         if null_start is not None:
             writer.write_table(table.slice(null_start), row_group_size=len(keys) - null_start)
+    combined, index = _append_page_chunks(path, target)
+    return combined, index, present
+
+
+def _append_page_chunks(path, target):
     pages, row, combined = [], 0, None
     with path.open('rb') as encoded:
         encoded.seek(-8, 2)
@@ -140,7 +145,36 @@ def _tile_pages(parquet, group, name, lod, keys, work, target, sparse_pages, pag
                     set_value(combined, field, get(combined, field) + get(cm, field))
             row += get(group, 3)
     path.unlink()
-    return combined, {1: (9, (12, pages))}, present
+    return combined, {1: (9, (12, pages))}
+
+
+def _companion_pages(parquet, group, column, geometry_index, work, target):
+    table = parquet.read_row_group(group, columns=[column])
+    pages = get(geometry_index, 1)[1]
+    path = work / 'attributes.parquet'
+    # A companion page covers exactly the same source rows as its geometry page.
+    # One write per row span and an oversized byte target prevent splitting a
+    # list-valued host record across pages. Ordinary offset indexes remain valid.
+    with pq.ParquetWriter(
+        path,
+        table.schema,
+        compression='zstd',
+        compression_level=9,
+        use_dictionary=False,
+        write_statistics=False,
+        write_page_index=True,
+        data_page_size=2**31 - 1,
+        max_rows_per_page=2**31 - 1,
+    ) as writer:
+        for i, page in enumerate(pages):
+            first = get(page, 3)
+            end = get(pages[i + 1], 3) if i + 1 < len(pages) else len(table)
+            writer.write_table(table.slice(first, end - first), row_group_size=end - first)
+    combined, index = _append_page_chunks(path, target)
+    actual = get(index, 1)[1]
+    if [get(p, 3) for p in actual] != [get(p, 3) for p in pages]:
+        raise ValueError('companion pages did not align with geometry pages')
+    return combined, index
 
 
 def optimize(
@@ -161,7 +195,7 @@ def optimize(
     parquet = pq.ParquetFile(src)
     geo = json.loads(parquet.schema_arrow.metadata[b'geo'])
     lod = geo['lod_columns']
-    if lod.get('encoding') != 'packed' or lod.get('pack_version') != 1:
+    if lod.get('encoding') not in ('packed', 'packed_geometry') or lod.get('pack_version') != 1:
         raise ValueError('optimize requires packed LOD version 1')
     key_column = lod['key']['column']
     if not 0 <= lod['key']['depth'] <= 26:
@@ -187,6 +221,14 @@ def optimize(
     root['bounds'] = bounds if bounds[0] <= bounds[2] else [-180, -85.051129, 180, 85.051129]
     prefix_end = lod['prefix']['row_group_end'] if lod.get('prefix') else -1
     names = list(lod['lods'])
+    companion_columns = {
+        column: (name, i)
+        for name, columns in lod.get('attribute_columns', {}).items()
+        for i, attribute in enumerate(lod['attributes'])
+        for column in [columns[attribute['name']]]
+    }
+    if companion_columns and not tile_pages:
+        raise ValueError('separated attributes require --tile-pages')
     with src.open('rb') as original:
         if original.read(4) != b'PAR1':
             raise ValueError('not an unencrypted Parquet file')
@@ -240,6 +282,7 @@ def optimize(
             # row-group/column positions in the standard footer remain unchanged.
             columns = len(get(groups[0], 1)[1])
             pending_indexes = []
+            geometry_indexes, directory_pages = {}, {}
             directory = {name: [[], []] for name in names}
             output = work / 'output.parquet'
             with output.open('w+b') as target:
@@ -251,7 +294,17 @@ def optimize(
                         path = [p.decode() for p in get(cm, 3)[1]]
                         name = path[1] if len(path) == 2 and path[0] == lod['column'] else None
                         present = None
-                        if name and tile_pages:
+                        companion = companion_columns.get(path[0])
+                        if companion:
+                            lod_name, _ = companion
+                            cm, index = _companion_pages(
+                                parquet, g, path[0], geometry_indexes[g, lod_name], work, target
+                            )
+                            set_value(chunk, 3, cm)
+                            set_value(chunk, 2, 0)
+                            chunk.pop(6, None)
+                            chunk.pop(7, None)
+                        elif name and tile_pages:
                             local_keys = keys[starts[g] : starts[g] + get(group, 3)]
                             cm, index, present = _tile_pages(
                                 parquet,
@@ -295,7 +348,14 @@ def optimize(
                                 present = array.is_valid().to_numpy(zero_copy_only=False)
                         if index is not None:
                             pages = get(index, 1)[1]
+                            if companion:
+                                lod_name, attribute_index = companion
+                                for page in pages:
+                                    entry = directory_pages.get((g, lod_name, get(page, 3)))
+                                    if entry is not None:
+                                        entry[8][attribute_index] = [get(page, 1), get(page, 2)]
                             if name:
+                                geometry_indexes[g, name] = index
                                 for p, page in enumerate(pages):
                                     local_first = get(page, 3)
                                     local_end = (
@@ -318,18 +378,20 @@ def optimize(
                                     fences = (
                                         np.column_stack((cells[changes], changes)).ravel().tolist()
                                     )
-                                    directory[name][int(g > prefix_end)].append(
-                                        [
-                                            int(keys[first]),
-                                            int(keys[first + valid_rows - 1]),
-                                            get(page, 1),
-                                            get(page, 2),
-                                            first,
-                                            end - first,
-                                            fences,
-                                            valid_rows,
-                                        ]
-                                    )
+                                    entry = [
+                                        int(keys[first]),
+                                        int(keys[first + valid_rows - 1]),
+                                        get(page, 1),
+                                        get(page, 2),
+                                        first,
+                                        end - first,
+                                        fences,
+                                        valid_rows,
+                                    ]
+                                    if lod.get('encoding') == 'packed_geometry':
+                                        entry.append([None] * len(lod['attributes']))
+                                    directory[name][int(g > prefix_end)].append(entry)
+                                    directory_pages[g, name, local_first] = entry
                             pending_indexes.append((chunk, 4, 5, dumps(index)))
                         elif name:
                             raise ValueError('LOD column has no offset index')

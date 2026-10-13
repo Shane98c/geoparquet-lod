@@ -124,13 +124,20 @@ scope.addEventListener('message', (event: MessageEvent<WorkerRequest | CpuReques
               signal: controller.signal,
             }
             const cpu = getPool()
-            if (cpu && reader instanceof SpatialReader && request.z <= reader.finestZoom) {
+            const properties = options.properties ?? reader.lod.attributes.map((a) => a.name)
+            if (
+              cpu &&
+              reader instanceof SpatialReader &&
+              request.z <= reader.finestZoom &&
+              properties.every((name) => reader.lod.attributes.some((a) => a.name === name))
+            ) {
               const task = await reader.prepareTile(
                 reader.lodForZoom(request.z),
                 request.z,
                 request.x,
                 request.y,
                 controller.signal,
+                properties,
               )
               return cpu.run(task, options)
             }

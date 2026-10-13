@@ -47,6 +47,7 @@ export interface LodMetadata {
   encoding: string
   pack_version: number
   attributes: { name: string; type: string; values?: string[] }[]
+  attribute_columns?: Record<string, Record<string, string>>
   thinning: Record<string, unknown>
   lods: Record<string, Omit<Lod, 'name'>>
 }
@@ -111,6 +112,11 @@ export class LodReader {
     { bytes: number; values: Promise<Map<number, unknown>> }
   >()
   private pageBytes = 0
+  // Cache requested scalar values, not whole decoded source pages. Sparse LOD
+  // joins may scan millions of unselected rows. Account conservatively for keys
+  // and Map entries; this is an estimated 32 MiB budget, not a heap guarantee.
+  private readonly projected = new Map<string, { value: unknown; bytes: number }>()
+  private projectedBytes = 0
   private readonly elements = new Map<string, SchemaTree['element']>()
   private readonly footer: ArrayBuffer | undefined
   private digest: Promise<string> | undefined
@@ -130,7 +136,10 @@ export class LodReader {
     if (major !== ourMajor || (major === '0' && minor !== ourMinor)) {
       throw new Error(`${LOD_KEY} version ${lod.version} is not compatible with ${LOD_VERSION}`)
     }
-    if (lod.encoding !== ENCODING || lod.pack_version !== PACK_VERSION) {
+    if (
+      ![ENCODING, 'packed_geometry'].includes(lod.encoding) ||
+      lod.pack_version !== PACK_VERSION
+    ) {
       throw new Error(
         `${LOD_KEY} encoding ${lod.encoding}/${lod.pack_version} is not ${ENCODING}/${PACK_VERSION}`,
       )
@@ -141,7 +150,8 @@ export class LodReader {
       }
     }
     if (!lod.key) throw new Error(`${LOD_KEY} file stores no key column`)
-    this.fields = lod.attributes.map((a) =>
+    validateCompanionMetadata(lod)
+    this.fields = (lod.encoding === 'packed_geometry' ? [] : lod.attributes).map((a) =>
       a.values
         ? { name: a.name, kind: 'enum' as const, values: a.values }
         : { name: a.name, kind: attributeKind(a.type) },
@@ -269,8 +279,9 @@ export class LodReader {
     const leaf = this.lodLeaf(lod)
     const tile = z * 2 ** 48 + x * 2 ** z + y
     const wanted = attributes.map((a) => this.fields.findIndex((f) => f.name === a))
-    if (wanted.includes(-1))
-      throw new Error(`attribute ${attributes[wanted.indexOf(-1)]} is not carried`)
+
+    const hosts: number[] = [],
+      slots: number[] = []
     // groups adjacent in key order are spatial neighbours: warm their indexes so a pan
     // seldom meets a group cold
     for (const g of groups) {
@@ -291,28 +302,43 @@ export class LodReader {
           leaf,
           signal,
         )
-        if (!ranges.length) return { g, values: new Map<number, unknown>() }
-        return { g, values: await this.readLeafRows(g, leaf, ranges, signal) }
+        if (!ranges.length)
+          return { g, values: new Map<number, unknown>(), keys: new Map<number, unknown>() }
+        const [values, keys] = await Promise.all([
+          this.readLeafRows(g, leaf, ranges, signal),
+          this.readLeafValues(g, key.column, ranges, signal),
+        ])
+        return { g, values, keys }
       }),
     )
-    for (const { g, values } of perGroup) {
+    for (const { g, values, keys } of perGroup) {
       const rowStart = this.rowGroupStarts[g]
       for (const [row, raw] of values) {
         const decoded = decodeRow(raw as Uint8Array, lod.geometry_type, this.fields)
         const own = decoded.geometry as unknown[]
-        if (lod.geometry_type === 'Point' || own.length) {
+        if (
+          (!coarse || g < mainFirst) &&
+          Number(keys.get(row)) >= start &&
+          Number(keys.get(row)) < end &&
+          (lod.geometry_type === 'Point' || own.length)
+        ) {
+          hosts.push(rowStart + row)
+          slots.push(0)
           out.rows.push(rowStart + row)
           out.coords.push(decoded.geometry)
           attributes.forEach((a, i) => out.columns[a].push(decoded.attrs[wanted[i]]))
         }
-        for (const copy of decoded.spill) {
+        for (const [slot, copy] of decoded.spill.entries()) {
           if (copy.tile !== tile) continue
+          hosts.push(rowStart + row)
+          slots.push(slot + 1)
           out.rows.push(copy.id)
           out.coords.push(copy.geometry)
           attributes.forEach((a, i) => out.columns[a].push(copy.attrs[wanted[i]]))
         }
       }
     }
+    await this.hydrateColumns(out, lod, attributes, hosts, slots, signal)
     return out
   }
 
@@ -443,8 +469,7 @@ export class LodReader {
     }
     const finest = this.lodForZoom(this.finestZoom)
     const wanted = attributes.map((a) => this.fields.findIndex((f) => f.name === a))
-    if (wanted.includes(-1))
-      throw new Error(`attribute ${attributes[wanted.indexOf(-1)]} is not carried`)
+
     const groups = this.metadata.row_groups
       .map((_, g) => g)
       .filter((g) => intersects(this.rowGroupBbox(g), bbox))
@@ -461,7 +486,7 @@ export class LodReader {
           }
         const [geometry, packed] = await Promise.all([
           this.readLeafValues(g, this.primary, ranges, signal),
-          attributes.length
+          wanted.some((i) => i >= 0)
             ? this.readLeafRows(g, this.lodLeaf(finest), ranges, signal)
             : Promise.resolve(new Map<number, unknown>()),
         ])
@@ -484,6 +509,115 @@ export class LodReader {
         }
       }
     }
+    await this.hydrateColumns(
+      out,
+      finest,
+      attributes,
+      out.rows,
+      out.rows.map(() => 0),
+      signal,
+    )
+    return out
+  }
+
+  private async hydrateColumns(
+    out: { rows: number[]; columns: Record<string, unknown[]> },
+    lod: Lod,
+    attributes: string[],
+    hosts: number[],
+    slots: number[],
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const companions = this.lod.attribute_columns?.[lod.name] ?? {}
+    await Promise.all(
+      attributes.map(async (name) => {
+        if (companions[name]) {
+          const leaf = `${companions[name]}.list.element`
+          const values = (await this.readColumns(hosts, [leaf], signal))[leaf]
+          out.columns[name] = values.map((value, i) =>
+            displayValue((value as unknown[][] | null)?.[0]?.[slots[i]] ?? null),
+          )
+        } else if (!this.fields.some((f) => f.name === name)) {
+          out.columns[name] = (await this.readColumns(out.rows, [name], signal))[name]
+        }
+      }),
+    )
+  }
+
+  /** Batch projection of source leaves, preserving order and duplicate row IDs.
+   * Reads each selected page once rather than issuing a lookup per feature. */
+  async readColumns(
+    rows: number[],
+    columns: string[],
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown[]>> {
+    signal?.throwIfAborted()
+    for (const column of columns)
+      if (!this.elements.has(column)) throw new Error(`unknown column ${column}`)
+    const total = Number(this.metadata.num_rows)
+    const groups = new Map<number, { local: number; output: number }[]>()
+    rows.forEach((row, output) => {
+      if (!Number.isSafeInteger(row) || row < 0 || row >= total)
+        throw new Error(`row ${row} out of range`)
+      let lo = 0,
+        hi = this.rowGroupStarts.length
+      while (lo + 1 < hi) {
+        const mid = (lo + hi) >>> 1
+        if (this.rowGroupStarts[mid] <= row) lo = mid
+        else hi = mid
+      }
+      const entries = groups.get(lo) ?? []
+      entries.push({ local: row - this.rowGroupStarts[lo], output })
+      groups.set(lo, entries)
+    })
+    const out = Object.fromEntries(columns.map((name) => [name, new Array<unknown>(rows.length)]))
+    await Promise.all(
+      [...groups].map(async ([g, entries]) => {
+        await Promise.all(
+          columns.map(async (name) => {
+            const key = (local: number) => `${name}:${local + this.rowGroupStarts[g]}`
+            const missing = entries.filter((entry) => {
+              const cached = this.projected.get(key(entry.local))
+              if (!cached) return true
+              out[name][entry.output] = cached.value
+              this.projected.delete(key(entry.local))
+              this.projected.set(key(entry.local), cached)
+              return false
+            })
+            if (!missing.length) return
+            const sorted = [...new Set(missing.map((e) => e.local))].sort((a, b) => a - b)
+            const ranges: [number, number][] = []
+            for (const row of sorted) {
+              const last = ranges.at(-1)
+              if (last?.[1] === row) last[1]++
+              else ranges.push([row, row + 1])
+            }
+            const values = await this.readLeafValues(g, name, ranges, signal)
+            for (const entry of missing) {
+              const value = values.get(entry.local) ?? null
+              out[name][entry.output] = value
+              if (
+                value !== null &&
+                !['number', 'string', 'boolean', 'bigint'].includes(typeof value)
+              )
+                continue
+              const k = key(entry.local)
+              if (this.projected.has(k)) continue
+              const bytes = 128 + k.length * 2 + (typeof value === 'string' ? value.length * 2 : 8)
+              if (bytes > 32 * 1024 * 1024) continue
+              while (this.projected.size && this.projectedBytes + bytes > 32 * 1024 * 1024) {
+                const first = this.projected.keys().next().value!
+                this.projectedBytes -= this.projected.get(first)!.bytes
+                this.projected.delete(first)
+              }
+              this.projected.set(k, { value, bytes })
+              this.projectedBytes += bytes
+            }
+          }),
+        )
+      }),
+    )
+    signal?.throwIfAborted()
     return out
   }
 
@@ -493,21 +627,8 @@ export class LodReader {
     columns: string[],
     signal?: AbortSignal,
   ): Promise<Record<string, unknown>> {
-    const g = this.rowGroupStarts.findIndex(
-      (start, i) =>
-        rowIndex >= start &&
-        (i + 1 === this.rowGroupStarts.length || rowIndex < this.rowGroupStarts[i + 1]),
-    )
-    if (g < 0) throw new Error(`row ${rowIndex} out of range`)
-    const local = rowIndex - this.rowGroupStarts[g]
-    const out: Record<string, unknown> = {}
-    await Promise.all(
-      columns.map(async (leaf) => {
-        const values = await this.readLeafValues(g, leaf, [[local, local + 1]], signal)
-        out[leaf] = values.get(local)
-      }),
-    )
-    return out
+    const values = await this.readColumns([rowIndex], columns, signal)
+    return Object.fromEntries(columns.map((name) => [name, values[name][0]]))
   }
 
   /** Lowercase hex SHA-256 of the footer bytes read at open. */
@@ -886,4 +1007,20 @@ const intersectRanges = (a: [number, number][], b: [number, number][]): [number,
     else j++
   }
   return out
+}
+
+/** Carried integers retain the existing display API’s numeric representation. */
+export const displayValue = (value: unknown): unknown =>
+  typeof value === 'bigint' ? Number(value) : value
+
+export function validateCompanionMetadata(lod: LodMetadata): void {
+  if (lod.encoding !== 'packed_geometry') return
+  const seen = new Set<string>()
+  for (const name of Object.keys(lod.lods))
+    for (const attr of lod.attributes) {
+      const column = lod.attribute_columns?.[name]?.[attr.name]
+      if (!column || typeof column !== 'string' || seen.has(column))
+        throw new Error(`missing or duplicate companion column for ${name}.${attr.name}`)
+      seen.add(column)
+    }
 }
