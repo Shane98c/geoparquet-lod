@@ -14,8 +14,8 @@ GeoParquet LOD, PMTiles, released COGP, and Esri SOP. Unselected panes are remov
 and do not initialize their readers or request their datasets. The selection is
 stored in the URL (`panes=lod,pmtiles,cogp,esri`); the default remains `lod,pmtiles`.
 Applying a selection reloads the readers while preserving the current view and
-style. One or two maps fill the available width; three or four use a two-column
-grid. At least one reader must be selected to apply.
+style. One, two, or three maps fill the available width; four use a two-column
+grid. Hidden panes leave no empty slots. At least one reader must be selected to apply.
 
 All four archives derive from the same 53,742,978 Japan building footprints.
 COGP uses the unmodified released `@cogp/maplibre` / `@cogp/reader` 2.1.4 and a

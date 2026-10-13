@@ -442,7 +442,7 @@
       }
 
       const container = document.getElementById('panes')
-      container.classList.toggle('multiple', panes.length > 2)
+      container.classList.toggle('multiple', panes.length === 4)
       if (!panes.length) container.textContent = 'Select at least one reader and apply.'
       for (const pane of panes) {
         const div = document.createElement('div')
