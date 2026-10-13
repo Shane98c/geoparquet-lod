@@ -12,7 +12,8 @@ describes the reference reader and binds no one.
 One GeoParquet file is both the dataset and the map source. Every feature is
 stored exactly once with its lossless geometry. A renderer reads, per tile,
 bytes comparable to a pre-cut vector tile. A reader that does not know this
-extension sees ordinary GeoParquet with two extra columns.
+extension sees ordinary GeoParquet with a bbox covering, Hilbert key, and LOD
+column alongside the source columns.
 
 ## Terms
 
@@ -27,21 +28,21 @@ extension sees ordinary GeoParquet with two extra columns.
   attributes and geometry) serving a contiguous range of zooms. Zooms may
   share an LOD only when row selection and carried attributes agree, and an
   LOD uses its finest zoom's grid.
-- **LOD column**: one nullable struct per LOD holding, for each feature
-  shown there, its geometry on the LOD's grid and the carried attributes as
-  typed children.
-- **Thinning**: the rule assigning each feature the coarsest zoom at which it
-  is shown. A feature shown at zoom z is shown at every finer zoom. The
-  reference writer thins only below a complete zoom; every feature is present
-  from there up. This extension records the rule's description; it does not
-  define rules.
+- **LOD column**: one nullable binary child per LOD in the required `lod`
+  struct. Each value packs quantized geometry, carried attributes, and any
+  boundary copies it hosts. Attribute types are declared in metadata.
+- **Thinning**: the rule selecting displayed features independently at each
+  zoom. Membership need not nest across zooms. The reference writer can force
+  completeness from a chosen zoom; null and empty primary geometries remain
+  absent from display LODs. This extension records the rule's description; it
+  does not define rules.
 
 ## Layout
 
 A conforming file MUST satisfy:
 
 1. **Order.** Rows sorted by a space-filling curve over the primary
-   geometry, within each of the two sections below. `order` names the curve:
+   geometry, within each section below (one section when `prefix` is null). `order` names the curve:
    `hilbert_webmercator` is the standard Hilbert curve over the Web Mercator
    world square divided into `2^depth` cells per side, numbered as XYZ tiles
    are, on the cell holding the bbox centre with latitude clamped to the
@@ -77,12 +78,12 @@ A conforming file MUST satisfy:
    its four leaves. Values are rounded outward.
 4. **Page indexes.** Every column has an offset index.
 5. **LOD columns.** A top-level required struct column named by `column`
-   with one nullable struct child per LOD, named by the LOD. The child is
-   non-null for a row if and only if the row is shown at the LOD's zooms;
+   with one nullable binary child per LOD, named by the LOD. The child is
+   non-null for a row when it is shown at the LOD's zooms or hosts boundary copies;
    since zooms sharing an LOD agree on row selection, that is one condition
    per LOD. Each child is a nullable `binary` column, one Parquet leaf,
    holding the row packed as Geometry describes: its geometry, its carried
-   attributes and the straddler copies it hosts, see Layout 1. A row whose
+   attributes and the straddler copies it hosts, see Layout 1. A host-only row has empty own geometry. A row whose
    primary geometry is null or empty is shown at no LOD.
 
 The validator checks the metadata, the schema shapes, covering statistics,
@@ -111,13 +112,13 @@ Under the `geo` key, a `lod_columns` object:
 | `version`      | string         | `0.1.0`; readers reject a different major version, and while the major is 0 a different minor as well, since minors may change the layout                                                                          |
 | `column`       | string         | name of the LOD struct column                                                                                                                                                                                      |
 | `order`        | string         | `hilbert_webmercator`, see Layout 1                                                                                                                                                                                |
-| `key`          | object         | `{column, depth}`: the uint32 column holding each row's Hilbert index at `depth` of its Web Mercator cell, with statistics and a page index, see Layout 1                                                          |
+| `key`          | object         | `{column, depth}`: the nullable int64 column holding each row's Hilbert index at `depth` of its Web Mercator cell, with statistics and a page index, see Layout 1                                                  |
 | `zooms`        | int[]          | every zoom the file serves, ascending                                                                                                                                                                              |
 | `tile_size`    | int            | pixels per tile the zooms assume (512)                                                                                                                                                                             |
 | `prefix`       | object or null | `{zoom, row_group_end}`, see Layout 2                                                                                                                                                                              |
 | `encoding`     | string         | `packed`, see Geometry                                                                                                                                                                                             |
 | `pack_version` | int            | `1`, the packed row format version                                                                                                                                                                                 |
-| `attributes`   | object[]       | `{name, type}` of the carried attributes; `type` is the Arrow type name, informational since the schema carries it                                                                                                 |
+| `attributes`   | object[]       | `{name, type, values?}` of carried attributes; `type` is the Arrow type name used to decode packed values; optional `values` is a string dictionary                                                                |
 | `thinning`     | object         | description of the rule used; informational                                                                                                                                                                        |
 | `lods`         | object         | LOD name to `{zooms, geometry_type, scale, offset, placeholder}`; `scale` and `offset` are `[x, y]` pairs in degrees, `placeholder` the width in grid cells of the square drawn for a shape too small for the grid |
 
@@ -135,14 +136,15 @@ complete zooms when the full-detail geometry is small.
 
 ### Example
 
-For a building file with two carried attributes, under the `geo` key beside
-the usual GeoParquet fields:
+Abbreviated metadata for a building file with two carried attributes, under
+the `geo` key beside the usual GeoParquet fields (only two LOD entries shown):
 
 ```json
 "lod_columns": {
   "version": "0.1.0",
   "column": "lod",
   "order": "hilbert_webmercator",
+  "key": { "column": "hilbert", "depth": 24 },
   "zooms": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
   "tile_size": 512,
   "prefix": { "zoom": 6, "row_group_end": 0 },
@@ -165,13 +167,10 @@ geometry: binary (WKB)
 height: float
 class: string
 bbox: struct<xmin: float, ymin: float, xmax: float, ymax: float> not null
+hilbert: int64
 lod: struct<
-  f8: struct<
-    geometry: list<list<list<list<int32 not null> not null> not null> not null> not null,
-    height: float,
-    class: string
-  >,
-  f13: struct<...same shape...>
+  f8: binary,
+  f13: binary
 > not null
 ```
 
@@ -195,7 +194,8 @@ geometry :=
 attrs  := presence bitmap (one varint, bit i for attribute i in metadata
           order), then each present value: integers zigzag, float32 as its
           bit pattern, float64 as its bit pattern, bool 0/1, string as its
-          byte length
+          byte length, or its zero-based dictionary index when the attribute
+          declares `values` (no trailing string bytes for dictionary values)
 spill  := count, per copy: tile (zoom << 48 | x * 2^zoom + y), file row
           index, geometry, attrs
 ```

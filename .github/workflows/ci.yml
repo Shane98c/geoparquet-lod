@@ -10,9 +10,11 @@ jobs:
         with: { node-version: 22 }
       - run: npm ci && npm run build
         working-directory: js
-      - run: uv sync --group dev
-      - run: uv run ruff check python tests examples
+      - run: uv sync --locked --group dev
+      - run: uv run ruff check python tests examples benchmarks
       - run: uv run pytest -q
+      - run: uv run python examples/quickstart.py /tmp/lod-quickstart
+      - run: uv run geoparquet-lod validate /tmp/lod-quickstart/buildings.lod.parquet
   js:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: js } }
@@ -23,3 +25,4 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+      - run: npm run demo:bundle

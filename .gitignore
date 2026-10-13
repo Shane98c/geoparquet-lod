@@ -9,3 +9,14 @@ js/dist/
 *.tiledir
 *.tiledir.v1
 js/test/esri-node.mjs
+.pytest_cache/
+.ruff_cache/
+.wrangler/
+.claude/
+.tmp/
+.env
+.env.*
+!.env.example
+*.pmtiles
+*.tgz
+build/

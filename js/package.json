@@ -21,7 +21,7 @@
     "src"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node -e \"require('node:fs').rmSync('dist', {recursive:true, force:true})\" && tsc -p tsconfig.json",
     "prepublishOnly": "npm run build",
     "check": "tsc -p tsconfig.json --noEmit",
     "measure": "node test/measure.mjs",

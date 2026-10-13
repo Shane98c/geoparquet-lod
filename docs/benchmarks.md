@@ -1,4 +1,8 @@
-# Benchmarks
+# Historical baseline benchmarks
+
+These are historical results, including COGP writer 2.2.1. They do not
+describe the current hosted comparison or the latest density experiment. Start
+with the [experiment index](README.md) for current results and provenance.
 
 The newer [spatial page index experiment](parity-experiment.md) measures
 tile-aligned Parquet pages, a 16 KiB bootstrap, and direct spatial lookup on
@@ -54,10 +58,6 @@ And what reading it cost:
 | z13 suburbs, Chiba        | 0.21 MB, 13    | 0.44 MB, 34 | 0.06 MB, 2 | 1.30 MB, 55     |
 | z15 street, Tokyo station | 0.20 MB, 14    | 0.90 MB, 82 | 0.03 MB, 2 | 1.30 MB, 62     |
 | z15 street, Osaka         | 0.25 MB, 14    | 0.93 MB, 80 | 0.11 MB, 2 | 1.01 MB, 57     |
-
-The open includes what opening starts in the background: the key and
-coarse LOD indexes of the prefix row groups, so a map opening at a coarse
-zoom reads them once.
 
 The open includes what opening starts in the background: the key and
 coarse LOD indexes of the prefix row groups, so a map opening at a coarse
