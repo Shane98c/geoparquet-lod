@@ -1,28 +1,15 @@
-"""Write a GeoParquet file with per-zoom display columns.
+"""Build GeoParquet with per-zoom display columns and a spatial page index.
 
-Layout, in order of what matters:
-
-1. Rows sorted once along a Hilbert curve, in large row groups, so a map
-   tile touches one or two.
-2. The rows shown at the coarsest zooms (up to `prefix_zoom`) come first in
-   their own curve order, so a whole-dataset view reads one row group.
-3. A float32 bbox covering with page statistics, and offset indexes on every
-   column, so pages can be chosen without reading data.
-4. Pages of about 16 KB with v1 page headers: small enough that a tile reads
-   little it does not need, large enough that a row group's offset indexes,
-   which a reader fetches whole, stay small. Measured on a city, 4 KB pages
-   cost more in indexes than they save in data and 64 KB the reverse.
-5. One nullable struct per LOD under `lod`, non-null exactly for the rows
-   shown there, holding the geometry on that LOD's grid and the carried
-   attributes as typed children.
-
-Everything the renderer reads is in 3 and 5. A plain reader sees ordinary
-GeoParquet with two extra columns.
+Overview generation retains the source columns and writes whole quantized
+geometry, carried attributes, and boundary copies into packed binary columns.
+Layout finalization aligns overview pages to tiles and adds the spatial directory
+without changing table values. Ordinary readers use the standard Parquet footer.
 """
 
 from __future__ import annotations
 
 import json
+import tempfile
 import time
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -355,6 +342,78 @@ def _render(args):
 
 
 def write(
+    src: str,
+    out: str | Path,
+    *,
+    thinning: Thin | None = None,
+    columns=(),
+    zooms='auto',
+    complete_from: int | None | str = 'auto',
+    carry=(),
+    geometry: str = 'geometry',
+    single_lod_bytes: int = 16 * 1024 * 1024,
+    row_group_rows: int = 1_048_576,
+    page_bytes: int = 16384,
+    page_rows: int = 2048,
+    lod_page_bytes: int = 65536,
+    compression_level: int = 9,
+    batch_rows: int | None = None,
+    workers: int | None = None,
+    memory_limit: str | None = None,
+    temp_dir: str | None = None,
+    log=print,
+) -> Path:
+    """Build an indexed GeoParquet file with display overviews in one call.
+
+    Rows use one global Hilbert order, with no coarse-prefix partition.
+    ``thinning`` chooses displayed rows at each zoom. ``complete_from`` sets
+    the zoom where every feature is shown; 'auto' derives it from the data.
+    ``carry`` embeds selected attributes in the overviews for fast styling.
+    ``compression_level`` applies to source and overview Zstd pages.
+
+    All overview generation options are passed to the writer. ``page_bytes``
+    controls analytical/staging pages; ``lod_page_bytes`` controls the final
+    tile-aligned overview pages (64 KiB by default). The build preserves the
+    existing output until both phases succeed and cleans up intermediate files.
+    Temporary build files live beside ``out``; ``temp_dir`` controls DuckDB spill.
+    """
+    from ._layout import finalize_layout
+
+    if page_bytes < 1 or lod_page_bytes < 1:
+        raise ValueError('page_bytes and lod_page_bytes must be positive')
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='.lod-build-', dir=out.parent) as tmp:
+        packed = Path(tmp) / 'packed.parquet'
+        _write_unindexed(
+            src,
+            packed,
+            thinning=thinning,
+            columns=columns,
+            zooms=zooms,
+            complete_from=complete_from,
+            carry=carry,
+            geometry=geometry,
+            prefix_zoom=None,
+            single_lod_bytes=single_lod_bytes,
+            row_group_rows=row_group_rows,
+            page_bytes=page_bytes,
+            page_rows=page_rows,
+            compression_level=compression_level,
+            batch_rows=batch_rows,
+            workers=workers,
+            memory_limit=memory_limit,
+            temp_dir=temp_dir,
+            log=log,
+        )
+        log('Finalizing tile-aligned pages and spatial index')
+        finalize_layout(
+            packed, out, page_bytes=lod_page_bytes, compression_level=compression_level, log=log
+        )
+    return out
+
+
+def _write_unindexed(
     src: str,
     out: str | Path,
     *,

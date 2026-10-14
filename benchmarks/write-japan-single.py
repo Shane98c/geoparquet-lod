@@ -3,8 +3,9 @@
 import sys
 import time
 
-from geoparquet_lod import chain, drop_smallest, tiny_polygons, write
-from geoparquet_lod.optimize import optimize
+from geoparquet_lod import chain, drop_smallest, tiny_polygons
+from geoparquet_lod._layout import finalize_layout
+from geoparquet_lod.writer import _write_unindexed as write
 
 if __name__ == '__main__':
     src, out, optimized = sys.argv[1:4]
@@ -26,4 +27,4 @@ if __name__ == '__main__':
         memory_limit='40GB',
         log=log,
     )
-    optimize(out, optimized, log=log)
+    finalize_layout(out, optimized, log=log)

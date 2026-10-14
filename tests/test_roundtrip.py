@@ -126,12 +126,11 @@ def test_points_importance_and_cluster(points, tmp_path):
         tmp_path / 'imp.parquet',
         thinning=importance('population', per_tile=20),
         carry=['population'],
-        prefix_zoom=3,
         workers=1,
         log=lambda *_: None,
     )
     s = validate(out)
-    assert s['prefix'] is not None and s['prefix']['row_group_end'] == 0
+    assert s['prefix'] is None
     out2 = write(
         points,
         tmp_path / 'cl.parquet',
@@ -148,14 +147,13 @@ def test_points_importance_and_cluster(points, tmp_path):
     assert len(values) < 2000
 
 
-def test_prefix_zoom_outside_range(buildings, tmp_path):
+def test_explicit_zooms_use_single_order(buildings, tmp_path):
     out = write(
         buildings,
         tmp_path / 'z.parquet',
         thinning=size_threshold(4),
         zooms=range(9, 15),
         complete_from=12,
-        prefix_zoom=6,
         workers=1,
         log=lambda *_: None,
     )

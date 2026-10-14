@@ -1,4 +1,4 @@
-"""Experimental geometry-only packed overviews with separately selectable attributes.
+"""Private benchmark experiment: geometry-only packed overviews with separately selectable attributes.
 
 Each attribute column is a standard nullable LIST of its original Arrow scalar
 type. Slot zero is the owning row's LOD value; subsequent slots correspond to
@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import copy
 import json
-import os
 import tempfile
 from pathlib import Path
 
@@ -73,7 +72,7 @@ def split_row(blob, family, fields, dictionaries):
 def separate(src, out, *, log=print):
     """Convert a packed file without changing row order, geometry, or source columns.
 
-    This is an opt-in ablation format. Run optimize afterward to index both the
+    This is an opt-in ablation format. The output includes a spatial index for
     geometry pages and their separately selectable attribute companions.
     """
     src, out = Path(src), Path(out)
@@ -142,5 +141,7 @@ def separate(src, out, *, log=print):
                     row_group_size=len(table),
                 )
                 log(f'  separated row group {g + 1}/{file.metadata.num_row_groups}')
-        os.replace(path, out)
+        from ._layout import finalize_layout
+
+        finalize_layout(path, out, log=log)
     return out

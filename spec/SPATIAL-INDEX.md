@@ -25,17 +25,18 @@ schema, and zstd, with page breaks at the LOD's finest tile grid. Multiple
 pages may serve a dense tile; a row-group boundary can also split a tile.
 The row cap scales with the chunk's LOD density to target 2,048 present values,
 up to 262,144 analytical rows per page, alongside a configurable uncompressed
-byte target (64 KiB by default; `--page-bytes 16384` restores the earlier target).
+byte target (64 KiB by default; `--lod-page-bytes 16384` selects 16 KiB).
 The target is advisory: write batches and individual large values may exceed it.
 The bootstrap remains 16 KiB, independent of the compression page size.
-`--fixed-pages` keeps the previous 2,048-row cap. Neither changes table values.
+Private layout benchmarks can also use a fixed 2,048-row cap. Neither policy
+changes table values.
 Runs of entirely null tiles are encoded together and omitted from the spatial
 directory. Standard offset indexes still describe every page.
 
 Every column chunk remains contiguous. Interleaving pages from different
 chunks is not part of this profile. A tile may need both the coarse-prefix
 section and the main section, so two data requests can remain necessary.
-A file written with `prefix_zoom=None` has only the main stream and can serve
+The public writer now emits only the main stream and can serve
 contiguous tile data in one range; row-group and directory boundaries can still
 introduce extra reads. Rewriting the logical order changes row IDs, unlike
 optimizing an existing file.
@@ -108,11 +109,12 @@ footer opening. Abandoned entries are replaced on lookup; a late failure may
 remove only the entry it belongs to. Completed cache entries stay reusable.
 
 Publish files immutably. This physical profile is specific to one file write;
-ordinary Parquet writers need not preserve it. Optimizing again reconstructs
-it. The reference optimizer writes to a temporary file and publishes only
-after the completed footer is readable. It requires a distinct output path
-and rejects encrypted/external chunks, bloom filters, and legacy index pages.
-Keep-pages mode additionally rejects dictionary-encoded LOD chunks.
+ordinary Parquet writers need not preserve it. The reference `write()` build
+includes layout finalization and reconstructs the index when rebuilding from
+source GeoParquet. It writes to temporary files and publishes only after the
+completed footer is readable. Its internal layout pass rejects encrypted/external
+chunks, bloom filters, and legacy index pages. The private keep-pages test mode
+additionally rejects dictionary-encoded LOD chunks.
 
 ## Parallel rendering
 

@@ -20,5 +20,4 @@ if __name__ == '__main__':
         thinning=only('rps_2011 > 0 AND rps_2047 > 0', drop_rate(2.5)),
         complete_from=13,  # every building is present from z13
         carry=[('rps_2011', 'float32'), ('rps_2047', 'float32')],
-        prefix_zoom=6,
     )

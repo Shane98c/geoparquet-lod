@@ -68,22 +68,27 @@ current indexed access path; thinning budgets should be tuned to your data.
 
 ```python
 from geoparquet_lod import chain, drop_smallest, tiny_polygons, write
-from geoparquet_lod.optimize import optimize
 
 write(
     "buildings.parquet", "buildings.lod.parquet",
     thinning=chain(drop_smallest(850_000), tiny_polygons()),
     carry=["height", "class"],
-    prefix_zoom=None,
 )
-optimize("buildings.lod.parquet", "buildings.indexed.parquet")
 ```
 
 Put writer calls in an `if __name__ == "__main__":` guard when running scripts
 with multiprocessing. Host the final file at an immutable URL with HTTP Range
-support and CORS exposing `Content-Range`. The optimizer preserves table values
-and row order while changing page layout and adding the directory. A generic
-Parquet rewrite loses this access path; optimize the rewritten LOD file again.
+support and CORS exposing `Content-Range`. `write()` produces the final indexed
+file in one build: overview generation in one Hilbert order, tile-aligned pages,
+and the spatial directory. Intermediate files are cleaned up automatically; the existing output
+is replaced only after the build succeeds. The CLI does the same with
+`geoparquet-lod write source.parquet output.parquet`; there is no separate
+`optimize` command or public API. `lod_page_bytes` / `--lod-page-bytes` controls
+the final overview page target (64 KiB by default).
+
+A generic Parquet rewrite loses the spatial access path. Rebuild from your
+source GeoParquet to produce an indexed file again. Internally the build still
+uses two phases, so allow temporary disk space for the intermediate file.
 
 In a MapLibre app, after creating the map and loading its style:
 

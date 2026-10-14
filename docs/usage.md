@@ -1,7 +1,10 @@
 # Writer and reader guide
 
 See the [README](../README.md) for the recommended indexed workflow and current
-measurements. The experiments linked below document individual design decisions.
+measurements. `write()` and `geoparquet-lod write` now include page layout and
+spatial indexing automatically; the separate optimize API/command has been removed.
+Older experiment reports describe the two-step workflow used for those measurements.
+The experiments linked below document individual design decisions.
 
 ## Whole-feature reads and runtime attributes
 
@@ -42,17 +45,16 @@ Overview queries return bbox-overlapping, deduplicated features and retain LOD
 thinning. They do not perform exact intersection tests. The current implementation
 uses up to 256 tiles by default; see the API's `maxTiles` option.
 
-`geoparquet-lod separate packed.parquet split.parquet`, followed by `optimize`,
-is an opt-in experiment with independently selectable display-attribute columns.
-It preserved functionality but lost styled-map performance in the Tokyo ablation,
-so **packed remains the default**. See [results and limitations](parity-separate.md).
+The separate-attribute layout was a slower Tokyo ablation and is retained only
+as a private benchmark experiment. New builds use packed overviews. See
+[results and limitations](parity-separate.md).
 
 ## How it works
 
 Rows are sorted once along a Hilbert curve over the Web Mercator world
 square in large row groups, so a tile's rows are one contiguous run and a
-city tile touches one or two row groups. An optional coarse prefix puts early-visible rows first in their own order.
-The current indexed Japan profile disables that prefix to keep one Hilbert stream.
+city tile touches one or two row groups. All new builds use one Hilbert stream;
+the coarse-prefix construction survives only in private historical fixtures.
 A float32 bbox covering with page statistics lets a reader pick pages without
 reading geometry. Each LOD is a nullable binary child of the required `lod`
 struct. Present values pack whole quantized geometry, carried attributes, and
@@ -91,7 +93,7 @@ few lines each and meant to be copied:
 | `chain(a, b)`                   | apply `b` to what `a` kept                                                                                                               | `drop_smallest` then `tiny_polygons`       |
 
 Anything the built-ins cannot express is a short function of a table. The
-writer's other options (zooms, the complete zoom, prefix zoom, row group and
+writer's other options (zooms, the complete zoom, row group and
 page sizes, compression level) shape the file, not the row selection.
 
 Zooms are derived from the data unless given: the coarsest zoom is where the

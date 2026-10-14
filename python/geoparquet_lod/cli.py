@@ -83,12 +83,21 @@ def cli():
     '--carry', multiple=True, help='column[:arrow type] to carry per LOD, e.g. risk:float32'
 )
 @click.option('--geometry', default='geometry', show_default=True)
-@click.option('--prefix-zoom', default=6, type=int, show_default=True)
-@click.option(
-    '--no-prefix', is_flag=True, help='Use one global Hilbert order for indexed-file experiments'
-)
 @click.option('--row-group-rows', default=1_048_576, type=int, show_default=True)
-@click.option('--page-bytes', default=16384, type=int, show_default=True)
+@click.option(
+    '--page-bytes',
+    default=16384,
+    type=click.IntRange(min=1),
+    show_default=True,
+    help='Analytical/staging page target in bytes',
+)
+@click.option(
+    '--lod-page-bytes',
+    default=65536,
+    type=click.IntRange(min=1),
+    show_default=True,
+    help='Final tile-aligned overview page target in bytes',
+)
 @click.option('--compression-level', default=9, type=int, show_default=True, help='zstd level')
 @click.option(
     '--batch-rows',
@@ -109,17 +118,16 @@ def write_cmd(
     complete_from,
     carry,
     geometry,
-    prefix_zoom,
-    no_prefix,
     row_group_rows,
     page_bytes,
+    lod_page_bytes,
     compression_level,
     batch_rows,
     workers,
     memory_limit,
     temp_dir,
 ):
-    """Write SRC (GeoParquet with WKB geometry) to OUT in the LOD columns layout."""
+    """Write SRC (GeoParquet with WKB geometry) to OUT with overviews and a spatial index."""
     if zooms != 'auto':
         lo, _, hi = zooms.partition('-')
         zooms = range(int(lo), int(hi or lo) + 1)
@@ -135,9 +143,9 @@ def write_cmd(
         complete_from=complete_from,
         carry=carried,
         geometry=geometry,
-        prefix_zoom=None if no_prefix else prefix_zoom,
         row_group_rows=row_group_rows,
         page_bytes=page_bytes,
+        lod_page_bytes=lod_page_bytes,
         compression_level=compression_level,
         batch_rows=batch_rows,
         workers=workers,
@@ -170,51 +178,3 @@ def inspect_cmd(path):
     click.echo(f'bytes per row in row group {info["row_group_sampled"]}:')
     for col, nbytes in info['compressed_bytes_by_column'].items():
         click.echo(f'  {col:40s} {nbytes / max(rows, 1):8.2f}')
-
-
-@cli.command('optimize')
-@click.argument('src', type=click.Path(exists=True, dir_okay=False))
-@click.argument('out', type=click.Path(dir_okay=False))
-@click.option('--leaf-pages', default=1024, type=click.IntRange(min=1), show_default=True)
-@click.option(
-    '--tile-pages/--keep-pages',
-    default=True,
-    show_default=True,
-    help='Align LOD compression pages to tile boundaries, or just relocate existing pages',
-)
-@click.option(
-    '--sparse-pages/--fixed-pages',
-    default=True,
-    show_default=True,
-    help='Size sparse LOD pages by present values, or cap all pages at 2048 source rows',
-)
-@click.option(
-    '--page-bytes',
-    default=65536,
-    type=click.IntRange(min=1),
-    show_default=True,
-    help='Uncompressed LOD page target; used only with --tile-pages',
-)
-def optimize_cmd(src, out, leaf_pages, tile_pages, sparse_pages, page_bytes):
-    """Cluster LOD pages and add a spatial directory; preserve every table value."""
-    from .optimize import optimize
-
-    optimize(
-        src,
-        out,
-        leaf_pages=leaf_pages,
-        tile_pages=tile_pages,
-        sparse_pages=sparse_pages,
-        page_bytes=page_bytes,
-        log=click.echo,
-    )
-
-
-@cli.command('separate')
-@click.argument('src', type=click.Path(exists=True, dir_okay=False))
-@click.argument('out', type=click.Path(dir_okay=False))
-def separate_cmd(src, out):
-    """Experimental: separate packed overview geometry and typed attributes."""
-    from .separate import separate
-
-    separate(src, out, log=click.echo)

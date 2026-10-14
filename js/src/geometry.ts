@@ -1,7 +1,6 @@
 /**
  * Assembles decoded LOD rows (nested arrays of grid coordinates in the
- * family's shape) into the columnar GeometryColumn that @cogp/reader's
- * `toMvt` consumes. Coordinates stay in grid units; `finish` records the
+ * family's shape) into the columnar GeometryColumn our MVT encoder consumes. Coordinates stay in grid units; `finish` records the
  * LOD's scale and offset so `offset + scale * value` is a CRS coordinate.
  */
 

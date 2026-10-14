@@ -167,8 +167,8 @@ export const readStats = async (): Promise<Record<string, Transfer>> => {
 }
 
 /**
- * Start the worker and open `url` now, so its footer and prefix indexes are in
- * hand by the time the map asks for a tile. Call it as early as the page can,
+ * Start the worker and open `url` now, so the spatial bootstrap is ready
+ * by the time the map asks for a tile. Call it as early as the page can,
  * before the map is constructed.
  */
 export const prefetch = (url: string): void => {

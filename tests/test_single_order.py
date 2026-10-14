@@ -8,6 +8,7 @@ import pyarrow.parquet as pq
 import shapely
 from geoparquet_lod import drop_rate, write
 from geoparquet_lod.pack import Unpacker
+from geoparquet_lod.writer import _write_unindexed
 
 
 def test_prefix_and_single_order_keep_feature_identity(tmp_path):
@@ -30,12 +31,14 @@ def test_prefix_and_single_order_keep_feature_identity(tmp_path):
     layouts = []
     for prefix in (11, None):
         out = tmp_path / f'{prefix}.parquet'
-        write(
+        build = write if prefix is None else _write_unindexed
+        options = {} if prefix is None else {'prefix_zoom': prefix}
+        build(
             src,
             out,
             zooms=range(10, 15),
             complete_from=13,
-            prefix_zoom=prefix,
+            **options,
             thinning=drop_rate(2.5),
             carry=['name'],
             row_group_rows=256,

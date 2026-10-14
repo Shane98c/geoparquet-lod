@@ -9,8 +9,9 @@ import json
 import time
 from pathlib import Path
 
-from geoparquet_lod import chain, drop_smallest, tiny_polygons, write
-from geoparquet_lod.optimize import optimize
+from geoparquet_lod import chain, drop_smallest, tiny_polygons
+from geoparquet_lod._layout import finalize_layout
+from geoparquet_lod.writer import _write_unindexed as write
 
 
 def calibrated_budgets():
@@ -65,4 +66,4 @@ if __name__ == '__main__':
         memory_limit='40GB',
         log=log,
     )
-    optimize(args.out, args.optimized, page_bytes=65536, log=log)
+    finalize_layout(args.out, args.optimized, page_bytes=65536, log=log)

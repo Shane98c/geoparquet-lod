@@ -65,7 +65,9 @@ def _copy(src, dst, start, size):
         size -= len(data)
 
 
-def _tile_pages(parquet, group, name, lod, keys, work, target, sparse_pages, page_bytes):
+def _tile_pages(
+    parquet, group, name, lod, keys, work, target, sparse_pages, page_bytes, compression_level
+):
     """Use Arrow to encode tile-aligned pages, then concatenate its temporary
     column chunks into one ordinary chunk in the original row group. Dictionary
     encoding is disabled so every page is independently decodable. Consecutive
@@ -90,7 +92,7 @@ def _tile_pages(parquet, group, name, lod, keys, work, target, sparse_pages, pag
         path,
         table.schema,
         compression='zstd',
-        compression_level=9,
+        compression_level=compression_level,
         use_dictionary=False,
         write_statistics=False,
         write_page_index=True,
@@ -177,8 +179,16 @@ def _companion_pages(parquet, group, column, geometry_index, work, target):
     return combined, index
 
 
-def optimize(
-    src, out, *, leaf_pages=1024, tile_pages=True, sparse_pages=True, page_bytes=65536, log=print
+def finalize_layout(
+    src,
+    out,
+    *,
+    leaf_pages=1024,
+    tile_pages=True,
+    sparse_pages=True,
+    page_bytes=65536,
+    compression_level=9,
+    log=print,
 ):
     """Write a separate optimized copy, atomically. Working memory is bounded by
     one row group of LOD values plus the file's page directory and indexes; keys
@@ -187,7 +197,7 @@ def optimize(
     """
     src, out = Path(src), Path(out)
     if src.resolve() == out.resolve():
-        raise ValueError('optimize requires a separate output path')
+        raise ValueError('layout finalization requires a separate output path')
     if leaf_pages < 1:
         raise ValueError('leaf_pages must be positive')
     if page_bytes < 1:
@@ -196,7 +206,7 @@ def optimize(
     geo = json.loads(parquet.schema_arrow.metadata[b'geo'])
     lod = geo['lod_columns']
     if lod.get('encoding') not in ('packed', 'packed_geometry') or lod.get('pack_version') != 1:
-        raise ValueError('optimize requires packed LOD version 1')
+        raise ValueError('layout finalization requires packed LOD version 1')
     key_column = lod['key']['column']
     if not 0 <= lod['key']['depth'] <= 26:
         raise ValueError('Hilbert depth must fit exact JavaScript integers (0..26)')
@@ -256,11 +266,11 @@ def optimize(
                 cm = get(chunk, 3)
                 if 14 in cm or 10 in cm:
                     raise ValueError('bloom filters and legacy index pages are unsupported')
-        with tempfile.TemporaryDirectory(prefix='.lod-optimize-', dir=out.parent) as work:
+        with tempfile.TemporaryDirectory(prefix='.lod-layout-', dir=out.parent) as work:
             work = Path(work)
             total_rows = parquet.metadata.num_rows
             if not total_rows:
-                raise ValueError('cannot optimize an empty file')
+                raise ValueError('cannot index an empty file')
             keys = np.memmap(work / 'keys', mode='w+', dtype=np.uint64, shape=(total_rows,))
             starts, start = [], 0
             last = None
@@ -316,6 +326,7 @@ def optimize(
                                 target,
                                 sparse_pages,
                                 page_bytes,
+                                compression_level,
                             )
                             set_value(chunk, 3, cm)
                             set_value(chunk, 2, 0)

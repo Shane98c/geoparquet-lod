@@ -1,5 +1,5 @@
-import { toMvt } from './mvt.js'
-import { MVT_BUFFER, MVT_EXTENT, geometryColumnFromWkb, toMvt as primaryToMvt } from '@cogp/reader'
+import { MVT_BUFFER, MVT_EXTENT, toMvt } from './mvt.js'
+import { geometryColumnFromWkb } from '@cogp/reader'
 import { GeometryBuilder } from './geometry.js'
 import type { Bbox, Lod } from './reader.js'
 import { decodeTile, type PreparedTile, type TileReader } from './spatial.js'
@@ -7,20 +7,12 @@ import { decodeTile, type PreparedTile, type TileReader } from './spatial.js'
 const VECTOR_TILE_SIZE = 512
 
 export interface TileOptions {
-  /** Tile directory sidecar URL or instance; a missing or mismatched one falls back to page indexes. */
   /** MVT layer name for shape LODs (default `features`). */
   layer?: string
   /** MVT layer name for point LODs (default: same as `layer`). */
   pointLayer?: string
   /** Attribute names to copy into MVT properties (default: all carried attributes). */
   properties?: string[]
-  /**
-   * Read the bbox values of candidate pages and keep only rows that intersect
-   * the tile before fetching their LOD pages (default true). Costs a few page
-   * reads of the covering, saves most of the LOD bytes at fine zooms, where a
-   * bbox page holds thousands of rows and a tile wants a few hundred.
-   */
-  refine?: boolean
   signal?: AbortSignal
 }
 
@@ -56,7 +48,7 @@ export const renderTile = async (
     // finer than any LOD: the exact primary geometry of the rows in the tile
     const { rows, wkb, columns } = await reader.readPrimary(bbox, names, signal)
     signal?.throwIfAborted()
-    return primaryToMvt(
+    return toMvt(
       { geometry: geometryColumnFromWkb(wkb), rowIndex: rows, columns },
       { z, x, y, layer, signal },
     )

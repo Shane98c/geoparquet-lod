@@ -9,10 +9,11 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 import shapely
-from geoparquet_lod import validate, write
-from geoparquet_lod.optimize import optimize
+from geoparquet_lod import validate
+from geoparquet_lod._layout import finalize_layout
+from geoparquet_lod._separate import separate
 from geoparquet_lod.pack import Unpacker
-from geoparquet_lod.separate import separate
+from geoparquet_lod.writer import _write_unindexed as write
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -90,8 +91,8 @@ def test_separate(tmp_path, family):
         log=lambda *_: None,
     )
     separate(packed, split, log=lambda *_: None)
-    optimize(packed, a, page_bytes=1024, log=lambda *_: None)
-    optimize(split, b, page_bytes=1024, log=lambda *_: None)
+    finalize_layout(packed, a, page_bytes=1024, log=lambda *_: None)
+    finalize_layout(split, b, page_bytes=1024, log=lambda *_: None)
     validate(b)
     old, new = pq.read_table(packed), pq.read_table(b)
     meta = json.loads(old.schema.metadata[b'geo'])['lod_columns']

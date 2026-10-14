@@ -60,7 +60,7 @@ to bring the physical access design into other GeoParquet overview proposals.
 
 | Path                     | Purpose                                              |
 | ------------------------ | ---------------------------------------------------- |
-| `python/geoparquet_lod/` | Writer, optimizer, validator, CLI                    |
+| `python/geoparquet_lod/` | Writer, layout finalization, validator, CLI          |
 | `js/src/`                | Range reader, tile rendering, MapLibre workers       |
 | `spec/`                  | Logical payload contract and optional physical index |
 | `tests/`, `js/test/`     | Correctness tests and measurement harnesses          |

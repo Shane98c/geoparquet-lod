@@ -68,7 +68,9 @@ A conforming file MUST satisfy:
    and keeps the copies whose `tile` is the tile's. The per-row
    uniform `u` the reference writer hands thinnings is a hash of the
    geometry bytes, so it does not depend on sort order.
-2. **Prefix.** When `prefix` is present, every row whose coarsest zoom is at
+2. **Prefix (historical construction).** The public writer sets `prefix` to
+   null and uses a single global order. Existing experimental files may have
+   a prefix. When `prefix` is present, every row whose coarsest zoom is at
    or below `prefix.zoom` is stored in row groups `0..prefix.row_group_end`,
    and no other row is. Those row groups are sorted on their own; the rest of
    the file is sorted on its own.
@@ -95,13 +97,14 @@ open work.
 
 The following SHOULD hold and are what the reference writer does:
 
-- Row groups of about one million rows; data pages of about 16 KB
-  uncompressed with v1 page headers. A reader fetches a row group's whole
-  offset index per leaf it reads, so page count is a per-tile cost; 4 KB
-  pages cost more there than they save in data, 64 KB the reverse.
+- Row groups of about one million rows; analytical pages target 16 KiB and
+  tile-aligned overview pages target 64 KiB uncompressed, with v1 page headers.
+  The [spatial index](SPATIAL-INDEX.md) selects overview pages directly without
+  fetching entire row-group offset indexes. These are writer policies, not
+  requirements on other producers.
 - Compression that decodes in a browser (zstd); no dictionary encoding on
-  LOD or bbox columns, though readers MUST handle a dictionary page when
-  one is present; `BYTE_STREAM_SPLIT` on coordinate leaves.
+  LOD or bbox columns. Packed LODs are binary values rather than separate
+  coordinate leaves. The standard footer reader also handles dictionary pages.
 
 ## Metadata
 
@@ -147,7 +150,7 @@ the `geo` key beside the usual GeoParquet fields (only two LOD entries shown):
   "key": { "column": "hilbert", "depth": 24 },
   "zooms": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
   "tile_size": 512,
-  "prefix": { "zoom": 6, "row_group_end": 0 },
+  "prefix": null,
   "encoding": "packed",
   "pack_version": 1,
   "attributes": [{ "name": "height", "type": "float" }, { "name": "class", "type": "string" }],
@@ -228,6 +231,10 @@ declared type, into that LOD's rows; copies carry the source row's values.
 
 ## Reader algorithm
 
+The indexed map path is described in [SPATIAL-INDEX.md](SPATIAL-INDEX.md).
+The following describes the footer-based reader retained for analytical access
+and experimental files without the spatial index.
+
 1. Read the footer. The reference HTTP source first probes for the optional
    [spatial index profile](SPATIAL-INDEX.md), which can bypass this algorithm
    for LOD tiles. Otherwise it reads a 64 KiB tail and any missing footer bytes.
@@ -269,7 +276,7 @@ any rule.
 Nothing here changes the primary geometry or attribute columns. `SELECT
 count(*)`, spatial joins and attribute queries are correct with no filter.
 The `bbox` column is the standard 1.1 covering. The LOD column is a
-struct of structs a reader can drop.
+struct of binary columns a reader can drop.
 
 ## Relation to other proposals
 
@@ -277,12 +284,10 @@ struct of structs a reader can drop.
   declares each level as a cumulative row-group prefix; geometry is stored
   once and an optional overview column may carry simplified shapes. Reading
   a fine level means reading every coarser level's row groups that touch the
-  view, so requests grow with the level count. This layout keeps one such
-  prefix and one global order, and moves zoom selection into nullable LOD
-  structs, so a tile touches few row groups at every zoom: one or two on
-  the building datasets measured, more where large geometries span groups.
-  Our `prefix` has the shape of a COGP level but not its contract, since
-  COGP's last level is the whole table and ours is one coarse slice. Our
+  view, so requests grow with the level count. The current writer uses one
+  global order and moves zoom selection into nullable binary LOD columns,
+  with an index over their pages. Historical builds also supported a coarse
+  prefix; it is no longer a public construction option. Our
   LOD geometry keeps COGP's `quantized_geoarrow` transform and grid, with
   `Point` added, but packs each row into one binary value, so a COGP reader
   cannot decode it and nothing is shared beyond the transform.

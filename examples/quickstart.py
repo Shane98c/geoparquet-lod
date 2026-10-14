@@ -14,15 +14,13 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import shapely
 from geoparquet_lod import chain, drop_smallest, tiny_polygons, write
-from geoparquet_lod.optimize import optimize
 
 
 def main(directory: Path):
     directory.mkdir(parents=True, exist_ok=True)
     source = directory / 'buildings.source.parquet'
-    packed = directory / 'buildings.packed.parquet'
     indexed = directory / 'buildings.lod.parquet'
-    for path in (source, packed, indexed):
+    for path in (source, indexed):
         if path.exists():
             raise FileExistsError(f'{path} exists; choose a fresh output directory')
 
@@ -48,15 +46,13 @@ def main(directory: Path):
     pq.write_table(table.replace_schema_metadata({b'geo': json.dumps(geo).encode()}), source)
     write(
         str(source),
-        packed,
+        indexed,
         thinning=chain(drop_smallest(850_000), tiny_polygons()),
         carry=['height', 'class'],
-        prefix_zoom=None,
         zooms=list(range(8, 17)),
         complete_from=14,
         workers=2,
     )
-    optimize(packed, indexed)
     print(f'Indexed demo: {indexed.resolve()}')
 
 

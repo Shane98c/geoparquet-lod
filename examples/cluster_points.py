@@ -21,5 +21,4 @@ if __name__ == '__main__':
         thinning=cluster(pixels=8, count='count'),
         zooms=range(0, 15),
         carry=['count'],
-        prefix_zoom=4,
     )

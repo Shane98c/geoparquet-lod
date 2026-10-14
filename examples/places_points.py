@@ -20,5 +20,4 @@ if __name__ == '__main__':
         thinning=importance('population', per_tile=300),
         zooms=range(0, 15),
         carry=['name', 'population'],
-        prefix_zoom=5,
     )

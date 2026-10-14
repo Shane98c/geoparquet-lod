@@ -35,8 +35,6 @@ export interface Lod {
   placeholder?: number
 }
 
-const DEFAULT_PLACEHOLDER_CELLS = 2
-
 export interface LodMetadata {
   version: string
   column: string
@@ -67,7 +65,7 @@ export interface PageLocation {
   byteEnd: number
 }
 
-/** Rows shown at one LOD inside a bbox: the coordinate leaf as hyparquet nests it, attributes by name. */
+/** Rows shown at one LOD inside a bbox: decoded geometry and attributes by name. */
 export interface LodRows {
   /** Global row index of each value, so a feature can be addressed later. */
   rows: number[]
@@ -82,10 +80,6 @@ export interface PrimaryRows {
   columns: Record<string, unknown[]>
 }
 
-/** Refine candidate rows by their bbox values only when the LOD bytes it should save exceed the bbox bytes by this factor. */
-
-/** Below this many bytes across an LOD's leaves, a row group's chunks are read whole rather than through page indexes. */
-
 /** Compressed bytes of decoded bbox pages kept for later tiles; the oldest go first. */
 const PAGE_CACHE_BYTES = 4 * 1024 * 1024
 /** LOD bytes a tile may read past its exact rows rather than fetch key pages to trim them. */
@@ -93,10 +87,9 @@ const LOOSE_BYTES = 32 * 1024
 const BBOX_LEAVES = ['bbox.xmin', 'bbox.ymin', 'bbox.xmax', 'bbox.ymax'] as const
 
 /**
- * Reads the LOD columns layout: rows in one Hilbert order with a coarse prefix,
- * a covering bbox with page statistics, and one nullable struct per LOD. A
- * tile read is: row groups by bbox statistics, pages by the bbox page index,
- * then only the overlapping pages of the LOD's geometry and attribute leaves.
+ * Footer-based access to source columns, exact geometry, and unindexed LOD
+ * files. The indexed map path uses SpatialReader and opens this reader lazily
+ * for analytical queries. Older prefix layouts remain readable here.
  */
 export class LodReader {
   readonly metadata: FileMetaData
@@ -796,26 +789,12 @@ export class LodReader {
     return chunk
   }
 
-  private chunkBytes(g: number, leaf: string): number {
-    return Number(this.chunk(g, leaf).meta_data!.total_compressed_size)
-  }
-
-  /**
-   * Whether reading the bbox values of the candidate rows should save more LOD
-   * bytes than it costs: the LOD leaves' bytes per row times the share of
-   * candidates expected to miss, against the covering's bytes per row.
-   */
-  /**
-   * Row ranges of the pages whose bbox statistics admit `bbox`, and `hit`,
-   * the share of those pages' extent the tile covers: an estimate of how
-   * many candidate rows will actually intersect, used to decide whether
-   * reading the bbox values to refine them is worth its own page reads.
-   */
+  /** Row ranges admitted by all four bbox column indexes. */
   private async candidateRows(
     g: number,
     bbox: Bbox,
     signal?: AbortSignal,
-  ): Promise<{ ranges: [number, number][]; hit: number }> {
+  ): Promise<{ ranges: [number, number][] }> {
     const rows = Number(this.metadata.row_groups[g].num_rows)
     const loaded = await Promise.all(
       BBOX_LEAVES.map((leaf) =>
@@ -833,26 +812,10 @@ export class LodReader {
         if (tests[i]) ranges.push([pages[p].rowStart, pages[p].rowEnd])
       })
       selected = selected ? intersectRanges(selected, ranges) : ranges
-      if (!selected.length) return { ranges: [], hit: 0 }
+      if (!selected.length) return { ranges: [] }
     }
     const ranges = mergeRanges(selected ?? [[0, rows]])
-    // page extents from the xmin/xmax and ymin/ymax indexes; pages share row boundaries
-    const [[xminPages, xminIndex], [, yminIndex], [, xmaxIndex], [, ymaxIndex]] = loaded
-    let covered = 0
-    let extent = 0
-    xminPages.forEach((p, i) => {
-      if (!ranges.some(([a, b]) => p.rowStart < b && p.rowEnd > a)) return
-      const px0 = xminIndex.min_values[i] as unknown as number
-      const py0 = yminIndex.min_values[i] as unknown as number
-      const px1 = xmaxIndex.max_values[i] as unknown as number
-      const py1 = ymaxIndex.max_values[i] as unknown as number
-      const area = Math.max(px1 - px0, 1e-12) * Math.max(py1 - py0, 1e-12)
-      const ix = Math.max(0, Math.min(px1, bbox[2]) - Math.max(px0, bbox[0]))
-      const iy = Math.max(0, Math.min(py1, bbox[3]) - Math.max(py0, bbox[1]))
-      extent += area
-      covered += Math.min(area, ix * iy)
-    })
-    return { ranges, hit: extent ? covered / extent : 1 }
+    return { ranges }
   }
 
   private async refineRows(
@@ -926,7 +889,6 @@ export class LodReader {
     return data as ArrayLike<unknown>[]
   }
 
-  /** Rows of a leaf under an LOD struct, present rows only. */
   /** Rows of an LOD leaf within `ranges`, present rows only. */
   private async readLeafRows(
     g: number,

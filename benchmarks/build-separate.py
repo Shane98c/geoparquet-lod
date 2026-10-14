@@ -10,9 +10,10 @@ from pathlib import Path
 
 import duckdb
 import pyarrow.parquet as pq
-from geoparquet_lod import chain, drop_smallest, tiny_polygons, write
-from geoparquet_lod.optimize import optimize
-from geoparquet_lod.separate import separate
+from geoparquet_lod import chain, drop_smallest, tiny_polygons
+from geoparquet_lod._layout import finalize_layout
+from geoparquet_lod._separate import separate
+from geoparquet_lod.writer import _write_unindexed as write
 
 
 def main():
@@ -50,9 +51,8 @@ def main():
         row_group_rows=262144,
         workers=4,
     )
-    separate(out / 'packed.raw.parquet', out / 'separate.raw.parquet')
-    for name in ['packed', 'separate']:
-        optimize(out / f'{name}.raw.parquet', out / f'{name}.parquet')
+    finalize_layout(out / 'packed.raw.parquet', out / 'packed.parquet')
+    separate(out / 'packed.raw.parquet', out / 'separate.parquet')
     print(
         json.dumps(
             {

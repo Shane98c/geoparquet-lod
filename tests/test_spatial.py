@@ -12,10 +12,12 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 import shapely
-from geoparquet_lod import drop_rate, validate, write
+from geoparquet_lod import drop_rate, validate
+from geoparquet_lod import write as build
 from geoparquet_lod._compact import dumps, loads
-from geoparquet_lod.optimize import optimize
+from geoparquet_lod._layout import finalize_layout
 from geoparquet_lod.pack import Unpacker
+from geoparquet_lod.writer import _write_unindexed as write
 from geoparquet_lod.writer import hilbert_key
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -72,9 +74,7 @@ def test_spatial_roundtrip(
     ).replace_schema_metadata({b'geo': json.dumps(geo).encode()})
     src, old, new = [tmp_path / name for name in ('source.parquet', 'old.parquet', 'new.parquet')]
     pq.write_table(table, src)
-    write(
-        src,
-        old,
+    options = dict(
         zooms=range(10, 15),
         complete_from=13,
         prefix_zoom=prefix,
@@ -87,6 +87,7 @@ def test_spatial_roundtrip(
         workers=1,
         log=lambda *_: None,
     )
+    write(src, old, **options)
     if family == 'point' and not sparse:
         # Keep-pages must retain support for standard v2 pages through the
         # general decoder when the sparse v1/PLAIN fast path doesn't apply.
@@ -107,16 +108,27 @@ def test_spatial_roundtrip(
     assert dumps(loads(footer)) == footer
     if leaf_pages == 1:
         monkeypatch.setattr(
-            importlib.import_module('geoparquet_lod.optimize'), '_ROOT_TARGET_BYTES', 800
+            importlib.import_module('geoparquet_lod._layout'), '_ROOT_TARGET_BYTES', 800
         )
-    optimize(
-        old,
-        new,
-        leaf_pages=leaf_pages,
-        tile_pages=tile_pages,
-        page_bytes=page_bytes,
-        log=lambda *_: None,
-    )
+    if family == 'line':
+        # Exercise the public single build against the legacy table and the
+        # independent JS membership/MVT assertions below.
+        build(
+            src,
+            new,
+            **{k: v for k, v in options.items() if k != 'prefix_zoom'},
+            lod_page_bytes=page_bytes,
+        )
+        assert not list(tmp_path.glob('.lod-build-*'))
+    else:
+        finalize_layout(
+            old,
+            new,
+            leaf_pages=leaf_pages,
+            tile_pages=tile_pages,
+            page_bytes=page_bytes,
+            log=lambda *_: None,
+        )
     if sparse:
         raw = new.read_bytes()
         root = json.loads(gzip.decompress(raw[16 : 16 + int.from_bytes(raw[12:16], 'little')]))
@@ -204,6 +216,6 @@ def test_spatial_roundtrip(
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_optimize_requires_separate_output(tmp_path):
+def test_layout_requires_separate_output(tmp_path):
     with pytest.raises(ValueError, match='separate output'):
-        optimize(tmp_path / 'same', tmp_path / 'same')
+        finalize_layout(tmp_path / 'same', tmp_path / 'same')

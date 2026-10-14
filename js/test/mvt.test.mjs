@@ -92,3 +92,96 @@ for (const type of ['Point', 'MultiLineString', 'MultiPolygon']) {
 console.log(
   'streaming MVT matches reference bytes for clipping, wrapping, winding, properties and cancellation',
 )
+
+// Exact-geometry fallback uses the same encoder as packed overviews. Exercise
+// float64 WKB, single/multi families, holes, empty/null geometry and boundaries.
+const { geometryColumnFromWkb } = await import('@cogp/reader')
+const { renderTile } = await import('../dist/tile.js')
+function wkb(type, coordinates) {
+  const bytes = [1]
+  const uint = (value) => {
+    const buffer = new ArrayBuffer(4)
+    new DataView(buffer).setUint32(0, value, true)
+    bytes.push(...new Uint8Array(buffer))
+  }
+  const point = (xy) => {
+    for (const value of xy) {
+      const buffer = new ArrayBuffer(8)
+      new DataView(buffer).setFloat64(0, value, true)
+      bytes.push(...new Uint8Array(buffer))
+    }
+  }
+  uint(type)
+  if (type === 1) point(coordinates)
+  else {
+    uint(coordinates.length)
+    for (const part of coordinates) {
+      if (type === 2) point(part)
+      else if (type === 3) {
+        uint(part.length)
+        for (const xy of part) point(xy)
+      } else bytes.push(...wkb(type - 3, part))
+    }
+  }
+  return Uint8Array.from(bytes)
+}
+const ring = [
+  [-0.123456789, -0.15],
+  [0.18, -0.15],
+  [0.18, 0.21],
+  [-0.123456789, 0.21],
+  [-0.123456789, -0.15],
+]
+const hole = [
+  [0.01, 0.01],
+  [0.01, 0.02],
+  [0.02, 0.02],
+  [0.02, 0.01],
+  [0.01, 0.01],
+]
+const exact = [
+  wkb(1, [0.0123456789, -0.0123456789]),
+  wkb(2, ring),
+  wkb(3, [ring, hole]),
+  wkb(4, [
+    [0.0123456789, -0.0123456789],
+    [179.99999, 1],
+  ]),
+  wkb(5, [
+    ring,
+    [
+      [-180.00001, 1],
+      [-179.99999, 2],
+    ],
+  ]),
+  wkb(6, [[ring, hole], [ring.map(([x, y]) => [x + 180, y])]]),
+  wkb(3, []),
+  null,
+]
+const exactRows = exact.map((_, i) => 2 ** 40 + i)
+const columns = { name: exact.map((_, i) => `feature-${i}`) }
+const geometry = geometryColumnFromWkb(exact)
+const reader = {
+  lod: { attributes: [{ name: 'name' }] },
+  finestZoom: 0,
+  lodForZoom: () => ({ geometry_type: 'MultiPolygon' }),
+  readPrimary: async () => ({ rows: exactRows, wkb: exact, columns }),
+}
+for (const [z, x, y] of [
+  [1, 0, 0],
+  [1, 1, 1],
+  [14, 8191, 8191],
+  [14, 8192, 8192],
+  [14, 16383, 8191],
+]) {
+  const options = { z, x, y, layer: 'features' }
+  assert.deepEqual(
+    new Uint8Array(await renderTile(reader, z, x, y)),
+    new Uint8Array(reference({ geometry, rowIndex: exactRows, columns }, options)),
+    `exact WKB fallback preserves reference MVT at ${z}/${x}/${y}`,
+  )
+}
+await assert.rejects(() => renderTile(reader, 1, 0, 0, { signal: AbortSignal.abort() }), {
+  name: 'AbortError',
+})
+console.log('exact WKB fallback preserves reference MVT across geometry families')
