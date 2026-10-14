@@ -1,0 +1,4473 @@
+{
+  "source_manifest": {
+    "version": 1,
+    "source": "/private/tmp/japan.tippecanoe-density.spatial.parquet",
+    "source_bytes": 7666520593,
+    "source_footer_sha256": "19aeefecef052764153034514cc4e575ba9a647f29584ec7ed9ee502bd898643",
+    "rows": 53742978,
+    "groups": 52,
+    "levels": ["f4", "f8", "f11", "f14", "f16"],
+    "max_selected_per_page": 2048,
+    "max_geometry_rows": 262144,
+    "attribute_rows": 4096,
+    "codec": "ZSTD9",
+    "native_decoder_sha256": "94d16295e969f73c681868784ba6baecd1545ed76ea6186261a5446780dbe35c",
+    "native_wrapper_sha256": "053f30a2adeb6058f35bb22a852354313203c2c9954eb633bc389c38e15a26fa"
+  },
+  "staging": {
+    "seconds": 23.616208957973868,
+    "groups": 52,
+    "totals": {
+      "f4": {
+        "selected": 7182,
+        "vertices": 35909,
+        "independent_coordinate_samples": 3720,
+        "bytes": 243519
+      },
+      "f8": {
+        "selected": 495590,
+        "vertices": 2408365,
+        "independent_coordinate_samples": 3744,
+        "bytes": 6883407
+      },
+      "f11": {
+        "selected": 2313488,
+        "vertices": 13378899,
+        "independent_coordinate_samples": 3744,
+        "bytes": 39017076
+      },
+      "f14": {
+        "selected": 53742978,
+        "vertices": 320394331,
+        "independent_coordinate_samples": 3328,
+        "bytes": 697043902
+      },
+      "f16": {
+        "selected": 53742978,
+        "vertices": 322581950,
+        "independent_coordinate_samples": 3328,
+        "bytes": 780423859
+      }
+    }
+  },
+  "assembly": {
+    "source_rows": 53742978,
+    "row_groups": 52,
+    "file_bytes": 6448104656,
+    "root_compressed_bytes": 13511,
+    "shards": 414,
+    "directory_bytes": 3356811,
+    "footer_bytes": 238015,
+    "copied_source_chunks": 2132,
+    "copied_source_payload_sha256": "fe99b7e9246e64a700f783a5503addcd570219401d209aad4e97643a33c4effe",
+    "assembly_seconds": 15.891204457962885,
+    "all_source_columns_arrow_equal": true,
+    "source_column_group_comparisons": 1300,
+    "source_validation_seconds": 34.457033458165824
+  },
+  "group_summaries": [
+    {
+      "group": 0,
+      "rows": 1048576,
+      "seconds": 1.834091416792944,
+      "fields": {
+        "height": { "bytes": 176435, "seconds": 0.029891041107475758, "pages": 256 },
+        "class": { "bytes": 126506, "seconds": 0.025273917010053992, "pages": 256 },
+        "f4": {
+          "bytes": 4952,
+          "seconds": 0.047774374950677156,
+          "selected": 147,
+          "polygons": 147,
+          "rings": 147,
+          "vertices": 735,
+          "geometry_sha256": "c5ac2e1431a62dc1c46bcc829b20b382f0098af7af694cf06545dcaf68735294",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 152192,
+          "seconds": 0.05843362491577864,
+          "selected": 11199,
+          "polygons": 11215,
+          "rings": 11216,
+          "vertices": 54554,
+          "geometry_sha256": "ac3798b2a47826563230d74eb61d159b9fecf12beffaa2496f3270488726a5ea",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 6
+        },
+        "f11": {
+          "bytes": 850666,
+          "seconds": 0.10333087504841387,
+          "selected": 51904,
+          "polygons": 53309,
+          "rings": 53465,
+          "vertices": 296804,
+          "geometry_sha256": "27a5c8a2091df7309a3bd1815c7df3d31a4ff90e7b50f72574a4f76fd29ddb59",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 26
+        },
+        "f14": {
+          "bytes": 13503243,
+          "seconds": 0.8258865000680089,
+          "selected": 1048576,
+          "polygons": 1048822,
+          "rings": 1049122,
+          "vertices": 6100966,
+          "geometry_sha256": "e8a2363fdfb4420f08f260afe3521150bbd73a4ab0f64ff498bd4b2fa5da15b3",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15136041,
+          "seconds": 0.7765597500838339,
+          "selected": 1048576,
+          "polygons": 1048725,
+          "rings": 1048971,
+          "vertices": 6147738,
+          "geometry_sha256": "4dfeeba887284a75406c2830cdd0d23ff18475bb75b5066505bd918b97d06224",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 1,
+      "rows": 1048576,
+      "seconds": 1.8640955002047122,
+      "fields": {
+        "height": { "bytes": 59211, "seconds": 0.015099917072802782, "pages": 256 },
+        "class": { "bytes": 125865, "seconds": 0.027387541951611638, "pages": 256 },
+        "f4": {
+          "bytes": 4791,
+          "seconds": 0.047834208933636546,
+          "selected": 144,
+          "polygons": 144,
+          "rings": 144,
+          "vertices": 720,
+          "geometry_sha256": "ad20f2a53b58fe6e8a233aff675ab31b130a2eb5c819e84048901ef362960f29",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 144147,
+          "seconds": 0.06820204202085733,
+          "selected": 10528,
+          "polygons": 10540,
+          "rings": 10540,
+          "vertices": 51042,
+          "geometry_sha256": "26b2be189bac02082d288678d5f6633739906e9e063343b227678383a98bb1cd",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 6
+        },
+        "f11": {
+          "bytes": 749585,
+          "seconds": 0.10223112488165498,
+          "selected": 44652,
+          "polygons": 45684,
+          "rings": 45842,
+          "vertices": 257417,
+          "geometry_sha256": "d06ca3b7472c953769e834712565a4ac660471368e3f019ed07b2d995bc29b5f",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 22
+        },
+        "f14": {
+          "bytes": 12986571,
+          "seconds": 0.876991958823055,
+          "selected": 1048576,
+          "polygons": 1048703,
+          "rings": 1049003,
+          "vertices": 5968596,
+          "geometry_sha256": "4e7083d4097c048ad05032b01a2d135aa2c695501e5ebb359e24519bc0475f27",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 14507504,
+          "seconds": 0.704251374816522,
+          "selected": 1048576,
+          "polygons": 1048682,
+          "rings": 1048954,
+          "vertices": 5990999,
+          "geometry_sha256": "cefe0807dd1d15370fcb48e4dfec85e8f12c6b065c4c20c6107d5ce22c0e51a6",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 2,
+      "rows": 1048576,
+      "seconds": 1.9729893340263516,
+      "fields": {
+        "height": { "bytes": 505018, "seconds": 0.06249037501402199, "pages": 256 },
+        "class": { "bytes": 243232, "seconds": 0.046889124903827906, "pages": 256 },
+        "f4": {
+          "bytes": 4557,
+          "seconds": 0.04989737505093217,
+          "selected": 140,
+          "polygons": 140,
+          "rings": 140,
+          "vertices": 700,
+          "geometry_sha256": "12f6f7fba4ffdfbc9fe92b5ec58e7aa28af2f8b6236ec5fcb94dfee58fbafb22",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 120743,
+          "seconds": 0.0598451669793576,
+          "selected": 9466,
+          "polygons": 9475,
+          "rings": 9475,
+          "vertices": 45900,
+          "geometry_sha256": "7df01c658362b8ca12a331c2ee8a7f975395304bdb21ab221584e99bc57c8a0c",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 663193,
+          "seconds": 0.10264541697688401,
+          "selected": 41641,
+          "polygons": 42520,
+          "rings": 42704,
+          "vertices": 237177,
+          "geometry_sha256": "724169666a44eae2ed60d78c9af6a0560a4b8f9a3ff26811941bf491582dbef6",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 21
+        },
+        "f14": {
+          "bytes": 13552150,
+          "seconds": 0.9143423750065267,
+          "selected": 1048576,
+          "polygons": 1048739,
+          "rings": 1049568,
+          "vertices": 6496764,
+          "geometry_sha256": "dc5282bfe8a11249c31e1688ece50ba4786555cf64befdbf9ec975fc75070935",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15177430,
+          "seconds": 0.7072398748714477,
+          "selected": 1048576,
+          "polygons": 1048708,
+          "rings": 1049519,
+          "vertices": 6548285,
+          "geometry_sha256": "c80aeb48c99d133355c7f80fd3b4588ed439833a70977b2a2f216bc13f7b8d59",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 3,
+      "rows": 1048576,
+      "seconds": 1.9205112920608371,
+      "fields": {
+        "height": { "bytes": 426412, "seconds": 0.05357449990697205, "pages": 256 },
+        "class": { "bytes": 166471, "seconds": 0.03185745910741389, "pages": 256 },
+        "f4": {
+          "bytes": 4238,
+          "seconds": 0.05665204208344221,
+          "selected": 115,
+          "polygons": 115,
+          "rings": 115,
+          "vertices": 575,
+          "geometry_sha256": "c3cb6628b9abfdaa84aa41501cdd59975ca2bafc55837085c9a8a8a551fc97ec",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 92961,
+          "seconds": 0.058838750002905726,
+          "selected": 6843,
+          "polygons": 6849,
+          "rings": 6849,
+          "vertices": 33074,
+          "geometry_sha256": "99ff738892d67688cb9dd28d799e271136d4fb09c5f76f48be9e42e2cef4b1ee",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f11": {
+          "bytes": 517751,
+          "seconds": 0.08724975003860891,
+          "selected": 30524,
+          "polygons": 31399,
+          "rings": 31534,
+          "vertices": 176992,
+          "geometry_sha256": "7bfcb450b538b2885e6378f03f37df43cd913300c210cfd5a9cf58ea30e584f0",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 15
+        },
+        "f14": {
+          "bytes": 13327337,
+          "seconds": 0.8911021668463945,
+          "selected": 1048576,
+          "polygons": 1048794,
+          "rings": 1049459,
+          "vertices": 6429027,
+          "geometry_sha256": "e0e5b0cf5b45cb665757751b523b945f0085533660e0dce909999dd1354d74c9",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15121635,
+          "seconds": 0.7168970420025289,
+          "selected": 1048576,
+          "polygons": 1048662,
+          "rings": 1049212,
+          "vertices": 6556061,
+          "geometry_sha256": "2a5fd202b63adfcbf2f1b0626655c64796873b2c60d3bf65c5988d0303efeebd",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 4,
+      "rows": 1048576,
+      "seconds": 1.9505323751363903,
+      "fields": {
+        "height": { "bytes": 513687, "seconds": 0.06672487501055002, "pages": 256 },
+        "class": { "bytes": 235804, "seconds": 0.04783262521959841, "pages": 256 },
+        "f4": {
+          "bytes": 4279,
+          "seconds": 0.05270308302715421,
+          "selected": 117,
+          "polygons": 117,
+          "rings": 117,
+          "vertices": 585,
+          "geometry_sha256": "a09d8ff2de07cdde001bbe93f1aa75f352a279470d540a74022ed754356a1dbf",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 94857,
+          "seconds": 0.05529700010083616,
+          "selected": 6703,
+          "polygons": 6711,
+          "rings": 6711,
+          "vertices": 32524,
+          "geometry_sha256": "b5bd07915e642e62987c8a4e2c54491cc8eb177df1d2a471d1ed43e1a69e838c",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 529563,
+          "seconds": 0.09284362499602139,
+          "selected": 31234,
+          "polygons": 31962,
+          "rings": 32100,
+          "vertices": 177718,
+          "geometry_sha256": "667b395a28f74fadeb4d26624b0306d3255bbb1be5c236a186281f28480f3ce4",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 16
+        },
+        "f14": {
+          "bytes": 13653485,
+          "seconds": 0.9161439589224756,
+          "selected": 1048576,
+          "polygons": 1048666,
+          "rings": 1049159,
+          "vertices": 6498565,
+          "geometry_sha256": "dc5ed5095d56e94e3638cde4728aa28bbcf1edcadad6c0ec9b1f9513a6c3195d",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15334708,
+          "seconds": 0.694173791911453,
+          "selected": 1048576,
+          "polygons": 1048620,
+          "rings": 1049088,
+          "vertices": 6569716,
+          "geometry_sha256": "6c2741a1eef7e0953143f2a88d771e6376f4a2d12da28305f9a1f05d48a4da82",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 5,
+      "rows": 1048576,
+      "seconds": 1.6605747079011053,
+      "fields": {
+        "height": { "bytes": 575106, "seconds": 0.05976541596464813, "pages": 256 },
+        "class": { "bytes": 110673, "seconds": 0.018863207893446088, "pages": 256 },
+        "f4": {
+          "bytes": 4525,
+          "seconds": 0.0367353749461472,
+          "selected": 129,
+          "polygons": 129,
+          "rings": 129,
+          "vertices": 645,
+          "geometry_sha256": "d3bc4ce8b330c4daf1afb68cf14f655112f198f678226b35b6741499acb8363d",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 122480,
+          "seconds": 0.04833341692574322,
+          "selected": 8851,
+          "polygons": 8860,
+          "rings": 8860,
+          "vertices": 43001,
+          "geometry_sha256": "f9040d158331b37245eabd641f68efa08a0a69713abe9c5ed3bbec4a2d658421",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 673143,
+          "seconds": 0.08881879085674882,
+          "selected": 39838,
+          "polygons": 41025,
+          "rings": 41177,
+          "vertices": 230912,
+          "geometry_sha256": "d845bcb975b3e35b385a6f6b9effcd57ce04a0b148781958d5ab02c2fa4b7cee",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 20
+        },
+        "f14": {
+          "bytes": 13423512,
+          "seconds": 0.7113737920299172,
+          "selected": 1048576,
+          "polygons": 1048773,
+          "rings": 1049225,
+          "vertices": 6230785,
+          "geometry_sha256": "cf29b70123fb6054eeb5531cf2e130baa80ca467738fc4789e5bd035a44511e9",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15085598,
+          "seconds": 0.6829230838920921,
+          "selected": 1048576,
+          "polygons": 1048678,
+          "rings": 1049094,
+          "vertices": 6287775,
+          "geometry_sha256": "d3ff09c68412ea6f7e06bbd5e4e0abfc17d999ddad82c4277364e978d2bce904",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 6,
+      "rows": 1048576,
+      "seconds": 1.5930517499800771,
+      "fields": {
+        "height": { "bytes": 40775, "seconds": 0.008483291836455464, "pages": 256 },
+        "class": { "bytes": 99017, "seconds": 0.017214833991602063, "pages": 256 },
+        "f4": {
+          "bytes": 4480,
+          "seconds": 0.034048042027279735,
+          "selected": 125,
+          "polygons": 125,
+          "rings": 125,
+          "vertices": 625,
+          "geometry_sha256": "661a1074082c5ba22ad323f7a069b93fd382ca9c84bfd56c56c239f8157d9b69",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 110136,
+          "seconds": 0.046850417042151093,
+          "selected": 7729,
+          "polygons": 7741,
+          "rings": 7741,
+          "vertices": 37527,
+          "geometry_sha256": "e81514c29469e68c02882b465b9e47a2b9e6c09a078f515e4d4791fc02dd6072",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 639478,
+          "seconds": 0.07942191697657108,
+          "selected": 36532,
+          "polygons": 37811,
+          "rings": 37985,
+          "vertices": 215854,
+          "geometry_sha256": "333354c95c3e7b32fba0c28170456c7b1c6148afa6021e3d4e94bc5c5bbc8518",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 18
+        },
+        "f14": {
+          "bytes": 14318580,
+          "seconds": 0.7117801669519395,
+          "selected": 1048576,
+          "polygons": 1048817,
+          "rings": 1049256,
+          "vertices": 6693411,
+          "geometry_sha256": "b43303e17138bb46b9f01288da0736e44cdd08a2d951d79de83a60822d3c3996",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 16049314,
+          "seconds": 0.6824600000400096,
+          "selected": 1048576,
+          "polygons": 1048762,
+          "rings": 1049169,
+          "vertices": 6764049,
+          "geometry_sha256": "479c0f05c5ddbaa074a3910f0ef40474f80c39f7a626d9c287978cac6aae3c8b",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 7,
+      "rows": 1048576,
+      "seconds": 1.6499487911351025,
+      "fields": {
+        "height": { "bytes": 120104, "seconds": 0.01882100012153387, "pages": 256 },
+        "class": { "bytes": 165329, "seconds": 0.026591124944388866, "pages": 256 },
+        "f4": {
+          "bytes": 4642,
+          "seconds": 0.03486433299258351,
+          "selected": 138,
+          "polygons": 138,
+          "rings": 138,
+          "vertices": 690,
+          "geometry_sha256": "be6e1f06b6823bb7954fc7fd7148b6c861d961514b540eaaf8729ec64a58be01",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 130723,
+          "seconds": 0.05097987502813339,
+          "selected": 10304,
+          "polygons": 10314,
+          "rings": 10314,
+          "vertices": 49996,
+          "geometry_sha256": "474335d52868c9158cfc8c3052b38aadf29039a4f665bf9f665732f744eda1bf",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 6
+        },
+        "f11": {
+          "bytes": 767073,
+          "seconds": 0.09683462488465011,
+          "selected": 48225,
+          "polygons": 49685,
+          "rings": 49923,
+          "vertices": 279531,
+          "geometry_sha256": "c746abf930e9610c59153c9eab239ca00868551ba1bcf122bc67c01c81d20fda",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 24
+        },
+        "f14": {
+          "bytes": 13050603,
+          "seconds": 0.7168664580676705,
+          "selected": 1048576,
+          "polygons": 1048710,
+          "rings": 1049410,
+          "vertices": 6252495,
+          "geometry_sha256": "2227358e190ef0ce6c0611149512631fcd34f83c7406ed80bfb01c2e5b29f3d1",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 14668348,
+          "seconds": 0.6894041250925511,
+          "selected": 1048576,
+          "polygons": 1048651,
+          "rings": 1049312,
+          "vertices": 6299271,
+          "geometry_sha256": "282958849461b7bd92c7b7053d87a4f762d6411156c11f86d742adfce8007506",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 8,
+      "rows": 1048576,
+      "seconds": 1.7460139589384198,
+      "fields": {
+        "height": { "bytes": 495388, "seconds": 0.06464020791463554, "pages": 256 },
+        "class": { "bytes": 223516, "seconds": 0.03615075000561774, "pages": 256 },
+        "f4": {
+          "bytes": 4326,
+          "seconds": 0.035850333981215954,
+          "selected": 124,
+          "polygons": 124,
+          "rings": 124,
+          "vertices": 620,
+          "geometry_sha256": "088ca42a379b89466985cb5dda47ef6567c232e523f99986f8528a4818406808",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 129312,
+          "seconds": 0.05190504202619195,
+          "selected": 10762,
+          "polygons": 10783,
+          "rings": 10783,
+          "vertices": 52365,
+          "geometry_sha256": "c3dd1a4734ace0dc40e577fe5fe7fd5644128cabac62d132cc747a1a5bb05517",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 6
+        },
+        "f11": {
+          "bytes": 755637,
+          "seconds": 0.10308787482790649,
+          "selected": 50280,
+          "polygons": 51575,
+          "rings": 51977,
+          "vertices": 287528,
+          "geometry_sha256": "dd8eef4fe4b894e0a6853b2bd2ceee357b4c0988f64cc57bb4c5a54ea51e82b5",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 25
+        },
+        "f14": {
+          "bytes": 12843475,
+          "seconds": 0.7194634589832276,
+          "selected": 1048576,
+          "polygons": 1048688,
+          "rings": 1049920,
+          "vertices": 6314797,
+          "geometry_sha256": "c10dfde6e56cf65697386aac39f7e9bbc71c739b9623f741b1c0d8a9c8644af3",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 14462288,
+          "seconds": 0.7161187080200762,
+          "selected": 1048576,
+          "polygons": 1048651,
+          "rings": 1049855,
+          "vertices": 6381456,
+          "geometry_sha256": "7e3cfd35e4047dbf17857a3a825aa3bc7abcfd695bee55ef03c956d567b00635",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 9,
+      "rows": 1048576,
+      "seconds": 1.733841500012204,
+      "fields": {
+        "height": { "bytes": 248803, "seconds": 0.0282643751706928, "pages": 256 },
+        "class": { "bytes": 173585, "seconds": 0.02677395800128579, "pages": 256 },
+        "f4": {
+          "bytes": 4097,
+          "seconds": 0.03387770801782608,
+          "selected": 108,
+          "polygons": 108,
+          "rings": 108,
+          "vertices": 540,
+          "geometry_sha256": "9aad6794fcd390759c2b30b498ca99fc90fde8753170021f615b8b5e27f488e7",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 89191,
+          "seconds": 0.04737062496133149,
+          "selected": 6850,
+          "polygons": 6862,
+          "rings": 6862,
+          "vertices": 33369,
+          "geometry_sha256": "fbfa7a72365ddcf11a571805d9cdecbe39bea771848496a7403e21bb6b6806fb",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 525995,
+          "seconds": 0.07654424989596009,
+          "selected": 33405,
+          "polygons": 34302,
+          "rings": 34464,
+          "vertices": 189713,
+          "geometry_sha256": "398abae2959e4a8acecae638c4317c4ef258c9556e7db0921cd652edee109a90",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 17
+        },
+        "f14": {
+          "bytes": 12213510,
+          "seconds": 0.7440417921170592,
+          "selected": 1048576,
+          "polygons": 1048654,
+          "rings": 1049115,
+          "vertices": 6124782,
+          "geometry_sha256": "72696f5a37484d8cd489fa5f6d830314a03e17d11b524d3b65b593e78ff47ea2",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 13704602,
+          "seconds": 0.7612243748735636,
+          "selected": 1048576,
+          "polygons": 1048643,
+          "rings": 1049061,
+          "vertices": 6159312,
+          "geometry_sha256": "189432b212204fa8ccf3b75b3d15fd95f92ef5b80327f64b98686a2c425f0659",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 10,
+      "rows": 1048576,
+      "seconds": 1.685169457923621,
+      "fields": {
+        "height": { "bytes": 52501, "seconds": 0.010952541837468743, "pages": 256 },
+        "class": { "bytes": 119891, "seconds": 0.02044266602024436, "pages": 256 },
+        "f4": {
+          "bytes": 4270,
+          "seconds": 0.03424908290617168,
+          "selected": 111,
+          "polygons": 111,
+          "rings": 111,
+          "vertices": 555,
+          "geometry_sha256": "94c824058268f5fc49444048ff53bd5ab7ff41005145a817384db6d823fa50f5",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 95921,
+          "seconds": 0.04568470804952085,
+          "selected": 6654,
+          "polygons": 6660,
+          "rings": 6660,
+          "vertices": 32383,
+          "geometry_sha256": "d4ed2e29edaa4905946fb4d86e9b6230017209fb9b98b008d59552a25e334ea9",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f11": {
+          "bytes": 589067,
+          "seconds": 0.07881145807914436,
+          "selected": 34034,
+          "polygons": 34963,
+          "rings": 35212,
+          "vertices": 197924,
+          "geometry_sha256": "476029b10f527e7b58d6367d3542ebc0c357a83f128aea834b66906e011135d2",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 17
+        },
+        "f14": {
+          "bytes": 12978071,
+          "seconds": 0.7458303330931813,
+          "selected": 1048576,
+          "polygons": 1048664,
+          "rings": 1049478,
+          "vertices": 6177617,
+          "geometry_sha256": "c22c3351f0333caea634ee5e3f17ef739501fabed4da8bb383398e617f9afd74",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 14562106,
+          "seconds": 0.7355089581105858,
+          "selected": 1048576,
+          "polygons": 1048625,
+          "rings": 1049372,
+          "vertices": 6225087,
+          "geometry_sha256": "aa6a0d1316d27ab24b898c570305594b94dcf1ab1182ece39c9eb3564f07302e",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 11,
+      "rows": 1048576,
+      "seconds": 1.676230790792033,
+      "fields": {
+        "height": { "bytes": 42578, "seconds": 0.008532499894499779, "pages": 256 },
+        "class": { "bytes": 111020, "seconds": 0.019080542027950287, "pages": 256 },
+        "f4": {
+          "bytes": 4720,
+          "seconds": 0.03573304181918502,
+          "selected": 138,
+          "polygons": 138,
+          "rings": 138,
+          "vertices": 690,
+          "geometry_sha256": "e2821b50d5fb5b71a80c0134aa48e2f21a880554b80c505b128e10475621a650",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 135879,
+          "seconds": 0.05033354088664055,
+          "selected": 9552,
+          "polygons": 9569,
+          "rings": 9569,
+          "vertices": 46378,
+          "geometry_sha256": "c52f3391218dfb2ea59ca7e52da0192a40dc1927b682fe5523e7a47f79452354",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 788392,
+          "seconds": 0.08979329187422991,
+          "selected": 44443,
+          "polygons": 46045,
+          "rings": 46279,
+          "vertices": 265622,
+          "geometry_sha256": "55137eb3533458f7115a10111bae7c8848dfd71ab74e4bdb83465f713484b8de",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 22
+        },
+        "f14": {
+          "bytes": 13907043,
+          "seconds": 0.7454150831326842,
+          "selected": 1048576,
+          "polygons": 1048802,
+          "rings": 1049206,
+          "vertices": 6348956,
+          "geometry_sha256": "2c750f65b61880501cb47b95ceb2fad06ab9e719fa41c32401e056196c6513e8",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15578250,
+          "seconds": 0.713997415965423,
+          "selected": 1048576,
+          "polygons": 1048720,
+          "rings": 1049075,
+          "vertices": 6388258,
+          "geometry_sha256": "03eac2fa4f8ef22d80b611e1e15aee3b809e7386d381c101718a8742a1d85d50",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 12,
+      "rows": 1048576,
+      "seconds": 1.7111443341709673,
+      "fields": {
+        "height": { "bytes": 172647, "seconds": 0.024011334171518683, "pages": 256 },
+        "class": { "bytes": 114678, "seconds": 0.018958833999931812, "pages": 256 },
+        "f4": {
+          "bytes": 5017,
+          "seconds": 0.034028165973722935,
+          "selected": 154,
+          "polygons": 154,
+          "rings": 154,
+          "vertices": 770,
+          "geometry_sha256": "03603578508fcdbbb2ae463fb56430f13d8ce628f03ac3f1b7105e389deca08c",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 147568,
+          "seconds": 0.052309874910861254,
+          "selected": 10291,
+          "polygons": 10301,
+          "rings": 10301,
+          "vertices": 49956,
+          "geometry_sha256": "b3889d97ae7755488171993e6709b89348fe6028408a52f4edd0638d631ab46d",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 6
+        },
+        "f11": {
+          "bytes": 870870,
+          "seconds": 0.09804104105569422,
+          "selected": 49328,
+          "polygons": 51057,
+          "rings": 51252,
+          "vertices": 291068,
+          "geometry_sha256": "4c94eab118248503370def7717774eca826abf90a338ef928cc7cecf5321eb6b",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 25
+        },
+        "f14": {
+          "bytes": 14112834,
+          "seconds": 0.7765773748978972,
+          "selected": 1048576,
+          "polygons": 1048736,
+          "rings": 1048974,
+          "vertices": 6299409,
+          "geometry_sha256": "f387332705fcb4ff834cecf504aeaf5a8c780501586e5245cb3765a0fa21f18d",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15788862,
+          "seconds": 0.6936969999223948,
+          "selected": 1048576,
+          "polygons": 1048688,
+          "rings": 1048879,
+          "vertices": 6340968,
+          "geometry_sha256": "9315626489f62bdc0bba2b0637e3b448ddf5189636aed6d402065f578ed81390",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 13,
+      "rows": 1048576,
+      "seconds": 1.6988588750828058,
+      "fields": {
+        "height": { "bytes": 234902, "seconds": 0.032880791928619146, "pages": 256 },
+        "class": { "bytes": 151500, "seconds": 0.02708129188977182, "pages": 256 },
+        "f4": {
+          "bytes": 4802,
+          "seconds": 0.036912249866873026,
+          "selected": 143,
+          "polygons": 143,
+          "rings": 143,
+          "vertices": 715,
+          "geometry_sha256": "1f48962deb8ddf14084723d2728c98965d20d6e7c7a425d8dd5083f8058bc205",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 126776,
+          "seconds": 0.05288729094900191,
+          "selected": 8647,
+          "polygons": 8658,
+          "rings": 8658,
+          "vertices": 42003,
+          "geometry_sha256": "1005e526673afe2743375431118a8c893a982b509d8e2b5f7c69e2bf2adadd8d",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 761147,
+          "seconds": 0.0945111671462655,
+          "selected": 42435,
+          "polygons": 43934,
+          "rings": 44149,
+          "vertices": 251871,
+          "geometry_sha256": "ae326328b48f61e1449f1e9fb83faa5ec657511ea3b2eff9a910baddb2215d66",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 21
+        },
+        "f14": {
+          "bytes": 13851865,
+          "seconds": 0.7628551248926669,
+          "selected": 1048576,
+          "polygons": 1048769,
+          "rings": 1049178,
+          "vertices": 6223650,
+          "geometry_sha256": "4a2e011273abad5262d7f489329c620849779761a89c335e63fd6b4325f266e0",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15532213,
+          "seconds": 0.6762075419537723,
+          "selected": 1048576,
+          "polygons": 1048689,
+          "rings": 1049019,
+          "vertices": 6270584,
+          "geometry_sha256": "4f466fd5c8886621966f17d897c764c0e0bc4ba91b4a40f7aaf6ff0f2b7b391a",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 14,
+      "rows": 1048576,
+      "seconds": 1.6406234169844538,
+      "fields": {
+        "height": { "bytes": 48840, "seconds": 0.011693333042785525, "pages": 256 },
+        "class": { "bytes": 81785, "seconds": 0.01641674991697073, "pages": 256 },
+        "f4": {
+          "bytes": 4728,
+          "seconds": 0.03639445803128183,
+          "selected": 141,
+          "polygons": 141,
+          "rings": 141,
+          "vertices": 705,
+          "geometry_sha256": "e5ebfe56b3be56092c166c77a92060c214584d27dc131b9024142b21149f480b",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 111585,
+          "seconds": 0.051091790897771716,
+          "selected": 7672,
+          "polygons": 7680,
+          "rings": 7680,
+          "vertices": 37208,
+          "geometry_sha256": "94f05194470721527329186b407424fa1ba56056a31617bcb51cd75c6160e0c7",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 636951,
+          "seconds": 0.09017416718415916,
+          "selected": 35547,
+          "polygons": 36553,
+          "rings": 36700,
+          "vertices": 208021,
+          "geometry_sha256": "f5e471f54af26b596653071d1b67c0a159e62c9c672fbdf3a31e88cd394d7cd4",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 18
+        },
+        "f14": {
+          "bytes": 13062592,
+          "seconds": 0.7396908749360591,
+          "selected": 1048576,
+          "polygons": 1048671,
+          "rings": 1048839,
+          "vertices": 5965815,
+          "geometry_sha256": "443c5b1e3f4694ce6b41ea4cbbdb092782b3efc361f12405aed2523a09a6748f",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 14610700,
+          "seconds": 0.6823557501193136,
+          "selected": 1048576,
+          "polygons": 1048635,
+          "rings": 1048791,
+          "vertices": 5982044,
+          "geometry_sha256": "52a115f480b1005f511b8d9eb22727a9e7f8dbc9c27cf6e47c58c419560a9ca3",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 15,
+      "rows": 1048576,
+      "seconds": 1.634263375075534,
+      "fields": {
+        "height": { "bytes": 140490, "seconds": 0.019816625164821744, "pages": 256 },
+        "class": { "bytes": 108970, "seconds": 0.021554999984800816, "pages": 256 },
+        "f4": {
+          "bytes": 4513,
+          "seconds": 0.03661287506110966,
+          "selected": 121,
+          "polygons": 121,
+          "rings": 121,
+          "vertices": 605,
+          "geometry_sha256": "b59a3fb2100f8affc7524b018956c7bd1e7cf6ac95c06bdd6e46f8f7eceaf15b",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 121179,
+          "seconds": 0.05171670904383063,
+          "selected": 8442,
+          "polygons": 8447,
+          "rings": 8447,
+          "vertices": 40949,
+          "geometry_sha256": "0aa2f5bdcc49b618b448841c4be384867e78590b230a49a554339b3bb0da208e",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 683779,
+          "seconds": 0.0894634579308331,
+          "selected": 39330,
+          "polygons": 40381,
+          "rings": 40531,
+          "vertices": 226836,
+          "geometry_sha256": "f4e880548fa7bd7aaeaf6886886e33442db2cc71816b1364d453b40b0c4b39a5",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 20
+        },
+        "f14": {
+          "bytes": 13749553,
+          "seconds": 0.7569468750152737,
+          "selected": 1048576,
+          "polygons": 1048742,
+          "rings": 1049019,
+          "vertices": 6273077,
+          "geometry_sha256": "e87bbb874dcabf27afbad843717e7ba4630c5406ce3023549e0b0452513098fe",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15425776,
+          "seconds": 0.644512000028044,
+          "selected": 1048576,
+          "polygons": 1048673,
+          "rings": 1048908,
+          "vertices": 6333422,
+          "geometry_sha256": "551a29ea93e61c82b4b38212af9174680682c7caebf895bd3bd1e825cc436c04",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 16,
+      "rows": 1048576,
+      "seconds": 1.6452393340878189,
+      "fields": {
+        "height": { "bytes": 55292, "seconds": 0.01125641679391265, "pages": 256 },
+        "class": { "bytes": 104295, "seconds": 0.019320291932672262, "pages": 256 },
+        "f4": {
+          "bytes": 4576,
+          "seconds": 0.036187250167131424,
+          "selected": 130,
+          "polygons": 130,
+          "rings": 130,
+          "vertices": 650,
+          "geometry_sha256": "838f22a5835aa0ee3467c61a14e5d51155cb5c57010ae16d5494392601728d17",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 131312,
+          "seconds": 0.054557083174586296,
+          "selected": 9442,
+          "polygons": 9453,
+          "rings": 9453,
+          "vertices": 45761,
+          "geometry_sha256": "f9d78d1e148759624ae60e6aa808ed5a205c314183e1c2030f56a4ac9e6f1bbc",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 675413,
+          "seconds": 0.09079999988898635,
+          "selected": 39532,
+          "polygons": 40660,
+          "rings": 40872,
+          "vertices": 230959,
+          "geometry_sha256": "e7464b70edd4117be5ba69d2832ccf4c903c3380e6231bea203a2e68e4bbb2c0",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 20
+        },
+        "f14": {
+          "bytes": 13723717,
+          "seconds": 0.7292324160225689,
+          "selected": 1048576,
+          "polygons": 1048739,
+          "rings": 1049005,
+          "vertices": 6361464,
+          "geometry_sha256": "399e4407c69f8609567419c1b69cf4e2b9f4c9024bc967902f0cec60dd6005b8",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15314801,
+          "seconds": 0.6899213748984039,
+          "selected": 1048576,
+          "polygons": 1048721,
+          "rings": 1048968,
+          "vertices": 6386543,
+          "geometry_sha256": "91088711a3428aa5ed20aa565e31255dc9bab0832e1691474baa14232d643459",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 17,
+      "rows": 1048576,
+      "seconds": 2.0379542920272797,
+      "fields": {
+        "height": { "bytes": 148298, "seconds": 0.022742209024727345, "pages": 256 },
+        "class": { "bytes": 203907, "seconds": 0.034483916126191616, "pages": 256 },
+        "f4": {
+          "bytes": 4251,
+          "seconds": 0.041308874962851405,
+          "selected": 117,
+          "polygons": 117,
+          "rings": 117,
+          "vertices": 585,
+          "geometry_sha256": "e1b2d5ba30f15cda657acbd8e1a8de37f0c23ccdf47f9ea708780a010f821dae",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 98246,
+          "seconds": 0.05776562518440187,
+          "selected": 7442,
+          "polygons": 7455,
+          "rings": 7455,
+          "vertices": 36206,
+          "geometry_sha256": "ec81a058c9b5b60a366aa9b6c6d2740318eb4ce8cb62ba85528be260795d2e1d",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 541315,
+          "seconds": 0.0995160830207169,
+          "selected": 32864,
+          "polygons": 33879,
+          "rings": 34128,
+          "vertices": 192614,
+          "geometry_sha256": "837395988c8596aac8db526f6121ae31d6c6b91bbaf8449d0f5fe910686e460d",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 17
+        },
+        "f14": {
+          "bytes": 13671628,
+          "seconds": 0.8772584579419345,
+          "selected": 1048576,
+          "polygons": 1048660,
+          "rings": 1049348,
+          "vertices": 6655168,
+          "geometry_sha256": "df22df200a52afb21b399f23e5912f180b59ba5c77400785c4a480449f1edfcc",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15427950,
+          "seconds": 0.8857078750152141,
+          "selected": 1048576,
+          "polygons": 1048626,
+          "rings": 1049283,
+          "vertices": 6749064,
+          "geometry_sha256": "7d34395760a920f1bbe944c9bbcfd939f59dda92cabc452a691e386d9bbcfbfd",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 18,
+      "rows": 1048576,
+      "seconds": 1.9737303329166025,
+      "fields": {
+        "height": { "bytes": 48152, "seconds": 0.01144295884296298, "pages": 256 },
+        "class": { "bytes": 113454, "seconds": 0.021304208086803555, "pages": 256 },
+        "f4": {
+          "bytes": 4549,
+          "seconds": 0.04037912515923381,
+          "selected": 129,
+          "polygons": 129,
+          "rings": 129,
+          "vertices": 645,
+          "geometry_sha256": "e473be43f84761f5b56c752ac0ca9cbcb200d3a04181c0f5cfa85e7777d3b402",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 109444,
+          "seconds": 0.0586374590639025,
+          "selected": 7537,
+          "polygons": 7550,
+          "rings": 7550,
+          "vertices": 36699,
+          "geometry_sha256": "e923f645f17da8054dc593eeda6ae7218adbcc7b99c6a0c0212b1b0079ffb53a",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 588792,
+          "seconds": 0.09419033420272171,
+          "selected": 34456,
+          "polygons": 35282,
+          "rings": 35422,
+          "vertices": 195593,
+          "geometry_sha256": "d0e1d76fd21f061a64cff37429612654406ab4f63be634fe2116f7444a04b9b1",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 17
+        },
+        "f14": {
+          "bytes": 13320656,
+          "seconds": 0.8719738330692053,
+          "selected": 1048576,
+          "polygons": 1048685,
+          "rings": 1048937,
+          "vertices": 6068202,
+          "geometry_sha256": "64bc7892a9d5314aa6f2b4510e03d478f83bae1c13ff6e0609e6c39e11a2a341",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 14899535,
+          "seconds": 0.8601197500247508,
+          "selected": 1048576,
+          "polygons": 1048659,
+          "rings": 1048904,
+          "vertices": 6102259,
+          "geometry_sha256": "71524538e0c9bb30cef94f2716c5ea61a028459ce194f099b0109b4fc6ef8dee",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 19,
+      "rows": 1048576,
+      "seconds": 2.008441375102848,
+      "fields": {
+        "height": { "bytes": 41908, "seconds": 0.011385499965399504, "pages": 256 },
+        "class": { "bytes": 108501, "seconds": 0.02303479192778468, "pages": 256 },
+        "f4": {
+          "bytes": 4812,
+          "seconds": 0.046033333986997604,
+          "selected": 151,
+          "polygons": 151,
+          "rings": 151,
+          "vertices": 755,
+          "geometry_sha256": "454f7ec85f0030e2e60f563dba16f4f48f132c7720a8a2cb4a8ee3db3f856aa7",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 127895,
+          "seconds": 0.06509320810437202,
+          "selected": 9516,
+          "polygons": 9532,
+          "rings": 9532,
+          "vertices": 46171,
+          "geometry_sha256": "c74958d7d6b06725e9477bf981479cdabd886656bec1f372ff43418e0a78c074",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 677457,
+          "seconds": 0.1043486250564456,
+          "selected": 40448,
+          "polygons": 41689,
+          "rings": 41930,
+          "vertices": 236738,
+          "geometry_sha256": "cae61686ec4f0d35bb160409cf92b0e3e337834a6e19d73114c73ef223ee4ffb",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 20
+        },
+        "f14": {
+          "bytes": 12819474,
+          "seconds": 0.8797089159488678,
+          "selected": 1048576,
+          "polygons": 1048815,
+          "rings": 1049186,
+          "vertices": 5950561,
+          "geometry_sha256": "878fd5b943a5226bb7b956c71bffb3a88c30b55fabdf62ee16bb3a1cacafe6d1",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 14351327,
+          "seconds": 0.8648630410898477,
+          "selected": 1048576,
+          "polygons": 1048746,
+          "rings": 1049098,
+          "vertices": 5980422,
+          "geometry_sha256": "530b5aa57de8debea4eab5782c539143f33b0da439828167825795ad25e4566b",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 20,
+      "rows": 1048576,
+      "seconds": 2.064372417051345,
+      "fields": {
+        "height": { "bytes": 90724, "seconds": 0.022709500044584274, "pages": 256 },
+        "class": { "bytes": 132537, "seconds": 0.03391145798377693, "pages": 256 },
+        "f4": {
+          "bytes": 4639,
+          "seconds": 0.04263270809315145,
+          "selected": 144,
+          "polygons": 144,
+          "rings": 144,
+          "vertices": 720,
+          "geometry_sha256": "656748654c0d76ef6000c994865646aa2e3882579018fa0760ec8685a68d8bd3",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 137879,
+          "seconds": 0.06593345897272229,
+          "selected": 11444,
+          "polygons": 11472,
+          "rings": 11472,
+          "vertices": 55594,
+          "geometry_sha256": "70680798033eb84150651fd542d92ffe9d3c6be6b8d10d21eb893301ccdfdd9a",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 6
+        },
+        "f11": {
+          "bytes": 756450,
+          "seconds": 0.12034566607326269,
+          "selected": 48702,
+          "polygons": 50020,
+          "rings": 50463,
+          "vertices": 284768,
+          "geometry_sha256": "c655648bd1ee858ec8afdfa33a861ed14a76a76ad846522b7ab34df36c63ddd7",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 24
+        },
+        "f14": {
+          "bytes": 12580204,
+          "seconds": 0.8770453329198062,
+          "selected": 1048576,
+          "polygons": 1048734,
+          "rings": 1049477,
+          "vertices": 6083473,
+          "geometry_sha256": "1a96816f4db0ee87b96f630108e0753163e1279d6b297616a54dec827e2647b1",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 14081675,
+          "seconds": 0.8802499580197036,
+          "selected": 1048576,
+          "polygons": 1048673,
+          "rings": 1049388,
+          "vertices": 6116198,
+          "geometry_sha256": "22e1882f4af92b347c15f59009257bdca3bba879a402f7f1c37a9bb18ad955be",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 21,
+      "rows": 1048576,
+      "seconds": 2.209826375124976,
+      "fields": {
+        "height": { "bytes": 126218, "seconds": 0.03548291604965925, "pages": 256 },
+        "class": { "bytes": 206120, "seconds": 0.05657816701568663, "pages": 256 },
+        "f4": {
+          "bytes": 4209,
+          "seconds": 0.04979466600343585,
+          "selected": 118,
+          "polygons": 118,
+          "rings": 118,
+          "vertices": 590,
+          "geometry_sha256": "2dd76d5cba9cf09c9312d801e49e2b0b7a69602fbb9d94a592a2c2b6031de8bd",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 99393,
+          "seconds": 0.06524741696193814,
+          "selected": 8053,
+          "polygons": 8061,
+          "rings": 8061,
+          "vertices": 39238,
+          "geometry_sha256": "0879bdb2d3e7ac5c9a25bed0d4ac4f188f2f7f7352172fcd6f6507773d74cfe4",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 637537,
+          "seconds": 0.10721491696313024,
+          "selected": 39896,
+          "polygons": 41244,
+          "rings": 41671,
+          "vertices": 236611,
+          "geometry_sha256": "9a5610609d75311b50412f8f458918a861b408801b86caddb833bda4aa7f0751",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 20
+        },
+        "f14": {
+          "bytes": 13446716,
+          "seconds": 0.9865714579354972,
+          "selected": 1048576,
+          "polygons": 1048631,
+          "rings": 1049776,
+          "vertices": 6661533,
+          "geometry_sha256": "fec0c3822d4054bf8c28660822ac8f1df03603a832b26f52645d85cfee8d3dfa",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15070334,
+          "seconds": 0.8888307497836649,
+          "selected": 1048576,
+          "polygons": 1048611,
+          "rings": 1049725,
+          "vertices": 6722262,
+          "geometry_sha256": "63224f842aa279c239484b1f16a7736ba2bc909ab0513394d72eb539c76a0eff",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 22,
+      "rows": 1048576,
+      "seconds": 2.094144167145714,
+      "fields": {
+        "height": { "bytes": 135665, "seconds": 0.03387258411385119, "pages": 256 },
+        "class": { "bytes": 210606, "seconds": 0.04765000008046627, "pages": 256 },
+        "f4": {
+          "bytes": 4277,
+          "seconds": 0.04437487502582371,
+          "selected": 120,
+          "polygons": 120,
+          "rings": 120,
+          "vertices": 600,
+          "geometry_sha256": "aec9d95e0a608eda0e88853537a3ac9983cb3ab2e92b4d549406bb15d4b27460",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 104095,
+          "seconds": 0.05954266688786447,
+          "selected": 8071,
+          "polygons": 8087,
+          "rings": 8087,
+          "vertices": 39276,
+          "geometry_sha256": "798bc3a400eb9a946aeef5f1635f9d3d276431a2454888800fc1a422d1e5c30b",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 571451,
+          "seconds": 0.09851237502880394,
+          "selected": 35323,
+          "polygons": 36478,
+          "rings": 36771,
+          "vertices": 207943,
+          "geometry_sha256": "e9a32d84aaf4936850ca09b576c86a32d2c445dfefee6bcae872c2deb7a09951",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 18
+        },
+        "f14": {
+          "bytes": 13652014,
+          "seconds": 0.934834250016138,
+          "selected": 1048576,
+          "polygons": 1048674,
+          "rings": 1049486,
+          "vertices": 6635832,
+          "geometry_sha256": "0f39a559863a2892a5d227756e51dbf3f723992a6ed539171a4d47e862b7c1b6",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15335664,
+          "seconds": 0.8529598331078887,
+          "selected": 1048576,
+          "polygons": 1048649,
+          "rings": 1049422,
+          "vertices": 6693094,
+          "geometry_sha256": "d2bd2ee6d0ec72460c68ab395b893d624e898355fc10f955c5e4c8a0dbd76d24",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 23,
+      "rows": 1048576,
+      "seconds": 2.185578375123441,
+      "fields": {
+        "height": { "bytes": 241534, "seconds": 0.054769250098615885, "pages": 256 },
+        "class": { "bytes": 163804, "seconds": 0.04110254184342921, "pages": 256 },
+        "f4": {
+          "bytes": 4289,
+          "seconds": 0.04720124998129904,
+          "selected": 120,
+          "polygons": 120,
+          "rings": 120,
+          "vertices": 600,
+          "geometry_sha256": "d796c0dc5ac04a13b88a1e544c6dd99ea805033a8b0e34b00d18c6b2ad0097a6",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 109706,
+          "seconds": 0.06098633399233222,
+          "selected": 8607,
+          "polygons": 8619,
+          "rings": 8619,
+          "vertices": 41809,
+          "geometry_sha256": "f5f566a49924cb37d05f51ef421c5edcf5600670e8c1b7acfb756421249da2e1",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 636844,
+          "seconds": 0.1090793339535594,
+          "selected": 39414,
+          "polygons": 40714,
+          "rings": 41004,
+          "vertices": 231516,
+          "geometry_sha256": "b61976ea2aa11dcd02666d80526f6e4f659a01f5159785aa017ebcdeaa2c2a57",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 20
+        },
+        "f14": {
+          "bytes": 13825991,
+          "seconds": 0.9737625829875469,
+          "selected": 1048576,
+          "polygons": 1048752,
+          "rings": 1049410,
+          "vertices": 6712200,
+          "geometry_sha256": "0239dd65acef009fc84711a92571ce52aba41592bd6751ea6a71cf2d3fa1a692",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15676050,
+          "seconds": 0.8740675419103354,
+          "selected": 1048576,
+          "polygons": 1048707,
+          "rings": 1049309,
+          "vertices": 6822131,
+          "geometry_sha256": "264aae19f28f90aa54e81d937d132c29a2c5bd4a6205902f4b41c6d96587f132",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 24,
+      "rows": 1048576,
+      "seconds": 2.1176376659423113,
+      "fields": {
+        "height": { "bytes": 70697, "seconds": 0.019857250154018402, "pages": 256 },
+        "class": { "bytes": 142677, "seconds": 0.03934104205109179, "pages": 256 },
+        "f4": {
+          "bytes": 4339,
+          "seconds": 0.052210791036486626,
+          "selected": 123,
+          "polygons": 123,
+          "rings": 123,
+          "vertices": 615,
+          "geometry_sha256": "2f6bb6fc73367409984ae73ad86836bb3579460afb5b6b8da9bbba9e0ce96479",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 103645,
+          "seconds": 0.07295470801182091,
+          "selected": 7794,
+          "polygons": 7808,
+          "rings": 7808,
+          "vertices": 37905,
+          "geometry_sha256": "e198737f5e85af15e27b5f055f60c1a79d621d44d92e66b31f69a3ac1deac466",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 584499,
+          "seconds": 0.1206231671385467,
+          "selected": 35349,
+          "polygons": 36432,
+          "rings": 36667,
+          "vertices": 206084,
+          "geometry_sha256": "766968c5ae736c76d5a8b2f80a102081262b02efadc10f08cb9481052e25f7bc",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 18
+        },
+        "f14": {
+          "bytes": 13616271,
+          "seconds": 0.9168787500821054,
+          "selected": 1048576,
+          "polygons": 1048750,
+          "rings": 1049307,
+          "vertices": 6555973,
+          "geometry_sha256": "3a5a30b4d0bf4115c9630460de172f7996b55beb997220a86d3d8d6c1922b9f7",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15376957,
+          "seconds": 0.8770038748625666,
+          "selected": 1048576,
+          "polygons": 1048710,
+          "rings": 1049215,
+          "vertices": 6644145,
+          "geometry_sha256": "9dd35c9fac80ad5389e87e17e62f12aabc18823a303ee4c965faf836fb36d589",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 25,
+      "rows": 1048576,
+      "seconds": 2.1446992920245975,
+      "fields": {
+        "height": { "bytes": 102633, "seconds": 0.024266707943752408, "pages": 256 },
+        "class": { "bytes": 122153, "seconds": 0.03081750008277595, "pages": 256 },
+        "f4": {
+          "bytes": 4375,
+          "seconds": 0.046347458148375154,
+          "selected": 127,
+          "polygons": 127,
+          "rings": 127,
+          "vertices": 635,
+          "geometry_sha256": "dc464c8f7fcd023e7ebb314883567bc36b8032f25c5ce6b7a045359f89f2f0c1",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 107110,
+          "seconds": 0.06204049987718463,
+          "selected": 8134,
+          "polygons": 8141,
+          "rings": 8141,
+          "vertices": 39584,
+          "geometry_sha256": "f8a962a4a6049eb7358a434868e35cf1216d413cc2cfc4067a9f20e258259b0e",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 632114,
+          "seconds": 0.1171510829590261,
+          "selected": 38826,
+          "polygons": 39864,
+          "rings": 40115,
+          "vertices": 224146,
+          "geometry_sha256": "c9fd8cd68e08bcfda088ebdf8bf78c16c6c9d8c7cb90c85be98bd5acbbffa2f2",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 19
+        },
+        "f14": {
+          "bytes": 12839164,
+          "seconds": 0.9118257500231266,
+          "selected": 1048576,
+          "polygons": 1048707,
+          "rings": 1049273,
+          "vertices": 6197867,
+          "geometry_sha256": "8a3c7ea55629d3822b82b4745d5b05da200312c2000aa9043e08c3a340945a5e",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 14428515,
+          "seconds": 0.9352299170568585,
+          "selected": 1048576,
+          "polygons": 1048653,
+          "rings": 1049188,
+          "vertices": 6248386,
+          "geometry_sha256": "0c30a94636153449ca7daf6b3e1bd1eebe2a64a6b15cae528de309ee5ce21842",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 26,
+      "rows": 1048576,
+      "seconds": 2.1208944169338793,
+      "fields": {
+        "height": { "bytes": 42697, "seconds": 0.011401457944884896, "pages": 256 },
+        "class": { "bytes": 88693, "seconds": 0.0333298749756068, "pages": 256 },
+        "f4": {
+          "bytes": 4735,
+          "seconds": 0.0403891250025481,
+          "selected": 147,
+          "polygons": 147,
+          "rings": 147,
+          "vertices": 735,
+          "geometry_sha256": "7eb54c9dfff02efb8f56d4f1fba7819073d0a97483ab59361cf050f4f3307b25",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 135118,
+          "seconds": 0.07048245891928673,
+          "selected": 9908,
+          "polygons": 9926,
+          "rings": 9926,
+          "vertices": 47986,
+          "geometry_sha256": "3c5dea7122d63c09d65ac686b9271d6f7344252510d22273c282a8b2e24674b0",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 697744,
+          "seconds": 0.11669062497094274,
+          "selected": 40645,
+          "polygons": 41838,
+          "rings": 42001,
+          "vertices": 237713,
+          "geometry_sha256": "8c85a2b81115ec3128474b99d4cfeda0f8e743e0a4e29ef659cd0ead1e902d89",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 20
+        },
+        "f14": {
+          "bytes": 12808985,
+          "seconds": 0.9016859580297023,
+          "selected": 1048576,
+          "polygons": 1048754,
+          "rings": 1048966,
+          "vertices": 5901079,
+          "geometry_sha256": "070af3db4ff8545f38fd18269e9e011f8c5ed2b1b715c1966e80af05b47de601",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 14348831,
+          "seconds": 0.9262085419613868,
+          "selected": 1048576,
+          "polygons": 1048686,
+          "rings": 1048878,
+          "vertices": 5922232,
+          "geometry_sha256": "780d1ded922ba5afd5669b949cb1a43b247ef62362de5eb7029d740613eeeb81",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 27,
+      "rows": 1048576,
+      "seconds": 2.0857056251261383,
+      "fields": {
+        "height": { "bytes": 40584, "seconds": 0.023293041856959462, "pages": 256 },
+        "class": { "bytes": 93580, "seconds": 0.02820349996909499, "pages": 256 },
+        "f4": {
+          "bytes": 4884,
+          "seconds": 0.058847540989518166,
+          "selected": 158,
+          "polygons": 158,
+          "rings": 158,
+          "vertices": 790,
+          "geometry_sha256": "ee7c848f633426496eb6d27462259e411cb7dc9a8d6e2fe312652f6751012a65",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 143857,
+          "seconds": 0.06296087498776615,
+          "selected": 10355,
+          "polygons": 10375,
+          "rings": 10375,
+          "vertices": 50132,
+          "geometry_sha256": "4b3efd1af971d98c6e65b49eaaab5280b8ffc98bd5bdecd03b3067fa38ed219d",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 6
+        },
+        "f11": {
+          "bytes": 767993,
+          "seconds": 0.12050762493163347,
+          "selected": 45692,
+          "polygons": 46663,
+          "rings": 46816,
+          "vertices": 259283,
+          "geometry_sha256": "0e820fbd5f88094ffce1424bf8a112330c49c1ad234ee490bb4d0f87b590b2c5",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 23
+        },
+        "f14": {
+          "bytes": 12703841,
+          "seconds": 0.9123797500506043,
+          "selected": 1048576,
+          "polygons": 1048676,
+          "rings": 1048838,
+          "vertices": 5758284,
+          "geometry_sha256": "b4e9f673b8e8d31626f8df5a4dec17ff1e3fee4e0c4d315557a371faf77a8323",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 14203865,
+          "seconds": 0.8621746669523418,
+          "selected": 1048576,
+          "polygons": 1048626,
+          "rings": 1048780,
+          "vertices": 5770465,
+          "geometry_sha256": "eac9ad49707014584ceeba67f3b098acdc6de5def6f39b1a760801813cf0afde",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 28,
+      "rows": 1048576,
+      "seconds": 2.118862541858107,
+      "fields": {
+        "height": { "bytes": 158219, "seconds": 0.0350959999486804, "pages": 256 },
+        "class": { "bytes": 78854, "seconds": 0.020007458981126547, "pages": 256 },
+        "f4": {
+          "bytes": 4869,
+          "seconds": 0.05585558293387294,
+          "selected": 154,
+          "polygons": 154,
+          "rings": 154,
+          "vertices": 770,
+          "geometry_sha256": "42644708476f0e8f2f3cba97977e7265aa97faaf8d53632fbecda86d4339aae0",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 148799,
+          "seconds": 0.06712691602297127,
+          "selected": 10701,
+          "polygons": 10713,
+          "rings": 10713,
+          "vertices": 51976,
+          "geometry_sha256": "292654ae1fac6af69a75093bcdd6865b4c4f7009db8d58c0bfa4892e376f4b3a",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 6
+        },
+        "f11": {
+          "bytes": 830805,
+          "seconds": 0.11601862497627735,
+          "selected": 50563,
+          "polygons": 51742,
+          "rings": 51896,
+          "vertices": 283076,
+          "geometry_sha256": "3ea31cd3523b3d9022d49fb18704fd0c5eff07a80ed73246845310de0191c36e",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 25
+        },
+        "f14": {
+          "bytes": 13486897,
+          "seconds": 0.9204420419409871,
+          "selected": 1048576,
+          "polygons": 1048707,
+          "rings": 1048955,
+          "vertices": 5962985,
+          "geometry_sha256": "e5f09e8965c6cd9b0ca6d77007ad1cc190968e4026921951284c1b77a1341eec",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15090983,
+          "seconds": 0.8822747920639813,
+          "selected": 1048576,
+          "polygons": 1048654,
+          "rings": 1048852,
+          "vertices": 5994244,
+          "geometry_sha256": "917d6d986d9adf127fc5f07880c9779a6858640216b00280b73965b72a5486f5",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 29,
+      "rows": 1048576,
+      "seconds": 1.6489919589366764,
+      "fields": {
+        "height": { "bytes": 40974, "seconds": 0.015470416052266955, "pages": 256 },
+        "class": { "bytes": 83440, "seconds": 0.037595874862745404, "pages": 256 },
+        "f4": {
+          "bytes": 4900,
+          "seconds": 0.04777070786803961,
+          "selected": 148,
+          "polygons": 148,
+          "rings": 148,
+          "vertices": 740,
+          "geometry_sha256": "6e98cd4543e83efd562106d7865de5da37e431a33289b42e763f0a9f78eaf405",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 136062,
+          "seconds": 0.059151750057935715,
+          "selected": 9124,
+          "polygons": 9128,
+          "rings": 9128,
+          "vertices": 44280,
+          "geometry_sha256": "9dc432ab69468bfe8639f95e4be3c4d37fcde17c889105c17ca5ce1f6fe06806",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 781035,
+          "seconds": 0.10477866721339524,
+          "selected": 44114,
+          "polygons": 45204,
+          "rings": 45394,
+          "vertices": 251849,
+          "geometry_sha256": "6d87934ef479c0e477d078a212db91a9a317367cc791e0105d73b4f52aa7d496",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 22
+        },
+        "f14": {
+          "bytes": 13838740,
+          "seconds": 0.7227246661204845,
+          "selected": 1048576,
+          "polygons": 1048690,
+          "rings": 1048880,
+          "vertices": 6036505,
+          "geometry_sha256": "3ca6c17a2cc7a42986cbb4f364cbca183a1f1dd40e9d12ef32341b7aa95f1e82",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15381415,
+          "seconds": 0.6384802078828216,
+          "selected": 1048576,
+          "polygons": 1048658,
+          "rings": 1048823,
+          "vertices": 6048500,
+          "geometry_sha256": "7fcad669744cc6caab8aa8193e38a7237d84b5bab1c1668344f78c5735881e1c",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 30,
+      "rows": 1048576,
+      "seconds": 1.6759697920642793,
+      "fields": {
+        "height": { "bytes": 40570, "seconds": 0.018241958925500512, "pages": 256 },
+        "class": { "bytes": 68293, "seconds": 0.022453667130321264, "pages": 256 },
+        "f4": {
+          "bytes": 5129,
+          "seconds": 0.04976529208943248,
+          "selected": 156,
+          "polygons": 156,
+          "rings": 156,
+          "vertices": 780,
+          "geometry_sha256": "21e971f5beabd96ad5b04898956245cbec7ceadb3ba1c2fc80d50a5fcf94bc02",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 133024,
+          "seconds": 0.06229020794853568,
+          "selected": 9112,
+          "polygons": 9125,
+          "rings": 9125,
+          "vertices": 44301,
+          "geometry_sha256": "da2dd204e91cf63ee2bf91c3b6ea55123ed6539b261568fba6f65aeac0b1df24",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 791761,
+          "seconds": 0.10177475004456937,
+          "selected": 44929,
+          "polygons": 46351,
+          "rings": 46577,
+          "vertices": 260898,
+          "geometry_sha256": "9e52fba2af544aef2f69476f79732a40e804d9210d04f3eb7ab87595d140519d",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 22
+        },
+        "f14": {
+          "bytes": 13318517,
+          "seconds": 0.7269484589342028,
+          "selected": 1048576,
+          "polygons": 1048775,
+          "rings": 1048968,
+          "vertices": 5970743,
+          "geometry_sha256": "4561f2c1aa3645a63400fefae33a5a76e6b7ce663f211503396943a6a1d45394",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 14834592,
+          "seconds": 0.6702589590568095,
+          "selected": 1048576,
+          "polygons": 1048717,
+          "rings": 1048892,
+          "vertices": 5982309,
+          "geometry_sha256": "51d8d4872b9b6ebf404625d78b157ba49d7f2f99beb6935000be82fbb286f3d7",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 31,
+      "rows": 1048576,
+      "seconds": 1.6797345001250505,
+      "fields": {
+        "height": { "bytes": 40976, "seconds": 0.018630667123943567, "pages": 256 },
+        "class": { "bytes": 77191, "seconds": 0.022416125051677227, "pages": 256 },
+        "f4": {
+          "bytes": 4812,
+          "seconds": 0.046402583131566644,
+          "selected": 144,
+          "polygons": 144,
+          "rings": 144,
+          "vertices": 720,
+          "geometry_sha256": "7b9ea6e9a98f42db970810a8e4a52369fb3bf340f3efeded84a4f839a59ae643",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 129652,
+          "seconds": 0.06574120791628957,
+          "selected": 9126,
+          "polygons": 9144,
+          "rings": 9144,
+          "vertices": 44255,
+          "geometry_sha256": "36ceb1322953a04e1804eef9e595dea57b8cc55fafe13b2bb61f49279d5da72d",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 777359,
+          "seconds": 0.09935058304108679,
+          "selected": 44164,
+          "polygons": 46055,
+          "rings": 46230,
+          "vertices": 264928,
+          "geometry_sha256": "7e7e96e3822d2845485924705c316534f4e950ff0f36ad8dde735cad7e3b29f0",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 22
+        },
+        "f14": {
+          "bytes": 13913395,
+          "seconds": 0.7352663329802454,
+          "selected": 1048576,
+          "polygons": 1048677,
+          "rings": 1048816,
+          "vertices": 6347772,
+          "geometry_sha256": "b7398a49acad59e32e5d0261735621981a7b6ecb91253d5ed34eb129fca5049c",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15504025,
+          "seconds": 0.6643908340483904,
+          "selected": 1048576,
+          "polygons": 1048631,
+          "rings": 1048751,
+          "vertices": 6359720,
+          "geometry_sha256": "2ab79afa34812cc51adfb7082271e43153221c34df96fffda69d86d546e01d28",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 32,
+      "rows": 1048576,
+      "seconds": 1.6524637499824166,
+      "fields": {
+        "height": { "bytes": 41605, "seconds": 0.01567250001244247, "pages": 256 },
+        "class": { "bytes": 88304, "seconds": 0.020400958135724068, "pages": 256 },
+        "f4": {
+          "bytes": 4994,
+          "seconds": 0.03967016586102545,
+          "selected": 152,
+          "polygons": 152,
+          "rings": 152,
+          "vertices": 760,
+          "geometry_sha256": "1e848290e05691bb8dcc9bd130e35a5d112ba0dfa8b5c522e2527a304c751d5c",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 133496,
+          "seconds": 0.05732658295892179,
+          "selected": 9188,
+          "polygons": 9201,
+          "rings": 9201,
+          "vertices": 44573,
+          "geometry_sha256": "be76a34cb9629e109f7b2df1538a721a69272edc19ec3a92cb6ddf974a621865",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 778736,
+          "seconds": 0.09763095784001052,
+          "selected": 43952,
+          "polygons": 45301,
+          "rings": 45490,
+          "vertices": 257738,
+          "geometry_sha256": "ca4f0059b34ed98a3a5b6441d4842bace43dc6767fdbe0ae4d09fb2abf9c63a9",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 22
+        },
+        "f14": {
+          "bytes": 13512360,
+          "seconds": 0.7464308328926563,
+          "selected": 1048576,
+          "polygons": 1048698,
+          "rings": 1048940,
+          "vertices": 6016170,
+          "geometry_sha256": "ff265a962d2c5f8373f1bdb141dcbfb8272da0f2c7825a4f4fc428e4f6b14118",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15074717,
+          "seconds": 0.6592980001587421,
+          "selected": 1048576,
+          "polygons": 1048656,
+          "rings": 1048876,
+          "vertices": 6030898,
+          "geometry_sha256": "d046b3c6f92e840a5c912cab3790af21398e7b9361a2df3f4cf875f9e76e4a32",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 33,
+      "rows": 1048576,
+      "seconds": 1.5954666670877486,
+      "fields": {
+        "height": { "bytes": 41148, "seconds": 0.008933416102081537, "pages": 256 },
+        "class": { "bytes": 105144, "seconds": 0.017624500207602978, "pages": 256 },
+        "f4": {
+          "bytes": 5007,
+          "seconds": 0.035575833171606064,
+          "selected": 152,
+          "polygons": 152,
+          "rings": 152,
+          "vertices": 760,
+          "geometry_sha256": "8c460c5667e55072a41bb2d898349c0cb658c178ca2db473c991916c0cefb4ba",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 128779,
+          "seconds": 0.04989291704259813,
+          "selected": 8745,
+          "polygons": 8761,
+          "rings": 8761,
+          "vertices": 42515,
+          "geometry_sha256": "69c19cd65a7c5fa1281e076a55dd2c8f19b66e8a100799dc63e0fcb8adb83e3f",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 790913,
+          "seconds": 0.08990783407352865,
+          "selected": 43993,
+          "polygons": 45903,
+          "rings": 46240,
+          "vertices": 261847,
+          "geometry_sha256": "8dabb3c5a3976b1c572b84b2b136856320a23b55034577d15d1c415341bfa0eb",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 22
+        },
+        "f14": {
+          "bytes": 14850568,
+          "seconds": 0.7062738330569118,
+          "selected": 1048576,
+          "polygons": 1048877,
+          "rings": 1049449,
+          "vertices": 6649198,
+          "geometry_sha256": "98c12fcd3fde27f314cce6b655286496f78495595852cad349f4dd17f2a4dfe6",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 16558823,
+          "seconds": 0.6736412921454757,
+          "selected": 1048576,
+          "polygons": 1048818,
+          "rings": 1049343,
+          "vertices": 6677529,
+          "geometry_sha256": "d73c29f3bb725408b74c779e14bceb805705430b037fed45c3548a83c4ed4d4c",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 34,
+      "rows": 1048576,
+      "seconds": 1.5539474999532104,
+      "fields": {
+        "height": { "bytes": 40526, "seconds": 0.008555749896913767, "pages": 256 },
+        "class": { "bytes": 93244, "seconds": 0.015652332920581102, "pages": 256 },
+        "f4": {
+          "bytes": 5007,
+          "seconds": 0.035217124968767166,
+          "selected": 153,
+          "polygons": 153,
+          "rings": 153,
+          "vertices": 765,
+          "geometry_sha256": "1ff56d0e4fb473b7f456ba054c09276ebd78ebb4c78d66c6dd54ecb29d0596af",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 133354,
+          "seconds": 0.050426082918420434,
+          "selected": 8794,
+          "polygons": 8816,
+          "rings": 8817,
+          "vertices": 42859,
+          "geometry_sha256": "6b515de9c5f99511dc7d5dca1c68f7888a5f58e8ffad185e6431d393c895320d",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 842144,
+          "seconds": 0.09303550003096461,
+          "selected": 46688,
+          "polygons": 48602,
+          "rings": 48893,
+          "vertices": 273376,
+          "geometry_sha256": "a5dce07997482c2a70b448d0b0624e25a5d4a1f88b72c243332603710f23e561",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 23
+        },
+        "f14": {
+          "bytes": 13877279,
+          "seconds": 0.7029885419178754,
+          "selected": 1048576,
+          "polygons": 1048870,
+          "rings": 1049269,
+          "vertices": 6144003,
+          "geometry_sha256": "5f176f3e3621fb326252e86a0bbe6da6f599e8cc005252f7e6a6e22f319edad6",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15439948,
+          "seconds": 0.6347968750633299,
+          "selected": 1048576,
+          "polygons": 1048835,
+          "rings": 1049222,
+          "vertices": 6156784,
+          "geometry_sha256": "f5790d585b68ab577eac696a3e3a5d2b1c2dac1851a762724e218e044c6c14ee",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 35,
+      "rows": 1048576,
+      "seconds": 1.5595709581393749,
+      "fields": {
+        "height": { "bytes": 43586, "seconds": 0.008488374995067716, "pages": 256 },
+        "class": { "bytes": 90825, "seconds": 0.017194666201248765, "pages": 256 },
+        "f4": {
+          "bytes": 5056,
+          "seconds": 0.035329166101291776,
+          "selected": 160,
+          "polygons": 160,
+          "rings": 160,
+          "vertices": 800,
+          "geometry_sha256": "0cb3b2372962209235bb7e9aaf32b8df5455613baef1bda5dda92425ef219ad5",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 162473,
+          "seconds": 0.05403837491758168,
+          "selected": 11138,
+          "polygons": 11154,
+          "rings": 11155,
+          "vertices": 54260,
+          "geometry_sha256": "244da6381abac7bad2558b6159804579a07a6b80af79f48472314118c606a13a",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 6
+        },
+        "f11": {
+          "bytes": 1035044,
+          "seconds": 0.10696879192255437,
+          "selected": 59701,
+          "polygons": 61639,
+          "rings": 61843,
+          "vertices": 342540,
+          "geometry_sha256": "cfaf05ac5db5eeb72eef3c240e0f43278acd3af35a503aa65a2c87facf325706",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 30
+        },
+        "f14": {
+          "bytes": 14096014,
+          "seconds": 0.6964287918526679,
+          "selected": 1048576,
+          "polygons": 1048741,
+          "rings": 1048922,
+          "vertices": 6090744,
+          "geometry_sha256": "aafb436299367c0bd80e7526ea37fcb75e29b9151e88734619e185b5c6d328b2",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15662366,
+          "seconds": 0.6286451250780374,
+          "selected": 1048576,
+          "polygons": 1048697,
+          "rings": 1048867,
+          "vertices": 6104505,
+          "geometry_sha256": "f79b51bbb047f15f00c6c5fad0e1f38c49eb222a9115d096b5d80c4e00c1391d",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 36,
+      "rows": 1048576,
+      "seconds": 1.6268284590914845,
+      "fields": {
+        "height": { "bytes": 41498, "seconds": 0.00853904103860259, "pages": 256 },
+        "class": { "bytes": 204520, "seconds": 0.030752207851037383, "pages": 256 },
+        "f4": {
+          "bytes": 5137,
+          "seconds": 0.036197375040501356,
+          "selected": 168,
+          "polygons": 168,
+          "rings": 168,
+          "vertices": 840,
+          "geometry_sha256": "9886eb69dfb737952f169138afeebcb52ea9d801319e3a97ded0d4ed4670495d",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 169992,
+          "seconds": 0.05591000011190772,
+          "selected": 12295,
+          "polygons": 12304,
+          "rings": 12304,
+          "vertices": 59899,
+          "geometry_sha256": "f51827652791d93680509d7c3b0cd25dfe029b887fb509b60316d2a1c6ba82a7",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 7
+        },
+        "f11": {
+          "bytes": 1053554,
+          "seconds": 0.10796637507155538,
+          "selected": 64122,
+          "polygons": 65999,
+          "rings": 66245,
+          "vertices": 365737,
+          "geometry_sha256": "2042e997c8421f36ff089a192f4b68b6a4aa014b99256b24e93ac7c47244eb61",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 32
+        },
+        "f14": {
+          "bytes": 13437555,
+          "seconds": 0.6973689580336213,
+          "selected": 1048576,
+          "polygons": 1048691,
+          "rings": 1049199,
+          "vertices": 6043708,
+          "geometry_sha256": "09c37a6f3c9ef9e2efc6d16d570ae9db556b3ed31e58086204281bdc3fb0a839",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 14955025,
+          "seconds": 0.6724605420604348,
+          "selected": 1048576,
+          "polygons": 1048671,
+          "rings": 1049166,
+          "vertices": 6058177,
+          "geometry_sha256": "53aa63d536cc80413de48d3391e56f7ab1ba67fb6eada90a062f47b15b4d4a62",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 37,
+      "rows": 1048576,
+      "seconds": 1.5300770001485944,
+      "fields": {
+        "height": { "bytes": 40552, "seconds": 0.008467875188216567, "pages": 256 },
+        "class": { "bytes": 87766, "seconds": 0.014883500058203936, "pages": 256 },
+        "f4": {
+          "bytes": 5075,
+          "seconds": 0.034379541873931885,
+          "selected": 157,
+          "polygons": 157,
+          "rings": 157,
+          "vertices": 785,
+          "geometry_sha256": "ddf18cfece5cb329cd93f021f2a7cd06c2d298aaf2d0a357ace9ed1c30f86217",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 161065,
+          "seconds": 0.05260162497870624,
+          "selected": 11152,
+          "polygons": 11176,
+          "rings": 11177,
+          "vertices": 54256,
+          "geometry_sha256": "706b47fc58657d096911aa1486d2d526ad89a975e0bafb7f4434865836f4d09c",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 6
+        },
+        "f11": {
+          "bytes": 889077,
+          "seconds": 0.10625912505201995,
+          "selected": 52017,
+          "polygons": 53590,
+          "rings": 53877,
+          "vertices": 298053,
+          "geometry_sha256": "3d204e21ceeba896af08716f97bf6ec42ac290ef473a50f5fe5b942099c44fd4",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 26
+        },
+        "f14": {
+          "bytes": 13993260,
+          "seconds": 0.6814182091038674,
+          "selected": 1048576,
+          "polygons": 1048745,
+          "rings": 1049168,
+          "vertices": 6222249,
+          "geometry_sha256": "04c2547d9f3e56679b7bef5c0d37fd95154946c16a47f4a087992d5727b16f54",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15596334,
+          "seconds": 0.6191303329542279,
+          "selected": 1048576,
+          "polygons": 1048710,
+          "rings": 1049116,
+          "vertices": 6245923,
+          "geometry_sha256": "0a2b0053a35f3bb14cea0ca36cf22ebbba96de415e4e8ab133bb72f0c36bdcf1",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 38,
+      "rows": 1048576,
+      "seconds": 1.5886444160714746,
+      "fields": {
+        "height": { "bytes": 40768, "seconds": 0.0083362499717623, "pages": 256 },
+        "class": { "bytes": 115705, "seconds": 0.023207041900604963, "pages": 256 },
+        "f4": {
+          "bytes": 5496,
+          "seconds": 0.03486708295531571,
+          "selected": 182,
+          "polygons": 182,
+          "rings": 182,
+          "vertices": 910,
+          "geometry_sha256": "76c22cc18ec514887cfd8edc55ece373c10593f93ea2846625ee3443eb9f18ee",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 215804,
+          "seconds": 0.06107287481427193,
+          "selected": 16018,
+          "polygons": 16081,
+          "rings": 16081,
+          "vertices": 78247,
+          "geometry_sha256": "0666c6a898fb667ded9f3099b834b1d7fd29830d1b6fd68da28691046cd444f5",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 8
+        },
+        "f11": {
+          "bytes": 1184266,
+          "seconds": 0.1207162500359118,
+          "selected": 77639,
+          "polygons": 79430,
+          "rings": 79806,
+          "vertices": 429727,
+          "geometry_sha256": "e204be0e1d19de831dd4cfbdd45409a577e4a450677d94864e2da4960740d551",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 38
+        },
+        "f14": {
+          "bytes": 13789300,
+          "seconds": 0.681829874869436,
+          "selected": 1048576,
+          "polygons": 1048688,
+          "rings": 1049378,
+          "vertices": 6172551,
+          "geometry_sha256": "1e815a881d1678d79540ffa4ee124c41cb5d7546c5aaedd88e8e64e6c26e9ccd",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15344719,
+          "seconds": 0.6457885408308357,
+          "selected": 1048576,
+          "polygons": 1048676,
+          "rings": 1049358,
+          "vertices": 6186968,
+          "geometry_sha256": "9180c0b2ec01de88604985929afb410dea66828a38bc829f1353c6256393ee25",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 39,
+      "rows": 1048576,
+      "seconds": 1.5539835409726948,
+      "fields": {
+        "height": { "bytes": 40641, "seconds": 0.012449332978576422, "pages": 256 },
+        "class": { "bytes": 95241, "seconds": 0.01620987500064075, "pages": 256 },
+        "f4": {
+          "bytes": 5291,
+          "seconds": 0.03468079189769924,
+          "selected": 166,
+          "polygons": 166,
+          "rings": 166,
+          "vertices": 829,
+          "geometry_sha256": "620a2116137b7c0d6685a4d4d64b65d1b36b17ff00932abfdc3dc027c73e1677",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 191440,
+          "seconds": 0.058818541932851076,
+          "selected": 13711,
+          "polygons": 13736,
+          "rings": 13736,
+          "vertices": 66827,
+          "geometry_sha256": "f791079d7a5340c4188ffe905c9231f0c0c01f2b12ec335ab563cc6a1d219969",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 7
+        },
+        "f11": {
+          "bytes": 1049439,
+          "seconds": 0.10889695794321597,
+          "selected": 64531,
+          "polygons": 66353,
+          "rings": 66713,
+          "vertices": 363053,
+          "geometry_sha256": "99331e5cf9f01894fca37a081f156f1b3a08bbb04878c1e582331bb4457d5f78",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 32
+        },
+        "f14": {
+          "bytes": 13739824,
+          "seconds": 0.6606662499252707,
+          "selected": 1048576,
+          "polygons": 1048667,
+          "rings": 1049189,
+          "vertices": 6148311,
+          "geometry_sha256": "f0153cc6f926a4380500e103d3856290eeaf71389c3284531d38551153ce239a",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15291995,
+          "seconds": 0.649579333839938,
+          "selected": 1048576,
+          "polygons": 1048642,
+          "rings": 1049153,
+          "vertices": 6166452,
+          "geometry_sha256": "9e15a3dfd17240764c2d00443acc9b75058c575a6ed684cb709b805aad125601",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 40,
+      "rows": 1048576,
+      "seconds": 1.5319032080005854,
+      "fields": {
+        "height": { "bytes": 46730, "seconds": 0.010379750048741698, "pages": 256 },
+        "class": { "bytes": 103065, "seconds": 0.016524750040844083, "pages": 256 },
+        "f4": {
+          "bytes": 5466,
+          "seconds": 0.036432999884709716,
+          "selected": 168,
+          "polygons": 168,
+          "rings": 168,
+          "vertices": 840,
+          "geometry_sha256": "5888863130e57e996db7abec20ff743b6ae84ff6007ea1cc3209c4a6f0b174fe",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 196642,
+          "seconds": 0.05500679183751345,
+          "selected": 13099,
+          "polygons": 13118,
+          "rings": 13118,
+          "vertices": 63852,
+          "geometry_sha256": "ba909f100f3491a357f1a5107cfe73526410f7b7301adbe6cd9d247c10237b73",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 7
+        },
+        "f11": {
+          "bytes": 1156591,
+          "seconds": 0.1078549160156399,
+          "selected": 66752,
+          "polygons": 68532,
+          "rings": 68853,
+          "vertices": 379489,
+          "geometry_sha256": "b5a1e203c9150dc69b5015f5656bc1a1611898affe47221df3dc7b5cef370a2f",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 33
+        },
+        "f14": {
+          "bytes": 14653121,
+          "seconds": 0.6655144169926643,
+          "selected": 1048576,
+          "polygons": 1048723,
+          "rings": 1049259,
+          "vertices": 6282349,
+          "geometry_sha256": "4af6ba419425c0e73bdeb68ecd8891e7caf5db5c9fe20c782e0be967304ba265",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 16306360,
+          "seconds": 0.625955417053774,
+          "selected": 1048576,
+          "polygons": 1048673,
+          "rings": 1049190,
+          "vertices": 6310620,
+          "geometry_sha256": "b63089d05c74823334ffe7e52e2003e54052d7dd82fffa8f8072542ac0a4c268",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 41,
+      "rows": 1048576,
+      "seconds": 1.5795017501804978,
+      "fields": {
+        "height": { "bytes": 211206, "seconds": 0.025665665976703167, "pages": 256 },
+        "class": { "bytes": 143224, "seconds": 0.023738583084195852, "pages": 256 },
+        "f4": {
+          "bytes": 4673,
+          "seconds": 0.034225207986310124,
+          "selected": 133,
+          "polygons": 133,
+          "rings": 133,
+          "vertices": 665,
+          "geometry_sha256": "efe00a14c03a70dd6359b3a2c039bc19658874f4afa184aa02a8772c90f47593",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 134361,
+          "seconds": 0.04895316599868238,
+          "selected": 9482,
+          "polygons": 9496,
+          "rings": 9497,
+          "vertices": 45960,
+          "geometry_sha256": "7956c4baba7b9b5f0f9f147f88efea065576cef066bccae5306f945267785e13",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 748235,
+          "seconds": 0.08323837514035404,
+          "selected": 42865,
+          "polygons": 44345,
+          "rings": 44585,
+          "vertices": 252917,
+          "geometry_sha256": "691d9fdb523d23e91d4b21382ff7d7bfe15946bf9cd9b590b3e838e0f1185d67",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 21
+        },
+        "f14": {
+          "bytes": 13855215,
+          "seconds": 0.6892017079517245,
+          "selected": 1048576,
+          "polygons": 1048809,
+          "rings": 1049723,
+          "vertices": 6361976,
+          "geometry_sha256": "c908dae88f3d06214371fdfc3f274ddf67636bf6d680cf700b56e98023860e6c",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15574447,
+          "seconds": 0.6595249159727246,
+          "selected": 1048576,
+          "polygons": 1048754,
+          "rings": 1049584,
+          "vertices": 6419161,
+          "geometry_sha256": "5f6df5faba333963e31361921e22cb7f7a7b92f404c65327fcf3653d9a795a1d",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 42,
+      "rows": 1048576,
+      "seconds": 1.6283723749220371,
+      "fields": {
+        "height": { "bytes": 740623, "seconds": 0.07734133396297693, "pages": 256 },
+        "class": { "bytes": 192356, "seconds": 0.028895833995193243, "pages": 256 },
+        "f4": {
+          "bytes": 4365,
+          "seconds": 0.03447904088534415,
+          "selected": 118,
+          "polygons": 118,
+          "rings": 118,
+          "vertices": 590,
+          "geometry_sha256": "89193935106a0bf306c3bebda8589828a07d52afbcf73d14936873b702cc6e9c",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 110492,
+          "seconds": 0.047592165879905224,
+          "selected": 7742,
+          "polygons": 7752,
+          "rings": 7753,
+          "vertices": 37607,
+          "geometry_sha256": "a79bafb3e2b7e7121088c5ceb974a4ee41deb433d70ad2442566cacefc1325ea",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 600260,
+          "seconds": 0.0776189579628408,
+          "selected": 34818,
+          "polygons": 35874,
+          "rings": 36053,
+          "vertices": 202622,
+          "geometry_sha256": "43217018fb1ad8119283e3777fee6ff5a354a4409dc4016500f6d07db40a13e0",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 18
+        },
+        "f14": {
+          "bytes": 14110122,
+          "seconds": 0.6880410420708358,
+          "selected": 1048576,
+          "polygons": 1048800,
+          "rings": 1049577,
+          "vertices": 6546937,
+          "geometry_sha256": "f019cafd41a9cc8a4032d4b05dea778d674cd0ff965fd8554d9558e64f8fb83c",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15915985,
+          "seconds": 0.6574871249031276,
+          "selected": 1048576,
+          "polygons": 1048718,
+          "rings": 1049460,
+          "vertices": 6636294,
+          "geometry_sha256": "8639702d47f1cf7d2294f8b82c223f8c929a8008d002135735c27b7551871abf",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 43,
+      "rows": 1048576,
+      "seconds": 1.5535319577902555,
+      "fields": {
+        "height": { "bytes": 329641, "seconds": 0.040866166818886995, "pages": 256 },
+        "class": { "bytes": 144039, "seconds": 0.023084417218342423, "pages": 256 },
+        "f4": {
+          "bytes": 4886,
+          "seconds": 0.03377012489363551,
+          "selected": 139,
+          "polygons": 139,
+          "rings": 139,
+          "vertices": 695,
+          "geometry_sha256": "f6abcf12f7847292f620e22bec54982e6431a1ee9f0427b1eea01d4e0f9100c1",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 137353,
+          "seconds": 0.049578667152673006,
+          "selected": 9545,
+          "polygons": 9561,
+          "rings": 9561,
+          "vertices": 46465,
+          "geometry_sha256": "dec3baedef2f75ddc32709eb081f861fc9f6146ace8bddf8f69f2678d7aac170",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 801907,
+          "seconds": 0.08811891684308648,
+          "selected": 46442,
+          "polygons": 47910,
+          "rings": 48177,
+          "vertices": 267959,
+          "geometry_sha256": "e1337d285ddad00f1438dfa0efa00cf4933fb03e7d872c425ed33177848cf9ad",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 23
+        },
+        "f14": {
+          "bytes": 14520834,
+          "seconds": 0.6594746659975499,
+          "selected": 1048576,
+          "polygons": 1049056,
+          "rings": 1049976,
+          "vertices": 6510425,
+          "geometry_sha256": "8213d898d4bffc59e5d20dfb1ea0dcfd1bd1841b6dbc8def1b5606c36d89c0de",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 16339875,
+          "seconds": 0.6442759998608381,
+          "selected": 1048576,
+          "polygons": 1048822,
+          "rings": 1049592,
+          "vertices": 6613275,
+          "geometry_sha256": "78fe71c10e392da382e5d384cf2e55b48f88da179c6fc5da6f8b8f319c58bdd5",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 44,
+      "rows": 1048576,
+      "seconds": 1.5184367091860622,
+      "fields": {
+        "height": { "bytes": 42354, "seconds": 0.00836325017735362, "pages": 256 },
+        "class": { "bytes": 100259, "seconds": 0.017268666997551918, "pages": 256 },
+        "f4": {
+          "bytes": 4773,
+          "seconds": 0.03439637506380677,
+          "selected": 129,
+          "polygons": 129,
+          "rings": 129,
+          "vertices": 645,
+          "geometry_sha256": "851cdc4c46f3287e8cf541441b1113b858530b2a21bfe5fff5e223ef416aba69",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 133916,
+          "seconds": 0.04873625002801418,
+          "selected": 9350,
+          "polygons": 9366,
+          "rings": 9366,
+          "vertices": 45472,
+          "geometry_sha256": "fe28b5f74ba4772d20ec9f5f7d03b35d4d93fcf28fbf16a3db8b14fb008651eb",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 5
+        },
+        "f11": {
+          "bytes": 715100,
+          "seconds": 0.08376745809800923,
+          "selected": 41235,
+          "polygons": 42382,
+          "rings": 42590,
+          "vertices": 239225,
+          "geometry_sha256": "7c18c167006f41e89d14c88337b8e6b7ba9c6157dadeba4cc2f18a4534141953",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 21
+        },
+        "f14": {
+          "bytes": 13177077,
+          "seconds": 0.6744793329853565,
+          "selected": 1048576,
+          "polygons": 1048862,
+          "rings": 1049298,
+          "vertices": 5970188,
+          "geometry_sha256": "79014bac7044f800aee6dd13238675833968d231776a3186e27927e26d02688a",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 14751929,
+          "seconds": 0.6395791659597307,
+          "selected": 1048576,
+          "polygons": 1048824,
+          "rings": 1049233,
+          "vertices": 6004281,
+          "geometry_sha256": "333ea0382510ee1f9a6fd311ef6687330d5bfe145839e682a97712fba2b66b65",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 45,
+      "rows": 1048576,
+      "seconds": 1.76236683386378,
+      "fields": {
+        "height": { "bytes": 92766, "seconds": 0.013946833088994026, "pages": 256 },
+        "class": { "bytes": 101547, "seconds": 0.017965583130717278, "pages": 256 },
+        "f4": {
+          "bytes": 5018,
+          "seconds": 0.03486879216507077,
+          "selected": 150,
+          "polygons": 150,
+          "rings": 150,
+          "vertices": 750,
+          "geometry_sha256": "679cf55eab4718b1c15b7367b4124c014c99d9a231d712e7138ea8ed6ef0ce14",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 174278,
+          "seconds": 0.05302012502215803,
+          "selected": 12127,
+          "polygons": 12140,
+          "rings": 12140,
+          "vertices": 58926,
+          "geometry_sha256": "c64472a7f9a711b55f9029d0987017415cf26cc13b9bb4e84bd884da2291fdf6",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 6
+        },
+        "f11": {
+          "bytes": 959498,
+          "seconds": 0.10278600011952221,
+          "selected": 55940,
+          "polygons": 57473,
+          "rings": 57676,
+          "vertices": 319994,
+          "geometry_sha256": "ce4dcf519f1509c28cf18a152a6814dfa96cbced5d3ab21048d76fe826435df7",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 28
+        },
+        "f14": {
+          "bytes": 13751904,
+          "seconds": 0.6924518330488354,
+          "selected": 1048576,
+          "polygons": 1048854,
+          "rings": 1049187,
+          "vertices": 5982357,
+          "geometry_sha256": "725e3031e4311ab580ac84872dd2262c04acbb1857aa4dc243fe07f3eee25fa4",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15343284,
+          "seconds": 0.8339483749587089,
+          "selected": 1048576,
+          "polygons": 1048815,
+          "rings": 1049119,
+          "vertices": 6008624,
+          "geometry_sha256": "b3c01526c52f5e28b1d5b6ff27797a92df2483feab5e9bb08d1f860547150ff3",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 46,
+      "rows": 1048576,
+      "seconds": 1.7805772081483155,
+      "fields": {
+        "height": { "bytes": 67840, "seconds": 0.010772458976134658, "pages": 256 },
+        "class": { "bytes": 93977, "seconds": 0.015937292017042637, "pages": 256 },
+        "f4": {
+          "bytes": 4899,
+          "seconds": 0.03392566693946719,
+          "selected": 147,
+          "polygons": 147,
+          "rings": 147,
+          "vertices": 735,
+          "geometry_sha256": "03ba7b5a9702e37716419de575dab92c3702589ae133b8c9eb00ffd4fda53cca",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 152389,
+          "seconds": 0.053368874825537205,
+          "selected": 10744,
+          "polygons": 10771,
+          "rings": 10771,
+          "vertices": 52171,
+          "geometry_sha256": "3abf198e5276b9b9e914e682cfbc4be80b8744bbe6e11d9e8af530241f06ec85",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 6
+        },
+        "f11": {
+          "bytes": 830299,
+          "seconds": 0.09725104202516377,
+          "selected": 48362,
+          "polygons": 49703,
+          "rings": 49898,
+          "vertices": 282418,
+          "geometry_sha256": "975dcc67cbf51f1d8b181199d14bc48ccf641d7a2f4951cfe0039b672efcfe0f",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 24
+        },
+        "f14": {
+          "bytes": 13400400,
+          "seconds": 0.6940789998043329,
+          "selected": 1048576,
+          "polygons": 1048843,
+          "rings": 1049130,
+          "vertices": 5977197,
+          "geometry_sha256": "dddf9d50cd622885728e4f68101baa34282e587d1126aa785755fd38a008ae40",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 14970922,
+          "seconds": 0.8621929590590298,
+          "selected": 1048576,
+          "polygons": 1048795,
+          "rings": 1049060,
+          "vertices": 6001622,
+          "geometry_sha256": "ab49517e0e8377a28cd3c9a60dc0eaea64046b484e16a01c8aaecebab80ecc29",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 47,
+      "rows": 1048576,
+      "seconds": 2.2582222500350326,
+      "fields": {
+        "height": { "bytes": 373862, "seconds": 0.0410924581810832, "pages": 256 },
+        "class": { "bytes": 187500, "seconds": 0.030409666011109948, "pages": 256 },
+        "f4": {
+          "bytes": 4965,
+          "seconds": 0.03714229189790785,
+          "selected": 157,
+          "polygons": 157,
+          "rings": 157,
+          "vertices": 785,
+          "geometry_sha256": "25c43a2faf431c7eb49975a2c146ddd7b00b500dcce404fab5cef17015f15014",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 154186,
+          "seconds": 0.05655908305197954,
+          "selected": 11069,
+          "polygons": 11078,
+          "rings": 11079,
+          "vertices": 53704,
+          "geometry_sha256": "fa7a37c20c3128da6df4ab77efb3a70939afb3d983647a583012947a4fb39a31",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 6
+        },
+        "f11": {
+          "bytes": 849687,
+          "seconds": 0.10427083307877183,
+          "selected": 50430,
+          "polygons": 51840,
+          "rings": 52169,
+          "vertices": 290891,
+          "geometry_sha256": "4999c6eadf6ec2b0666c4a15f8a36089dff3e5638748ac957a81d688417864b2",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 25
+        },
+        "f14": {
+          "bytes": 14831645,
+          "seconds": 1.0321387499570847,
+          "selected": 1048576,
+          "polygons": 1048826,
+          "rings": 1049617,
+          "vertices": 6677911,
+          "geometry_sha256": "5770da3ff16e2d813d50c466c0115acef9c2ed4ba6b5ee0940fbf8bff2253597",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 16590567,
+          "seconds": 0.9395590419881046,
+          "selected": 1048576,
+          "polygons": 1048796,
+          "rings": 1049547,
+          "vertices": 6729479,
+          "geometry_sha256": "ff182cb593c8841c9b759d94d0990f1570ba5011f55abfdbeb6bed1075c7e20b",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 48,
+      "rows": 1048576,
+      "seconds": 1.879374915966764,
+      "fields": {
+        "height": { "bytes": 295516, "seconds": 0.03698112512938678, "pages": 256 },
+        "class": { "bytes": 177101, "seconds": 0.031288750004023314, "pages": 256 },
+        "f4": {
+          "bytes": 4822,
+          "seconds": 0.037113500060513616,
+          "selected": 140,
+          "polygons": 140,
+          "rings": 140,
+          "vertices": 700,
+          "geometry_sha256": "166dd69a02d55e0d2a9d081a3f2a3a1e69f47b9963289a6973e4426dd5972238",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 149505,
+          "seconds": 0.05552683398127556,
+          "selected": 10913,
+          "polygons": 10931,
+          "rings": 10931,
+          "vertices": 52994,
+          "geometry_sha256": "f6bd6a0acdec9abb02e25796e95d3b4b6a8620847566fbc173d0bc87e8b7aeb3",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 6
+        },
+        "f11": {
+          "bytes": 811569,
+          "seconds": 0.09352649981155992,
+          "selected": 48712,
+          "polygons": 50267,
+          "rings": 50582,
+          "vertices": 284372,
+          "geometry_sha256": "f45a2e95a0d007ca6b8316acc2aba11a554267491b898b26732897aff82d2d39",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 24
+        },
+        "f14": {
+          "bytes": 13749191,
+          "seconds": 0.7021527499891818,
+          "selected": 1048576,
+          "polygons": 1048819,
+          "rings": 1049438,
+          "vertices": 6275404,
+          "geometry_sha256": "86906359c9773c4aa397c00abdfc435777b139924218ce2bd53ad3e3d917793f",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15372512,
+          "seconds": 0.9054341248702258,
+          "selected": 1048576,
+          "polygons": 1048776,
+          "rings": 1049365,
+          "vertices": 6306498,
+          "geometry_sha256": "e5b6c92a9016a27165ba4718afa63fc9a60317d5289027d03f0e590a3a3fce81",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 49,
+      "rows": 1048576,
+      "seconds": 1.9345736249815673,
+      "fields": {
+        "height": { "bytes": 126041, "seconds": 0.030965040903538465, "pages": 256 },
+        "class": { "bytes": 128359, "seconds": 0.03996274992823601, "pages": 256 },
+        "f4": {
+          "bytes": 5029,
+          "seconds": 0.03941933298483491,
+          "selected": 153,
+          "polygons": 153,
+          "rings": 153,
+          "vertices": 765,
+          "geometry_sha256": "e2a3d04bd9712483b0b30c2a6e94791743a3e38855db7ba04abe0e33ec266e3d",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 166400,
+          "seconds": 0.08061383292078972,
+          "selected": 12049,
+          "polygons": 12060,
+          "rings": 12060,
+          "vertices": 58502,
+          "geometry_sha256": "0598ff6a7239fdf38b87a489847ad34d104d1df226e98426a58e258fd148a08f",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 6
+        },
+        "f11": {
+          "bytes": 886436,
+          "seconds": 0.12875683302991092,
+          "selected": 53142,
+          "polygons": 54508,
+          "rings": 54736,
+          "vertices": 303118,
+          "geometry_sha256": "2fb914a4654006fc73a99ad65d8edf16cba682854466a1e92c74486c42312d1f",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 26
+        },
+        "f14": {
+          "bytes": 14190751,
+          "seconds": 0.8340235829818994,
+          "selected": 1048576,
+          "polygons": 1048795,
+          "rings": 1049302,
+          "vertices": 6313333,
+          "geometry_sha256": "52da1efb30d201b8642d7a2c4bfd3a601a7ad830e7fa0560505f5449fe9b735b",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15857904,
+          "seconds": 0.7614852499682456,
+          "selected": 1048576,
+          "polygons": 1048756,
+          "rings": 1049227,
+          "vertices": 6353639,
+          "geometry_sha256": "ef59d2dd974bf34391772699498b58fe2cd95d87be41650558e33aa5a839d107",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 50,
+      "rows": 1048576,
+      "seconds": 1.8997979161795229,
+      "fields": {
+        "height": { "bytes": 53711, "seconds": 0.017040207982063293, "pages": 256 },
+        "class": { "bytes": 110936, "seconds": 0.029568583006039262, "pages": 256 },
+        "f4": {
+          "bytes": 4886,
+          "seconds": 0.04926837491802871,
+          "selected": 137,
+          "polygons": 137,
+          "rings": 137,
+          "vertices": 685,
+          "geometry_sha256": "7f9b390a80d74c01b29275c15f9053eacc542a40bc8c38a0f025dd9f6e047097",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 4
+        },
+        "f8": {
+          "bytes": 150410,
+          "seconds": 0.06483149994164705,
+          "selected": 10202,
+          "polygons": 10213,
+          "rings": 10213,
+          "vertices": 49583,
+          "geometry_sha256": "321b1daf7d111654df2132054f64f8fecbfefa2e08693f1054e9e3103e36bfa8",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 6
+        },
+        "f11": {
+          "bytes": 825533,
+          "seconds": 0.1249877919908613,
+          "selected": 48220,
+          "polygons": 49464,
+          "rings": 49701,
+          "vertices": 276563,
+          "geometry_sha256": "0cf22f5b1e80ef27fc27a1e7a9e92cf1102c985215466c18225d49dd381d94cb",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 24
+        },
+        "f14": {
+          "bytes": 13601581,
+          "seconds": 0.831347499974072,
+          "selected": 1048576,
+          "polygons": 1048796,
+          "rings": 1049231,
+          "vertices": 6037329,
+          "geometry_sha256": "442b0cfd2e2964c0eb631f70b5ae8d635f5688ea720d520f5235ab923128459e",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        },
+        "f16": {
+          "bytes": 15151871,
+          "seconds": 0.7608611250761896,
+          "selected": 1048576,
+          "polygons": 1048766,
+          "rings": 1049197,
+          "vertices": 6059633,
+          "geometry_sha256": "1a83c0f8f6537077b8fc6a97c1d86b988c6e96b4472ef50defd8887d55b2b3c2",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 512
+        }
+      }
+    },
+    {
+      "group": 51,
+      "rows": 265602,
+      "seconds": 0.54658312513493,
+      "fields": {
+        "height": { "bytes": 19548, "seconds": 0.00412870803847909, "pages": 65 },
+        "class": { "bytes": 45590, "seconds": 0.007991750026121736, "pages": 65 },
+        "f4": {
+          "bytes": 2092,
+          "seconds": 0.022175332996994257,
+          "selected": 40,
+          "polygons": 40,
+          "rings": 40,
+          "vertices": 200,
+          "geometry_sha256": "70d64dcc57ffe27c6052eebecbf3169516049ac5e209275f139cbf6db03db92a",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 48,
+          "pages": 2
+        },
+        "f8": {
+          "bytes": 46185,
+          "seconds": 0.025198166957125068,
+          "selected": 3368,
+          "polygons": 3369,
+          "rings": 3369,
+          "vertices": 16291,
+          "geometry_sha256": "91a0efc76fc15d2bafbb1a0d4e789a487f647dd1e610091c07aaa39e262ced4f",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 2
+        },
+        "f11": {
+          "bytes": 257929,
+          "seconds": 0.043614417081698775,
+          "selected": 15658,
+          "polygons": 16025,
+          "rings": 16128,
+          "vertices": 91553,
+          "geometry_sha256": "08c84eab25810dcfb76060fd1df6943618fb81e4adec6ae126f7299e05dd5c87",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 72,
+          "pages": 8
+        },
+        "f14": {
+          "bytes": 3805267,
+          "seconds": 0.22073983307927847,
+          "selected": 265602,
+          "polygons": 265624,
+          "rings": 265913,
+          "vertices": 1713638,
+          "geometry_sha256": "adc32a5e8fc029bc7ac8c8343b027b8ac50f04df7626472f9e2efe1978913031",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 130
+        },
+        "f16": {
+          "bytes": 4252382,
+          "seconds": 0.2093353751115501,
+          "selected": 265602,
+          "polygons": 265616,
+          "rings": 265908,
+          "vertices": 1724589,
+          "geometry_sha256": "86eb948fb336200cd8f5847c11df5c4fd07c69a2925e5d72a355121cb91c4112",
+          "all_own_source_properties_equal": true,
+          "independent_coordinate_samples": 64,
+          "pages": 130
+        }
+      }
+    }
+  ],
+  "verification": {
+    "all_selected_own_height_class_equal_to_source": true,
+    "independent_coordinate_samples": 17864,
+    "full_nested_stage_arrow_roundtrip_equal": true,
+    "all_original_source_columns_arrow_equal": true,
+    "source_column_group_comparisons": 1300,
+    "copied_source_compressed_chunks": 2132
+  },
+  "format_limits": {
+    "stored_levels": ["f4", "f8", "f11", "f14", "f16"],
+    "full_production_archive_replacement": false,
+    "geometry": "Exact production own quantized geometry; no hosted boundary copies",
+    "attributes": "height/class source aligned shared pages,4096 source rows",
+    "source_indexes": "Old optional source page-index pointers omitted; copied chunk statistics retained; reencoded height/class have no ordinary statistics",
+    "shards": "At most256pages or64KiB raw JSON; global source-row IDs; outward6-decimal shard bboxes"
+  },
+  "extra_semantics": {
+    "checks": [
+      {
+        "place": "Japan",
+        "z": 4,
+        "x": 14,
+        "y": 6,
+        "extra_features": 96,
+        "buffer_only": 95,
+        "positive_unbuffered_fill": 1,
+        "owner_in_query_tile": 0,
+        "source_bbox_upper_below_one_pixel": 96,
+        "samples": [
+          {
+            "id": 39438004,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.042361304882772864,
+            "quantized_mvt_bbox": [1139, -26, 1141, -23],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 141.25367736816406,
+              "ymin": 41.08543395996094,
+              "xmax": 141.2555389404297,
+              "ymax": 41.086158752441406
+            }
+          },
+          {
+            "id": 39450159,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.004513909536688911,
+            "quantized_mvt_bbox": [1025, -42, 1027, -39],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 140.63755798339844,
+              "ymin": 41.14654541015625,
+              "xmax": 140.63775634765625,
+              "ymax": 41.14665985107422
+            }
+          },
+          {
+            "id": 39453522,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.00625002858926157,
+            "quantized_mvt_bbox": [1085, -53, 1087, -50],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 140.9608917236328,
+              "ymin": 41.18994903564453,
+              "xmax": 140.96116638183594,
+              "ymax": 41.190093994140625
+            }
+          },
+          {
+            "id": 42372843,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.010763938125950482,
+            "quantized_mvt_bbox": [981, -63, 983, -61],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 140.3886260986328,
+              "ymin": 41.23834228515625,
+              "xmax": 140.38909912109375,
+              "ymax": 41.23866271972656
+            }
+          },
+          {
+            "id": 42383103,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.0024305666736017216,
+            "quantized_mvt_bbox": [969, -2, 971, 0],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 140.32167053222656,
+              "ymin": 40.98069381713867,
+              "xmax": 140.32177734375,
+              "ymax": 40.98074722290039
+            }
+          },
+          {
+            "id": 43610753,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.01631951909418299,
+            "quantized_mvt_bbox": [-1, 1412, 1, 1414],
+            "positive_fill_inside_unbuffered_tile": true,
+            "unbuffered_mvt_fill_area": 2.0,
+            "source_bbox": {
+              "xmin": 134.9966583251953,
+              "ymin": 34.85993576049805,
+              "xmax": 134.99737548828125,
+              "ymax": 34.86043167114258
+            }
+          }
+        ]
+      },
+      {
+        "place": "Tokyo",
+        "z": 8,
+        "x": 227,
+        "y": 100,
+        "extra_features": 2632,
+        "buffer_only": 2597,
+        "positive_unbuffered_fill": 35,
+        "owner_in_query_tile": 0,
+        "source_bbox_upper_below_one_pixel": 2632,
+        "samples": [
+          {
+            "id": 3826,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.2906213285970212,
+            "quantized_mvt_bbox": [4159, 14, 4161, 16],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 140.64703369140625,
+              "ymin": 36.59355545043945,
+              "xmax": 140.64779663085938,
+              "ymax": 36.59419631958008
+            }
+          },
+          {
+            "id": 4338,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.4064689024548393,
+            "quantized_mvt_bbox": [4155, 51, 4157, 54],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 140.645751953125,
+              "ymin": 36.58298873901367,
+              "xmax": 140.64602661132812,
+              "ymax": 36.583885192871094
+            }
+          },
+          {
+            "id": 4341,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.15000068614227768,
+            "quantized_mvt_bbox": [4151, 46, 4153, 49],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 140.64419555664062,
+              "ymin": 36.584415435791016,
+              "xmax": 140.6446075439453,
+              "ymax": 36.58473587036133
+            }
+          },
+          {
+            "id": 4345,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.20000091485637023,
+            "quantized_mvt_bbox": [4151, 51, 4153, 54],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 140.6439971923828,
+              "ymin": 36.58306121826172,
+              "xmax": 140.64454650878906,
+              "ymax": 36.58323669433594
+            }
+          },
+          {
+            "id": 4389,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.3199872325062553,
+            "quantized_mvt_bbox": [4147, 51, 4149, 54],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 140.64273071289062,
+              "ymin": 36.583343505859375,
+              "xmax": 140.64337158203125,
+              "ymax": 36.584049224853516
+            }
+          },
+          {
+            "id": 8133,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.22777881969753278,
+            "quantized_mvt_bbox": [4095, 171, 4097, 173],
+            "positive_fill_inside_unbuffered_tile": true,
+            "unbuffered_mvt_fill_area": 2.0,
+            "source_bbox": {
+              "xmin": 140.62506103515625,
+              "ymin": 36.550559997558594,
+              "xmax": 140.6256866455078,
+              "ymax": 36.55085372924805
+            }
+          },
+          {
+            "id": 14054,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.16111184807874268,
+            "quantized_mvt_bbox": [4095, 298, 4097, 300],
+            "positive_fill_inside_unbuffered_tile": true,
+            "unbuffered_mvt_fill_area": 1.5,
+            "source_bbox": {
+              "xmin": 140.62498474121094,
+              "ymin": 36.51536560058594,
+              "xmax": 140.62542724609375,
+              "ymax": 36.515567779541016
+            }
+          },
+          {
+            "id": 14808,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.14444510517404516,
+            "quantized_mvt_bbox": [4095, 352, 4097, 355],
+            "positive_fill_inside_unbuffered_tile": true,
+            "unbuffered_mvt_fill_area": 3.0,
+            "source_bbox": {
+              "xmin": 140.6248779296875,
+              "ymin": 36.500064849853516,
+              "xmax": 140.62527465820312,
+              "ymax": 36.500370025634766
+            }
+          },
+          {
+            "id": 41883,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.21093576735650865,
+            "quantized_mvt_bbox": [4095, 2464, 4097, 2467],
+            "positive_fill_inside_unbuffered_tile": true,
+            "unbuffered_mvt_fill_area": 3.0,
+            "source_bbox": {
+              "xmin": 140.6249237060547,
+              "ymin": 35.91488265991211,
+              "xmax": 140.62547302246094,
+              "ymax": 35.91535186767578
+            }
+          },
+          {
+            "id": 14612153,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.2866100293205609,
+            "quantized_mvt_bbox": [-1, 551, 1, 554],
+            "positive_fill_inside_unbuffered_tile": true,
+            "unbuffered_mvt_fill_area": 3.0,
+            "source_bbox": {
+              "xmin": 139.21826171875,
+              "ymin": 36.44480895996094,
+              "xmax": 139.21875,
+              "ymax": 36.44544219970703
+            }
+          }
+        ]
+      },
+      {
+        "place": "Tokyo",
+        "z": 11,
+        "x": 1819,
+        "y": 806,
+        "extra_features": 259,
+        "buffer_only": 247,
+        "positive_unbuffered_fill": 12,
+        "owner_in_query_tile": 0,
+        "source_bbox_upper_below_one_pixel": 210,
+        "samples": [
+          {
+            "id": 20816124,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.9992614833425062,
+            "quantized_mvt_bbox": [4152, 291, 4158, 299],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 139.9242706298828,
+              "ymin": 35.73609924316406,
+              "xmax": 139.92459106445312,
+              "ymax": 35.73637771606445
+            }
+          },
+          {
+            "id": 20816387,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.9777822504089212,
+            "quantized_mvt_bbox": [4110, 353, 4116, 358],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 139.92245483398438,
+              "ymin": 35.7340202331543,
+              "xmax": 139.92279052734375,
+              "ymax": 35.73426055908203
+            }
+          },
+          {
+            "id": 20817195,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.9855015207153578,
+            "quantized_mvt_bbox": [4098, 456, 4104, 464],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 139.92193603515625,
+              "ymin": 35.73032760620117,
+              "xmax": 139.92222595214844,
+              "ymax": 35.7306022644043
+            }
+          },
+          {
+            "id": 20817555,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.9777822504089212,
+            "quantized_mvt_bbox": [4094, 619, 4102, 624],
+            "positive_fill_inside_unbuffered_tile": true,
+            "unbuffered_mvt_fill_area": 2.0,
+            "source_bbox": {
+              "xmin": 139.9218292236328,
+              "ymin": 35.7247428894043,
+              "xmax": 139.9221649169922,
+              "ymax": 35.724979400634766
+            }
+          },
+          {
+            "id": 20817604,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 1.0128069086919989,
+            "quantized_mvt_bbox": [4136, 614, 4144, 621],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 139.9236297607422,
+              "ymin": 35.72484588623047,
+              "xmax": 139.92396545410156,
+              "ymax": 35.725128173828125
+            }
+          },
+          {
+            "id": 20817555,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.9777822504089212,
+            "quantized_mvt_bbox": [4094, 619, 4102, 624],
+            "positive_fill_inside_unbuffered_tile": true,
+            "unbuffered_mvt_fill_area": 2.0,
+            "source_bbox": {
+              "xmin": 139.9218292236328,
+              "ymin": 35.7247428894043,
+              "xmax": 139.9221649169922,
+              "ymax": 35.724979400634766
+            }
+          },
+          {
+            "id": 20820978,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 1.0666715459006413,
+            "quantized_mvt_bbox": [4092, 929, 4100, 937],
+            "positive_fill_inside_unbuffered_tile": true,
+            "unbuffered_mvt_fill_area": 14.666666666666742,
+            "source_bbox": {
+              "xmin": 139.92172241210938,
+              "ymin": 35.71390914916992,
+              "xmax": 139.92208862304688,
+              "ymax": 35.71415710449219
+            }
+          },
+          {
+            "id": 20899100,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.9333376026630611,
+            "quantized_mvt_bbox": [4094, 1461, 4102, 1469],
+            "positive_fill_inside_unbuffered_tile": true,
+            "unbuffered_mvt_fill_area": 4.0,
+            "source_bbox": {
+              "xmin": 139.9218292236328,
+              "ymin": 35.695335388183594,
+              "xmax": 139.92214965820312,
+              "ymax": 35.69557571411133
+            }
+          },
+          {
+            "id": 20899109,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.9777822504089212,
+            "quantized_mvt_bbox": [4092, 1478, 4100, 1483],
+            "positive_fill_inside_unbuffered_tile": true,
+            "unbuffered_mvt_fill_area": 10.0,
+            "source_bbox": {
+              "xmin": 139.92172241210938,
+              "ymin": 35.69478225708008,
+              "xmax": 139.92205810546875,
+              "ymax": 35.69503402709961
+            }
+          },
+          {
+            "id": 22098212,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.9777822504089212,
+            "quantized_mvt_bbox": [-6, 1299, 2, 1306],
+            "positive_fill_inside_unbuffered_tile": true,
+            "unbuffered_mvt_fill_area": 3.6666666666667425,
+            "source_bbox": {
+              "xmin": 139.74586486816406,
+              "ymin": 35.700984954833984,
+              "xmax": 139.74620056152344,
+              "ymax": 35.70123291015625
+            }
+          }
+        ]
+      },
+      {
+        "place": "Tokyo",
+        "z": 14,
+        "x": 14552,
+        "y": 6451,
+        "extra_features": 2,
+        "buffer_only": 2,
+        "positive_unbuffered_fill": 0,
+        "owner_in_query_tile": 0,
+        "source_bbox_upper_below_one_pixel": 0,
+        "samples": [
+          {
+            "id": 21817772,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 1.4222287278675216,
+            "quantized_mvt_bbox": [4084, -56, 4092, -49],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 139.7679901123047,
+              "ymin": 35.693206787109375,
+              "xmax": 139.76805114746094,
+              "ymax": 35.693241119384766
+            }
+          },
+          {
+            "id": 21845478,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 1.4222287278675216,
+            "quantized_mvt_bbox": [930, 4147, 938, 4154],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 139.75106811523438,
+              "ymin": 35.67489242553711,
+              "xmax": 139.75112915039062,
+              "ymax": 35.674922943115234
+            }
+          }
+        ]
+      },
+      {
+        "place": "Tokyo east",
+        "z": 14,
+        "x": 14553,
+        "y": 6451,
+        "extra_features": 4,
+        "buffer_only": 4,
+        "positive_unbuffered_fill": 0,
+        "owner_in_query_tile": 0,
+        "source_bbox_upper_below_one_pixel": 0,
+        "samples": [
+          {
+            "id": 21675008,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 1.0666715459006413,
+            "quantized_mvt_bbox": [4131, 2148, 4137, 2155],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 139.79022216796875,
+              "ymin": 35.6836051940918,
+              "xmax": 139.79026794433594,
+              "ymax": 35.68363571166992
+            }
+          },
+          {
+            "id": 21677601,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 1.0666715459006413,
+            "quantized_mvt_bbox": [4103, 1702, 4109, 1707],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 139.79006958007812,
+              "ymin": 35.68555450439453,
+              "xmax": 139.7901153564453,
+              "ymax": 35.68558120727539
+            }
+          },
+          {
+            "id": 21817772,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 1.4222287278675216,
+            "quantized_mvt_bbox": [-12, -56, -4, -49],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 139.7679901123047,
+              "ymin": 35.693206787109375,
+              "xmax": 139.76805114746094,
+              "ymax": 35.693241119384766
+            }
+          },
+          {
+            "id": 21844594,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 1.0666715459006413,
+            "quantized_mvt_bbox": [-49, 571, -45, 578],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 139.76779174804688,
+              "ymin": 35.69047546386719,
+              "xmax": 139.76783752441406,
+              "ymax": 35.69050979614258
+            }
+          }
+        ]
+      },
+      {
+        "place": "Osaka",
+        "z": 14,
+        "x": 14358,
+        "y": 6506,
+        "extra_features": 8,
+        "buffer_only": 8,
+        "positive_unbuffered_fill": 0,
+        "owner_in_query_tile": 0,
+        "source_bbox_upper_below_one_pixel": 2,
+        "samples": [
+          {
+            "id": 9179786,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 1.0666715459006413,
+            "quantized_mvt_bbox": [-58, 1535, -53, 1541],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 135.4830780029297,
+              "ymin": 34.69869613647461,
+              "xmax": 135.48312377929688,
+              "ymax": 34.698726654052734
+            }
+          },
+          {
+            "id": 9179789,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 1.0666715459006413,
+            "quantized_mvt_bbox": [-46, 1584, -43, 1587],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 135.48313903808594,
+              "ymin": 34.69849395751953,
+              "xmax": 135.48318481445312,
+              "ymax": 34.698509216308594
+            }
+          },
+          {
+            "id": 9179832,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 1.4222287278675216,
+            "quantized_mvt_bbox": [-15, 1079, -7, 1086],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 135.48330688476562,
+              "ymin": 34.70070266723633,
+              "xmax": 135.48336791992188,
+              "ymax": 34.70073699951172
+            }
+          },
+          {
+            "id": 9181917,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.7111143639337608,
+            "quantized_mvt_bbox": [-8, 583, -4, 587],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 135.4833526611328,
+              "ymin": 34.702903747558594,
+              "xmax": 135.48338317871094,
+              "ymax": 34.70292663574219
+            }
+          },
+          {
+            "id": 9232218,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 1.0666715459006413,
+            "quantized_mvt_bbox": [1188, -26, 1194, -20],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 135.48976135253906,
+              "ymin": 34.70557403564453,
+              "xmax": 135.48980712890625,
+              "ymax": 34.705604553222656
+            }
+          }
+        ]
+      },
+      {
+        "place": "Sapporo",
+        "z": 11,
+        "x": 1828,
+        "y": 752,
+        "extra_features": 120,
+        "buffer_only": 114,
+        "positive_unbuffered_fill": 6,
+        "owner_in_query_tile": 0,
+        "source_bbox_upper_below_one_pixel": 102,
+        "samples": [
+          {
+            "id": 39854287,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.8499913072537485,
+            "quantized_mvt_bbox": [-10, 4021, -4, 4030],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 141.32774353027344,
+              "ymin": 42.94245910644531,
+              "xmax": 141.3280029296875,
+              "ymax": 42.94267272949219
+            }
+          },
+          {
+            "id": 39865893,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.8960893449993288,
+            "quantized_mvt_bbox": [-50, 2792, -44, 2797],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 141.32598876953125,
+              "ymin": 42.98110580444336,
+              "xmax": 141.3262939453125,
+              "ymax": 42.98133087158203
+            }
+          },
+          {
+            "id": 39867067,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.9777822504089212,
+            "quantized_mvt_bbox": [-34, 2338, -28, 2343],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 141.32662963867188,
+              "ymin": 42.995418548583984,
+              "xmax": 141.32696533203125,
+              "ymax": 42.995548248291016
+            }
+          },
+          {
+            "id": 39886617,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.9777822504089212,
+            "quantized_mvt_bbox": [-30, 1017, -22, 1022],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 141.32684326171875,
+              "ymin": 43.036808013916016,
+              "xmax": 141.32717895507812,
+              "ymax": 43.037017822265625
+            }
+          },
+          {
+            "id": 39886666,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.9777822504089212,
+            "quantized_mvt_bbox": [-8, 945, -2, 954],
+            "positive_fill_inside_unbuffered_tile": false,
+            "unbuffered_mvt_fill_area": 0.0,
+            "source_bbox": {
+              "xmin": 141.3277587890625,
+              "ymin": 43.03901290893555,
+              "xmax": 141.32809448242188,
+              "ymax": 43.03925704956055
+            }
+          },
+          {
+            "id": 39899071,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.9580175469359191,
+            "quantized_mvt_bbox": [-6, 387, 2, 393],
+            "positive_fill_inside_unbuffered_tile": true,
+            "unbuffered_mvt_fill_area": 6.0,
+            "source_bbox": {
+              "xmin": 141.32791137695312,
+              "ymin": 43.056541442871094,
+              "xmax": 141.3282012939453,
+              "ymax": 43.05678176879883
+            }
+          },
+          {
+            "id": 39899368,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.844448307171341,
+            "quantized_mvt_bbox": [-4, 256, 2, 264],
+            "positive_fill_inside_unbuffered_tile": true,
+            "unbuffered_mvt_fill_area": 6.0,
+            "source_bbox": {
+              "xmin": 141.3279266357422,
+              "ymin": 43.060646057128906,
+              "xmax": 141.32821655273438,
+              "ymax": 43.06083297729492
+            }
+          },
+          {
+            "id": 41305152,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.943000100562152,
+            "quantized_mvt_bbox": [3942, -7, 3946, 1],
+            "positive_fill_inside_unbuffered_tile": true,
+            "unbuffered_mvt_fill_area": 3.875,
+            "source_bbox": {
+              "xmin": 141.4972686767578,
+              "ymin": 43.068843841552734,
+              "xmax": 141.49746704101562,
+              "ymax": 43.0690803527832
+            }
+          },
+          {
+            "id": 41310570,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.888892954917201,
+            "quantized_mvt_bbox": [2842, -4, 2848, 1],
+            "positive_fill_inside_unbuffered_tile": true,
+            "unbuffered_mvt_fill_area": 1.0,
+            "source_bbox": {
+              "xmin": 141.45005798339844,
+              "ymin": 43.06886672973633,
+              "xmax": 141.4503631591797,
+              "ymax": 43.06906509399414
+            }
+          },
+          {
+            "id": 41432924,
+            "owner_is_query_tile": false,
+            "source_float32_bbox_pixel_width_upper": 0.8973703094813446,
+            "quantized_mvt_bbox": [1898, -4, 1904, 4],
+            "positive_fill_inside_unbuffered_tile": true,
+            "unbuffered_mvt_fill_area": 14.799999999999955,
+            "source_bbox": {
+              "xmin": 141.4095458984375,
+              "ymin": 43.06879806518555,
+              "xmax": 141.4098358154297,
+              "ymax": 43.06902313232422
+            }
+          }
+        ]
+      }
+    ],
+    "method": "Packed own geometry projected/rounded like MVT; exact positive fill intersection with unbuffered tile; source Hilbert ownership and outward float32 bbox width bound",
+    "summary": {
+      "extra_features": 3121,
+      "buffer_only": 3067,
+      "positive_unbuffered_fill": 54,
+      "owner_in_query_tile": 0,
+      "source_bbox_upper_below_one_pixel": 3042
+    }
+  },
+  "footer_payload": {
+    "production": {
+      "file_bytes": 7666520593,
+      "five_overview_fields": {
+        "f4": 73256,
+        "f8": 3288613,
+        "f11": 30538425,
+        "f14": 967287796,
+        "f16": 1105098281
+      },
+      "five_overview_total": 2106286371,
+      "source_attributes": { "height": 6641169, "class": 5953023 },
+      "source_attribute_total": 12594192,
+      "all_compressed_payload_bytes": 7608559062,
+      "all_overview_payload_bytes": 2670916165,
+      "footer_bytes": 270389
+    },
+    "nested": {
+      "file_bytes": 6448104656,
+      "five_overview_fields": {
+        "f4": 153893,
+        "f8": 6770133,
+        "f11": 38654223,
+        "f14": 689592217,
+        "f16": 772971064
+      },
+      "five_overview_total": 1508141530,
+      "source_attributes": { "height": 6346986, "class": 4956221 },
+      "source_attribute_total": 11303207,
+      "all_compressed_payload_bytes": 6444493442,
+      "all_overview_payload_bytes": 1508141530,
+      "footer_bytes": 238015
+    },
+    "comparison": {
+      "nested_geometry_vs_production_five_packed_ratio": 0.7160192226301976,
+      "note": "Production five packed fields include carried height/class and hosted copies; nested fields are whole own geometry only. Source height/class remain separate ordinary columns in both files. More-production-level savings must be separated from this five-field comparison."
+    }
+  }
+}
