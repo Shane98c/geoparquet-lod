@@ -334,6 +334,7 @@ this layout is in which rows a coarse view reads and how it finds them.
 - Partitioned datasets: one manifest listing files and their extents.
 - Whether to order the table coarse-first for readers that do not know the
   format, as COGP does, so QGIS draws the coarse selection before the rest.
-  [Design alternatives](../docs/design-alternatives.md) measures the cost to
-  the indexed reader on Tokyo: one extra request per tile at city zooms and
-  two at street zooms, with identical features.
+  [Design alternatives](../docs/design-alternatives.md) measures both sides
+  on Tokyo: QGIS shows 44% of the final picture after one second with the
+  prefix against 4% with one order, and the indexed reader pays one extra
+  request per tile at city zooms and two at street zooms.

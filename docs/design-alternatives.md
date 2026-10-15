@@ -27,9 +27,29 @@ with the current reader:
 
 Feature counts are identical. The prefix saves bytes at the coarse zoom it
 serves alone, costs one extra request per tile at city zooms and two at
-street zooms, and doubles the requests of every neighbouring tile. The layout
-keeps one order; if sequential readers matter more than a request per tile,
-the prefix is the lever, and the spatial index works either way.
+street zooms, and doubles the requests of every neighbouring tile.
+
+The benefit to readers that do not know the format is measured in QGIS 4.2
+(GDAL 3.12), rendering each file headlessly with a parallel render job and
+sampling the partial image every 100 ms, as the canvas preview does. Both
+files finish in the same time; what differs is how much of the final picture
+is on screen early (median of three alternating runs, fraction of the final
+painted pixels):
+
+| Extent, file           | 0.5 s | 1 s  | 2 s  | 5 s  | Done   |
+| ---------------------- | ----- | ---- | ---- | ---- | ------ |
+| Whole Tokyo, one order | 0.02  | 0.04 | 0.09 | 0.23 | 29.9 s |
+| Whole Tokyo, prefix    | 0.40  | 0.44 | 0.48 | 0.56 | 29.9 s |
+| City, one order        | 0.10  | 0.22 | 0.50 | 1.00 | 5.0 s  |
+| City, prefix           | 0.41  | 0.48 | 0.63 | 1.00 | 5.0 s  |
+
+With one order QGIS fills the map region by region along the curve; with the
+prefix the coarse selection covers the whole extent inside the first half
+second, because GDAL delivers row groups in file order and the selection is
+the first group. The layout keeps one order for now; the prefix is the lever
+if sequential readers matter more than a request per tile, and the spatial
+index works either way. `benchmarks/standard-overviews/qgis-progressive.py`
+reproduces the measurement.
 
 Without the index, removing the prefix initially doubled the coarse Tokyo
 tile's bytes, because a coarse overview is sparse and a fixed row cap left
