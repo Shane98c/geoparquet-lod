@@ -59,16 +59,45 @@ Quantized nested int32 coordinates with Parquet delta encoding, the shape COGP's
 concrete benefit the others lack: DuckDB spatial recognizes it and runs spatial
 SQL on the overviews without a custom decoder.
 
-## Ordinary overview tables
+## Standard overview table with tile-sized row groups
 
-A companion table with one actual row per shown feature per level, holding
-nested int32 geometry and source attributes, gives standard Parquet columns
-without the sparse null rows of source-aligned overview columns. Across a
-14-step Tokyo navigation route it transferred 7.98 MB in 60 requests against
-4.26 MB in 25 for the packed layout, with cold national views within 25 ms of
-each other and dense views over-fetching. It is a viable direction for a
-standard encoding at the cost of requests; a source-aligned nested column
-without that compaction took 70 s for the cold national view and is not.
+The closest standard-Parquet equivalent of the packed rows, built from the
+same Tokyo file so the two hold identical overviews: one table with a row per
+shown feature per level and a row per boundary copy tagged with the tile it
+serves, columns `level, row, tile, geometry, height, class, key`, geometry as
+nested int32 x/y on the level's grid (COGP's `quantized_geoarrow` shape), in
+Hilbert order with row groups cut at the level's tile boundaries and at 4,096
+rows. A tile then reads whole row groups, each one contiguous byte range, and
+a directory over the row groups replaces the 11 MB footer. The reader's
+coalescing policy is applied to both; the packed numbers are the real reader
+on the local file, the standard numbers a simulation from the footer with
+membership checked equal to the packed reader on every tile.
+`benchmarks/standard-overviews/` holds the converter, the simulator, and the
+results.
+
+4,881,955 Tokyo buildings, zooms 8 to 16, cold geometry-only reads after a
+16 KiB open, then the tile one column east on the same reader:
+
+| Tile                      | Packed cold                   | Standard cold  | Packed next    | Standard next  |
+| ------------------------- | ----------------------------- | -------------- | -------------- | -------------- |
+| z8 metro, Tokyo           | 0.53 MB, 2 req, 102,403 feat. | 0.81 MB, 2 req | 0.01 MB, 1 req | 0.01 MB, 1 req |
+| z11 city, Tokyo           | 0.29 MB, 2 req, 24,086 feat.  | 0.41 MB, 2 req | 0.16 MB, 1 req | 0.24 MB, 1 req |
+| z12 city, Tokyo           | 0.36 MB, 2 req, 29,342 feat.  | 0.51 MB, 2 req | 0.32 MB, 1 req | 0.47 MB, 1 req |
+| z13 downtown, Shibuya     | 0.36 MB, 2 req, 29,877 feat.  | 0.51 MB, 2 req | 0.25 MB, 1 req | 0.38 MB, 1 req |
+| z13 suburbs, Kawasaki     | 0.26 MB, 2 req, 20,283 feat.  | 0.36 MB, 2 req | 0.34 MB, 1 req | 0.52 MB, 1 req |
+| z15 street, Tokyo station | 0.04 MB, 2 req, 229 feat.     | 0.03 MB, 2 req | 0.02 MB, 1 req | 0.03 MB, 1 req |
+| z15 street, Shinjuku      | 0.05 MB, 2 req, 1,107 feat.   | 0.04 MB, 2 req | 0.02 MB, 1 req | 0.03 MB, 1 req |
+
+Request counts are identical. The standard table costs 40 to 55% more bytes
+at city zooms, slightly fewer at street zooms, and 344 MB against 219 MB for
+the packed overview columns. Styled reads cost the same as geometry-only in
+both: with 4,096-row groups the attribute chunks sit inside the gaps the
+coalescer bridges anyway. The table is ordinary Parquet; DuckDB queries it
+and reads the nested coordinates directly, though no tool treats them as
+geometry without the level's scale and offset. Not measured: decode CPU,
+which the standard-geometry ablation above puts at about twice the packed
+rows, and larger datasets, where the 15,345 row groups here become hundreds
+of thousands and the directory must carry them.
 
 ## Modified COGP reader
 
