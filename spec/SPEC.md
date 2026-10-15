@@ -322,6 +322,12 @@ this layout is in which rows a coarse view reads and how it finds them.
 
 ## Open questions
 
+- Whether the overviews could be stored as COGP's `quantized_geoarrow` column
+  with the spatial page index over its pages, so other readers decode them.
+  [Design alternatives](../docs/design-alternatives.md) measures that layout:
+  storage and cold views match the packed rows, but a navigation route costs
+  about twice the requests because geometry leaves and attributes are separate
+  pages, and boundary copies have no home in a geometry column.
 - Whether `quantized_geoarrow` should admit a `Point` type, or point LODs
   should use a GeoArrow point struct in degrees at float64.
 - Partitioned datasets: one manifest listing files and their extents.
