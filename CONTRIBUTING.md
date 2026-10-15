@@ -1,9 +1,7 @@
 # Contributing
 
-This is an experimental implementation and draft format. COGP, Esri's overview
-work, and this project are evolving approaches; this repository is an invitation
-to compare designs, not a claim of an agreed overview standard. Compatibility
-breaks are possible while the layout is being evaluated.
+This is a draft format with one implementation, so expect the layout to
+change while it is being evaluated.
 
 ## Development
 

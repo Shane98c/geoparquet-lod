@@ -7,9 +7,8 @@ alongside compact, thinned overviews. A spatial page index lets a browser
 fetch the relevant Parquet pages without opening the full footer. Ordinary
 GeoParquet tools query the original columns; the map uses a custom reader.
 
-**Draft 0.1.0: a research prototype, not an adopted standard or a production
-release.** The format can still change. Python and JavaScript packages are not
-published to registries yet.
+Draft 0.1.0. The format can still change, and the Python and JavaScript
+packages are not published to registries yet.
 
 [Live comparison](https://geoparquet-lod-compare.pages.dev/) ·
 [Format specification](spec/SPEC.md) ·
@@ -158,9 +157,8 @@ thinning budgets were calibrated against PMTiles feature counts, as the
 a few percent where both serve native tiles. [The comparison page](docs/comparison.md)
 has definitions, provenance, and reproduction steps.
 
-This supports competitive request counts and nearby transfer sizes on this
-workload, **not a claim that this is universally faster than PMTiles, COGP, or
-Esri**. We have not established broad device, dataset, or network parity.
+These are single-tile reads on one dataset from one network; they show
+competitive request counts and transfer sizes, not a general speed ranking.
 
 ## Main tradeoffs
 
