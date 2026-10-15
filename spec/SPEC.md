@@ -1,7 +1,7 @@
-# LOD columns
+# GeoParquet LOD
 
-_A layout and metadata contract for GeoParquet files that serve a zoomable
-map directly. Implemented by the writer and reader in this repository. Draft 0.1.0._
+_The `lod_columns` extension: a layout and metadata contract for GeoParquet
+files that serve a zoomable map directly. Implemented by the writer and reader in this repository. Draft 0.1.0._
 
 The key words MUST, SHOULD and MAY are to be interpreted as in RFC 2119.
 'Layout', 'Metadata' and 'Geometry' are the contract; 'Reading without the

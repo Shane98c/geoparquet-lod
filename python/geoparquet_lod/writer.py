@@ -363,7 +363,7 @@ def write(
     temp_dir: str | None = None,
     log=print,
 ) -> Path:
-    """Build an indexed GeoParquet file with display overviews in one call.
+    """Build a GeoParquet LOD file in one call.
 
     Rows use one global Hilbert order.
     ``thinning`` chooses displayed rows at each zoom. ``complete_from`` sets
@@ -434,7 +434,7 @@ def _write_unindexed(
     log=print,
 ) -> Path:
     """Write `src` (any GeoParquet with a WKB geometry column) to `out` in the
-    LOD columns layout. `thinning` chooses the rows shown at every zoom;
+    GeoParquet LOD layout. `thinning` chooses the rows shown at every zoom;
     `complete_from` is the zoom from which every feature is shown whatever the
     thinning says, and the base zoom a rate-based thinning counts from; `'auto'`
     guesses the base and records which zooms the thinning leaves complete.

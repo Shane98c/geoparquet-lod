@@ -1,4 +1,4 @@
-# geoparquet-lod JavaScript reader
+# GeoParquet LOD JavaScript reader
 
 Experimental draft 0.1.0. Reads the GeoParquet LOD layout and spatial page
 index emitted by the writer; generates vector tiles for MapLibre. Not yet published to

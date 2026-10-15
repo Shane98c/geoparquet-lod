@@ -1,9 +1,9 @@
-# geoparquet-lod
+# GeoParquet LOD
 
 **One GeoParquet file for a zoomable map and the original analytical data.**
 
 This experimental layout keeps original feature geometries and source attributes
-alongside compact, thinned display overviews. A spatial page index lets a browser
+alongside compact, thinned overviews. A spatial page index lets a browser
 fetch the relevant Parquet pages without opening the full footer. Ordinary
 GeoParquet tools query the original columns; the map uses a custom reader.
 
@@ -83,7 +83,7 @@ duckdb.sql("""
 """).show()
 ```
 
-This query counts source features, not the thinned display overviews.
+This query counts source features, not the thinned overviews.
 
 To view your output locally, install Node 22+ and run:
 
@@ -169,7 +169,7 @@ Esri**. We have not established broad device, dataset, or network parity.
   different capabilities. Building overviews and indexing is an offline step;
   updates require rebuilding.
 - **A custom display encoding and index.** Ordinary tools read original
-  geometries and attributes, but cannot interpret the display payloads. There
+  geometries and attributes, but cannot interpret the overview payloads. There
   is one implementation, a draft spec, and no independent conformance suite.
   Compatibility has been exercised with PyArrow and DuckDB, not every Parquet
   reader or rewriter. [Design alternatives](docs/design-alternatives.md)

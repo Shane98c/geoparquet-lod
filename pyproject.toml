@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "geoparquet-lod"
 version = "0.1.0"
-description = "Write and validate GeoParquet files with per-zoom display payload columns"
+description = "Write and validate GeoParquet LOD files: GeoParquet with per-zoom overview columns and a spatial page index"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"

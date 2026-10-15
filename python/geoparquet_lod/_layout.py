@@ -71,7 +71,7 @@ def _tile_pages(
     """Use Arrow to encode tile-aligned pages, then concatenate its temporary
     column chunks into one ordinary chunk in the original row group. Dictionary
     encoding is disabled so every page is independently decodable. Consecutive
-    all-null tiles share a run; they carry no display payload.
+    all-null tiles share a run; they carry no overview payload.
     """
     table = parquet.read_row_group(group, columns=[f'{lod["column"]}.{name}'])
     array = table.column(0).combine_chunks().field(name)

@@ -40,7 +40,7 @@ def validate(path: str | Path, sample_rows: int = 2000, *, full: bool = False) -
     if lod.get('pack_version') != PACK_VERSION:
         raise ValidationError(f'pack_version {lod.get("pack_version")!r} is not {PACK_VERSION}')
     if md.num_row_groups == 0 or md.num_rows == 0:
-        raise ValidationError('empty file: an empty dataset carries no LOD columns')
+        raise ValidationError('empty file: an empty dataset carries no overviews')
     column = lod.get('column', 'lod')
     names = f.schema_arrow.names
     if column not in names:

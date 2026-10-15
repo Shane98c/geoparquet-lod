@@ -2,7 +2,7 @@
 
 This evaluation asks whether one GeoParquet file can preserve the original
 analytical data while approaching PMTiles map-transfer costs. It uses
-53,742,978 Japan building footprints, packed display overviews, and a spatial
+53,742,978 Japan building footprints, packed overviews, and a spatial
 page index. Original geometries and attributes remain available to ordinary
 GeoParquet tools.
 

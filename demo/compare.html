@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>geoparquet-lod side by side</title>
+    <title>GeoParquet LOD comparison</title>
     <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css" />
     <style>
       html,
@@ -130,7 +130,6 @@
       // One pane per file given in the query string, all on the same view, each with a
       // tally of the bytes and requests its reader has made:
       //   ?url=        this layout, read through its page indexes
-      //   ?tiledir=    the same file through a tile directory sidecar
       //   ?pmtiles=    a PMTiles archive; ?pmtiles_layer= names its layer (default: buildings)
       //   ?cogp=       a COGP file, read with @cogp/maplibre
       //   ?esri=       a Spatially Optimized Parquet file, read with Esri's MapLibre reference reader
@@ -154,10 +153,6 @@
         return result.href
       }
       const fileUrl = abs(url)
-      const dirFile = fileUrl ? new URL(fileUrl) : null
-      dirFile?.searchParams.set('dir', '1')
-      const dirFileUrl = dirFile?.href
-      const tiledir = abs(params.get('tiledir'))
       const pmtilesUrl = abs(params.get('pmtiles'))
       const pmtilesLayer = params.get('pmtiles_layer') ?? 'buildings'
       const cogpUrl = abs(params.get('cogp'))
@@ -167,7 +162,6 @@
         ['pmtiles', 'PMTiles', pmtilesUrl],
         ['cogp', 'COGP (released)', cogpUrl],
         ['esri', 'Esri SOP', esriUrl],
-        ['tiledir', 'LOD tile directory', fileUrl && tiledir],
       ].filter(([, , source]) => source)
       const chosen = new Set(
         params.has('panes') ? params.get('panes').split(',') : available.map(([id]) => id),
@@ -300,7 +294,7 @@
           return result
         })
 
-      if (enabled('lod') || enabled('tiledir')) registerProtocol(maplibregl)
+      if (enabled('lod')) registerProtocol(maplibregl)
       if (enabled('pmtiles')) {
         const protocol = new pmtiles.Protocol()
         maplibregl.addProtocol('pmtiles', protocol.tile)
@@ -338,25 +332,14 @@
         maxzoom: 22,
       })
 
-      // a query string on the second LOD pane's URL keeps its tally apart from the first
       const panes = []
       if (enabled('lod'))
         panes.push({
-          title: 'GeoParquet LOD · current reader',
+          title: 'GeoParquet LOD',
           keys: [fileUrl],
           tile: (u) => u.startsWith('lod://') && parseTileUrl(u).config.url === fileUrl,
           lodUrl: fileUrl,
           sources: { lod: lodSource(fileUrl) },
-          layers: [fill('lod', 'shapes'), dots('lod', 'points')],
-        })
-      if (enabled('tiledir'))
-        panes.push({
-          title: 'LOD columns, tile directory',
-          keys: [dirFileUrl, tiledir],
-          tile: (u) => u.startsWith('lod://') && parseTileUrl(u).config.url === dirFileUrl,
-          lodUrl: dirFileUrl,
-          lodOptions: { tiledir },
-          sources: { lod: lodSource(dirFileUrl, { tiledir }) },
           layers: [fill('lod', 'shapes'), dots('lod', 'points')],
         })
       if (enabled('cogp')) {
