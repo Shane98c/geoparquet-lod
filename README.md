@@ -134,19 +134,19 @@ custom thinning, validation, and worker configuration.
 
 Four readers against the hosted Japan archives, all derived from the same
 53,742,978 Overture building footprints: this layout, released COGP 2.2.2,
-PMTiles written by tippecanoe, and Esri's Spatially Optimized Parquet with its
-reference reader. Each cell is a cold read on a fresh reader after one open,
+Esri's Spatially Optimized Parquet with its reference reader, and, as the
+map-delivery reference, PMTiles written by tippecanoe. Each cell is a cold read on a fresh reader after one open,
 geometry only, served from the same public bucket. Bytes are decimal.
 
-| Tile                  | GeoParquet LOD               | COGP 2.2.2                  | PMTiles                      | Esri SOP                    |
-| --------------------- | ---------------------------- | --------------------------- | ---------------------------- | --------------------------- |
-| open                  | 16 KB, 1 req                 | 1.50 MB, 3 req              | 16 KB, 1 req                 | 2.62 MB, 3 req              |
-| z8 metro, Tokyo       | 0.62 MB, 2 req, 93,775 feat. | 0.12 MB, 8 req, 1,152 feat. | 0.50 MB, 2 req, 95,774 feat. | 26.65 MB, 1,048 req, 28,000 |
-| z11 city, Tokyo       | 0.32 MB, 2 req, 24,068       | 0.25 MB, 17 req, 860        | 0.31 MB, 2 req, 24,373       | 5.39 MB, 143 req, 177,679   |
-| z13 downtown, Shibuya | 0.36 MB, 2 req, 29,834       | 0.68 MB, 42 req, 2,739      | 0.35 MB, 2 req, 28,908       | 2.61 MB, 92 req, 51,996     |
-| z13 suburbs, Chiba    | 0.08 MB, 2 req, 4,955        | 0.44 MB, 34 req, 454        | 0.06 MB, 2 req, 4,929        | 1.30 MB, 55 req, 6,841      |
-| z15 street, Tokyo     | 0.04 MB, 2 req, 229          | 0.86 MB, 82 req, 213        | 0.03 MB, 2 req, 1,441        | 1.30 MB, 62 req, 229        |
-| z15 street, Osaka     | 0.07 MB, 2 req, 1,357        | 0.80 MB, 80 req, 1,287      | 0.11 MB, 2 req, 6,523        | 1.01 MB, 57 req, 1,362      |
+| Tile                  | GeoParquet LOD               | COGP 2.2.2                  | Esri SOP                    | PMTiles                      |
+| --------------------- | ---------------------------- | --------------------------- | --------------------------- | ---------------------------- |
+| open                  | 16 KB, 1 req                 | 1.50 MB, 3 req              | 2.62 MB, 3 req              | 16 KB, 1 req                 |
+| z8 metro, Tokyo       | 0.62 MB, 2 req, 93,775 feat. | 0.12 MB, 8 req, 1,152 feat. | 26.65 MB, 1,048 req, 28,000 | 0.50 MB, 2 req, 95,774 feat. |
+| z11 city, Tokyo       | 0.32 MB, 2 req, 24,068       | 0.25 MB, 17 req, 860        | 5.39 MB, 143 req, 177,679   | 0.31 MB, 2 req, 24,373       |
+| z13 downtown, Shibuya | 0.36 MB, 2 req, 29,834       | 0.68 MB, 42 req, 2,739      | 2.61 MB, 92 req, 51,996     | 0.35 MB, 2 req, 28,908       |
+| z13 suburbs, Chiba    | 0.08 MB, 2 req, 4,955        | 0.44 MB, 34 req, 454        | 1.30 MB, 55 req, 6,841      | 0.06 MB, 2 req, 4,929        |
+| z15 street, Tokyo     | 0.04 MB, 2 req, 229          | 0.86 MB, 82 req, 213        | 1.30 MB, 62 req, 229        | 0.03 MB, 2 req, 1,441        |
+| z15 street, Osaka     | 0.07 MB, 2 req, 1,357        | 0.80 MB, 80 req, 1,287      | 1.01 MB, 57 req, 1,362      | 0.11 MB, 2 req, 6,523        |
 
 The four files do not agree on what a tile should contain, so bytes only mean
 something next to the feature counts. COGP's conversion keeps very few features
