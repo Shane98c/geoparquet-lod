@@ -11,7 +11,6 @@ import { tableFromIPC } from 'apache-arrow'
 
 const status = document.querySelector('#status'),
   url = document.querySelector('#url'),
-  primary = document.querySelector('#primary'),
   params = new URLSearchParams(location.search)
 url.value = new URL(params.get('url') ?? url.value, location.href).href
 let reader,
@@ -61,26 +60,24 @@ function featureLayer(id, table, zoom) {
 // One tile per LOD tile: deck's TileLayer caches loaded tiles and their GPU
 // buffers, cancels abandoned loads, and overzooms the finest level.
 function tileLayer() {
-  const exact = primary.checked
   const zooms = reader.lod.zooms
   return new TileLayer({
-    id: `tiles-${generation}-${exact ? 'primary' : 'overview'}`,
+    id: `tiles-${generation}`,
     tileSize: reader.lod.tile_size,
-    minZoom: exact ? Math.max(14, Math.min(...zooms)) : Math.min(...zooms),
-    maxZoom: exact ? 18 : Math.max(...zooms),
+    minZoom: Math.min(...zooms),
+    maxZoom: Math.max(...zooms),
     extent: reader.bounds,
     getTileData: async ({ index, bbox, signal }) => {
       const batch = await readGeometryBatch(reader, {
         bbox: [bbox.west, bbox.south, bbox.east, bbox.north],
         resolution: 360 / (reader.lod.tile_size * 2 ** index.z),
         signal,
-        geometry: exact ? 'primary' : 'overview',
+        geometry: 'overview',
         maxTiles: 16,
       })
       return {
         table: tableFromIPC(batchToGeoArrow(batch, { crs: 'OGC:CRS84' })),
         rows: batch.rowIndex,
-        source: batch.source,
       }
     },
     renderSubLayers: ({ id, tile, data }) =>
@@ -88,7 +85,7 @@ function tileLayer() {
     onViewportLoad: (tiles) => {
       const loaded = tiles.filter((t) => t.content)
       const features = loaded.reduce((n, t) => n + t.content.rows.length, 0)
-      status.textContent = `${features.toLocaleString()} ${loaded[0]?.content.source ?? 'overview'} features in ${loaded.length} tiles · zoom ${state.zoom.toFixed(1)}`
+      status.textContent = `${features.toLocaleString()} overview features in ${loaded.length} tiles · zoom ${state.zoom.toFixed(1)}`
     },
     onTileError: (error) => {
       if (error?.name !== 'AbortError') status.textContent = error.message
@@ -122,5 +119,4 @@ document.querySelector('form').addEventListener('submit', (event) => {
   event.preventDefault()
   open()
 })
-primary.addEventListener('change', () => reader && map.setProps({ layers: [tileLayer()] }))
 open()
