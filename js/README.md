@@ -31,8 +31,9 @@ row IDs and attributes. `toGeometryBatch` converts a `readFeatures`
 result. `batchToGeoJSON`, `batchToGeoArrow` (Arrow IPC), and `batchToMvt` consume
 the same batch. GeoArrow conversion uses the `@cogp/reader` dependency; nested or
 mixed attributes become display strings. GeoJSON is intended for small results.
-The runnable deck.gl example is `demo/deck/index.html` after `npm run demo:bundle`
-and serving the repository with Range support.
+The deck.gl example is `demo/deck/index.html` after `npm run demo:bundle`,
+served with Range support; it feeds `batchToGeoArrow` output to the GeoArrow
+deck.gl layers.
 
 `readColumns` and query `columns` accept struct paths (`details.height`), list
 indexes (`floors[0].name`), and map keys (`tags.name`). Null/missing values become

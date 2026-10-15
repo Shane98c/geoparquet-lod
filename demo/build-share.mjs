@@ -46,6 +46,13 @@ html = html.replace(
   `${anchor}\n      for (const [key, value] of Object.entries(${json(defaults)})) {\n        if (!params.has(key)) params.set(key, value)\n      }\n      document.getElementById('notes').textContent += ${json(` R2 release ${values.release}; real network timing, no artificial delay. Subtype uses the GeoParquet source columns.`)}`,
 )
 await cp(new URL('./dist/', import.meta.url), resolve(out, 'dist'), { recursive: true })
+// The deck.gl example opens the hosted GeoParquet file unless ?url= overrides it.
+const deckDefault = 'value="/buildings.lod.parquet"'
+let deck = await readFile(new URL('./deck/index.html', import.meta.url), 'utf8')
+if (deck.split(deckDefault).length !== 2) throw new Error('deck.gl example default has changed')
+deck = deck.replace(deckDefault, `value=${json(values.url)}`)
+await mkdir(resolve(out, 'deck'), { recursive: true })
+await writeFile(resolve(out, 'deck', 'index.html'), deck)
 await writeFile(resolve(out, 'index.html'), html)
 await writeFile(resolve(out, 'compare.html'), html)
 await writeFile(
@@ -59,6 +66,7 @@ await writeFile(
         cogp: values.cogp,
         esri: values.esri,
       },
+      deck: '/deck/',
       defaultPanes: ['lod', 'pmtiles'],
       artificialLatencyMs: 0,
     },

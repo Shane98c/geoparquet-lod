@@ -10,6 +10,9 @@ The page defaults to Tokyo at zoom 11, geometry styling, and no basemap. Both
 readers request data directly from the same R2 public host with no simulated
 latency or bandwidth cap. The files use identical immutable cache settings.
 The page supports the same view and style controls as the local comparison.
+The [deck.gl example](https://geoparquet-lod-compare.pages.dev/deck/) is
+deployed beside it and opens the same GeoParquet file through the
+renderer-neutral batch API; pass `?url=` to point it at another file.
 
 Use the reader checkboxes and **Apply readers** to choose any combination of
 GeoParquet LOD, PMTiles, released COGP, and Esri SOP. Unselected panes are removed

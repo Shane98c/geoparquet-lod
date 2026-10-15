@@ -337,12 +337,19 @@ geometry column. `batchToMvt` clips the same buffers to one tile, defaults to
 layer `shapes`, and uses the same MVT encoder and property semantics as
 `renderTile`, which remains the optimized tile-serving path.
 
-A second renderer is runnable at
+A second renderer is hosted at
+<https://geoparquet-lod-compare.pages.dev/deck/> and runnable locally at
 `http://localhost:8091/demo/deck/index.html?url=/buildings.lod.parquet` after
-`npm --prefix js run demo`. It uses pinned deck.gl 9.1.14 from a public CDN,
-shows the whole queried features through `GeoJsonLayer`, and supports panning,
-zooming and switching to original geometry. There is no basemap dependency.
-A Range-enabled server and browser network access to the CDN are required; the
-example deliberately uses the small-data GeoJSON adapter rather than claiming
-zero-copy deck rendering. For external files use the comparison server's
-`/demo/deck/index.html?url=/data/current.parquet` route and its `--lod` option.
+`npm --prefix js run demo`. `demo/deck/main.js` bundles deck.gl 9.1 with the
+GeoArrow deck.gl layers: each settled view reads the viewport as a geometry
+batch, converts it to a GeoArrow table, and hands the table to
+`GeoArrowPolygonLayer` (or the path and scatterplot layers for lines and
+points), so coordinates move from Arrow buffers into GPU attributes without
+per-feature objects. Polygon triangulation still runs on the CPU, as for any
+deck.gl polygon layer, and each view change re-reads and re-uploads the
+viewport; a streaming application would keep tiles resident instead. Outlines
+are drawn from zoom 14, where features are larger than the placeholder squares
+coarse overviews use. `?view=lon,lat,zoom` opens at a place and `?url=` opens
+another file; there is no basemap dependency. For external files use the
+comparison server's `/demo/deck/index.html?url=/data/current.parquet` route
+and its `--lod` option.

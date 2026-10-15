@@ -126,8 +126,9 @@ map.addLayer({
 Install the JS package from the built local `js/` directory. Its worker asset
 must remain available to your bundler. The reader also exposes whole-feature
 geometry batches with typed coordinate buffers, plus GeoJSON, GeoArrow IPC, and
-MVT adapters; the [deck.gl example](demo/deck/index.html) renders outside
-MapLibre. See the [guide](docs/usage.md) for source attributes, nested fields,
+MVT adapters; the [deck.gl example](https://geoparquet-lod-compare.pages.dev/deck/)
+renders the hosted Japan file outside MapLibre. See the [guide](docs/usage.md)
+for source attributes, nested fields,
 custom thinning, validation, and worker configuration.
 
 ## What we have measured

@@ -40,12 +40,13 @@
   <form id="controls">
     <strong>GeoParquet LOD · deck.gl</strong>
     <p>Pan and zoom to read unclipped features.</p>
-    <input id="url" type="url" aria-label="Parquet URL" /><button>Open</button>
+    <input id="url" type="url" aria-label="Parquet URL" value="/buildings.lod.parquet" /><button>
+      Open
+    </button>
     <p>
       <label><input id="primary" type="checkbox" /> Original geometry</label>
     </p>
     <div id="status" role="status">Opening…</div>
   </form>
-  <script src="https://unpkg.com/deck.gl@9.1.14/dist.min.js"></script>
-  <script type="module" src="./main.js"></script>
+  <script type="module" src="../dist/deck.js"></script>
 </html>

@@ -79,7 +79,7 @@ to bring the physical access design into other GeoParquet overview proposals.
 | `examples/`              | Small runnable construction examples                 |
 | `benchmarks/`            | Dataset-specific builds and recorded results         |
 | `docs/`                  | Usage, comparisons, evaluation, design alternatives  |
-| `demo/`                  | Local and hosted comparison UI                       |
+| `demo/`                  | Local and hosted comparison UI and deck.gl example   |
 
 See [THIRD_PARTY.md](THIRD_PARTY.md) before modifying or redistributing vendored
 code. Package publishing and hosted dataset replacement are separate from a
