@@ -571,5 +571,266 @@
     ]
   },
   "source_rows": 4881955,
-  "bbox": [139.39, 35.45, 140.1, 35.9]
+  "bbox": [139.39, 35.45, 140.1, 35.9],
+  "prefix": {
+    "file_bytes": 680517238,
+    "prefix_zoom": 10,
+    "prefix_rows": 166545,
+    "directory_bytes": 827921,
+    "root_bytes": 1671,
+    "tiles": [
+      {
+        "z": 8,
+        "x": 227,
+        "y": 100,
+        "label": "metro, Tokyo",
+        "geometry": {
+          "open": {
+            "requests": 1,
+            "bytes": 16384
+          },
+          "cold": {
+            "requests": 2,
+            "bytes": 387707,
+            "features": 102403
+          },
+          "next": {
+            "requests": 1,
+            "bytes": 370
+          }
+        },
+        "styled": {
+          "open": {
+            "requests": 1,
+            "bytes": 16384
+          },
+          "cold": {
+            "requests": 2,
+            "bytes": 387707,
+            "features": 102403
+          },
+          "next": {
+            "requests": 1,
+            "bytes": 370
+          }
+        }
+      },
+      {
+        "z": 11,
+        "x": 1819,
+        "y": 806,
+        "label": "city, Tokyo",
+        "geometry": {
+          "open": {
+            "requests": 1,
+            "bytes": 16384
+          },
+          "cold": {
+            "requests": 3,
+            "bytes": 281830,
+            "features": 24086
+          },
+          "next": {
+            "requests": 2,
+            "bytes": 158681
+          }
+        },
+        "styled": {
+          "open": {
+            "requests": 1,
+            "bytes": 16384
+          },
+          "cold": {
+            "requests": 3,
+            "bytes": 281830,
+            "features": 24086
+          },
+          "next": {
+            "requests": 2,
+            "bytes": 158681
+          }
+        }
+      },
+      {
+        "z": 12,
+        "x": 3638,
+        "y": 1612,
+        "label": "city, Tokyo",
+        "geometry": {
+          "open": {
+            "requests": 1,
+            "bytes": 16384
+          },
+          "cold": {
+            "requests": 3,
+            "bytes": 362588,
+            "features": 29342
+          },
+          "next": {
+            "requests": 2,
+            "bytes": 317627
+          }
+        },
+        "styled": {
+          "open": {
+            "requests": 1,
+            "bytes": 16384
+          },
+          "cold": {
+            "requests": 3,
+            "bytes": 362588,
+            "features": 29342
+          },
+          "next": {
+            "requests": 2,
+            "bytes": 317627
+          }
+        }
+      },
+      {
+        "z": 13,
+        "x": 7274,
+        "y": 3226,
+        "label": "downtown, Shibuya",
+        "geometry": {
+          "open": {
+            "requests": 1,
+            "bytes": 16384
+          },
+          "cold": {
+            "requests": 3,
+            "bytes": 363667,
+            "features": 29877
+          },
+          "next": {
+            "requests": 2,
+            "bytes": 252186
+          }
+        },
+        "styled": {
+          "open": {
+            "requests": 1,
+            "bytes": 16384
+          },
+          "cold": {
+            "requests": 3,
+            "bytes": 363667,
+            "features": 29877
+          },
+          "next": {
+            "requests": 2,
+            "bytes": 252186
+          }
+        }
+      },
+      {
+        "z": 13,
+        "x": 7273,
+        "y": 3228,
+        "label": "suburbs, Kawasaki",
+        "geometry": {
+          "open": {
+            "requests": 1,
+            "bytes": 16384
+          },
+          "cold": {
+            "requests": 3,
+            "bytes": 265119,
+            "features": 20283
+          },
+          "next": {
+            "requests": 2,
+            "bytes": 337179
+          }
+        },
+        "styled": {
+          "open": {
+            "requests": 1,
+            "bytes": 16384
+          },
+          "cold": {
+            "requests": 3,
+            "bytes": 265119,
+            "features": 20283
+          },
+          "next": {
+            "requests": 2,
+            "bytes": 337179
+          }
+        }
+      },
+      {
+        "z": 15,
+        "x": 29105,
+        "y": 12903,
+        "label": "street, Tokyo station",
+        "geometry": {
+          "open": {
+            "requests": 1,
+            "bytes": 16384
+          },
+          "cold": {
+            "requests": 4,
+            "bytes": 63727,
+            "features": 229
+          },
+          "next": {
+            "requests": 2,
+            "bytes": 23430
+          }
+        },
+        "styled": {
+          "open": {
+            "requests": 1,
+            "bytes": 16384
+          },
+          "cold": {
+            "requests": 4,
+            "bytes": 63727,
+            "features": 229
+          },
+          "next": {
+            "requests": 2,
+            "bytes": 23430
+          }
+        }
+      },
+      {
+        "z": 15,
+        "x": 29099,
+        "y": 12902,
+        "label": "street, Shinjuku",
+        "geometry": {
+          "open": {
+            "requests": 1,
+            "bytes": 16384
+          },
+          "cold": {
+            "requests": 4,
+            "bytes": 74923,
+            "features": 1107
+          },
+          "next": {
+            "requests": 2,
+            "bytes": 24459
+          }
+        },
+        "styled": {
+          "open": {
+            "requests": 1,
+            "bytes": 16384
+          },
+          "cold": {
+            "requests": 4,
+            "bytes": 74923,
+            "features": 1107
+          },
+          "next": {
+            "requests": 2,
+            "bytes": 24459
+          }
+        }
+      }
+    ]
+  }
 }

@@ -332,3 +332,8 @@ this layout is in which rows a coarse view reads and how it finds them.
 - Whether `quantized_geoarrow` should admit a `Point` type, or point LODs
   should use a GeoArrow point struct in degrees at float64.
 - Partitioned datasets: one manifest listing files and their extents.
+- Whether to order the table coarse-first for readers that do not know the
+  format, as COGP does, so QGIS draws the coarse selection before the rest.
+  [Design alternatives](../docs/design-alternatives.md) measures the cost to
+  the indexed reader on Tokyo: one extra request per tile at city zooms and
+  two at street zooms, with identical features.

@@ -8,18 +8,34 @@ the time and show direction, not current values.
 
 ## Coarse prefix versus one order
 
-A construction that stores rows shown at coarse zooms in leading row groups
-of their own lets a coarse tile touch a small part of the file. With the
-spatial directory this stops paying: a single Hilbert order reaches **two cold
-requests and one neighbour request** on every sampled Japan tile, matching
-PMTiles, while the prefix version needed three or four. The prefix also made a
-fine tile that straddled the two sections need two data requests. The layout
-now has one order and no prefix.
+Storing the rows shown at coarse zooms in leading row groups of their own,
+the rest after, gives a reader that knows nothing about the format the same
+thing COGP's coarse-to-fine order gives it: QGIS and other sequential readers
+draw those first row groups first, so a whole-extent view fills in coarse
+before fine. On the Tokyo file a prefix through zoom 10 is 166,545 rows, 3.4%
+of the table, in one leading row group. The cost falls on the indexed map
+reader, because fine levels then live in both sections and a tile needs a
+range from each. Same Tokyo tiles as the table below, cold geometry reads
+with the current reader:
 
-Removing the prefix initially doubled the coarse Tokyo tile's bytes, because a
-coarse overview is sparse and a fixed row cap left pages holding few values.
-The page writer therefore scales each LOD chunk's row cap by its density,
-targeting 2,048 present values per page, up to 262,144 analytical rows.
+| Tile                      | One order      | Coarse prefix  | Next tile, one order / prefix |
+| ------------------------- | -------------- | -------------- | ----------------------------- |
+| z8 metro, Tokyo           | 0.53 MB, 2 req | 0.39 MB, 2 req | 0.01 MB, 1 / 0.00 MB, 1       |
+| z11 city, Tokyo           | 0.29 MB, 2 req | 0.28 MB, 3 req | 0.16 MB, 1 / 0.16 MB, 2       |
+| z13 downtown, Shibuya     | 0.36 MB, 2 req | 0.36 MB, 3 req | 0.25 MB, 1 / 0.25 MB, 2       |
+| z15 street, Tokyo station | 0.04 MB, 2 req | 0.06 MB, 4 req | 0.02 MB, 1 / 0.02 MB, 2       |
+
+Feature counts are identical. The prefix saves bytes at the coarse zoom it
+serves alone, costs one extra request per tile at city zooms and two at
+street zooms, and doubles the requests of every neighbouring tile. The layout
+keeps one order; if sequential readers matter more than a request per tile,
+the prefix is the lever, and the spatial index works either way.
+
+Without the index, removing the prefix initially doubled the coarse Tokyo
+tile's bytes, because a coarse overview is sparse and a fixed row cap left
+pages holding few values. The page writer therefore scales each LOD chunk's
+row cap by its density, targeting 2,048 present values per page, up to
+262,144 analytical rows.
 
 ## Page size and CPU workers
 
