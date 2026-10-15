@@ -60,10 +60,9 @@ feature counts does not automatically match transferred bytes: page layout,
 geometry encoding and feature selection also matter. These tile measurements
 do not establish equal whole-session performance across datasets or devices.
 
-The hosted demo serves a build with different thinning budgets, so its
-counters do not reproduce this table; see the
-[hosted comparison notes](hosted-comparison.md) and the
-[four-reader comparison](comparison.md) measured on that build.
+The [hosted demo](hosted-comparison.md) serves this build; the
+[four-reader comparison](comparison.md) measures it beside COGP, PMTiles and
+Esri SOP over the public internet, so its numbers differ from this local run.
 
 ## Integrity and reproduction
 
