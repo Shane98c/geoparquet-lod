@@ -1,9 +1,12 @@
-# Experimental spatial page index, version 1
+# Spatial page index, version 1
 
-This is an optional physical profile of a packed LOD file. The logical
-`geo.lod_columns` metadata and all table values remain unchanged. It is not
-a standardized GeoParquet extension. Compatibility has been exercised with
-PyArrow, DuckDB, and the existing hyparquet-based reader.
+An optional physical profile of a packed LOD file. The logical
+`geo.lod_columns` metadata and all table values are unchanged; the profile
+decides where column chunks and pages sit and adds a directory over the
+overview pages so a reader finds a tile's pages from the first 16 KiB of the
+file without reading the footer. It is not a standardized GeoParquet
+extension. Compatibility has been exercised with PyArrow, DuckDB, and the
+hyparquet-based reader in this repository.
 
 ## File layout
 
@@ -18,28 +21,22 @@ standard Parquet footer | footer_length:u32le | PAR1
 
 The footer retains the original row groups, columns, schema, statistics, and
 GeoParquet metadata, with relocated offsets and updated physical sizes.
-`lod_spatial_index` in its key/value metadata advertises the bootstrap location.
-Primary geometry and source attribute chunks are copied byte for byte. LOD
-chunks are optionally re-encoded using the original row order, nullable binary
-schema, and zstd, with page breaks at the LOD's finest tile grid. Multiple
-pages may serve a dense tile; a row-group boundary can also split a tile.
-The row cap scales with the chunk's LOD density to target 2,048 present values,
-up to 262,144 analytical rows per page, alongside a configurable uncompressed
-byte target (64 KiB by default; `--lod-page-bytes 16384` selects 16 KiB).
-The target is advisory: write batches and individual large values may exceed it.
-The bootstrap remains 16 KiB, independent of the compression page size.
-Private layout benchmarks can also use a fixed 2,048-row cap. Neither policy
-changes table values.
-Runs of entirely null tiles are encoded together and omitted from the spatial
-directory. Standard offset indexes still describe every page.
+`lod_spatial_index` in its key/value metadata advertises the bootstrap
+location. Primary geometry and source attribute chunks are copied byte for
+byte. LOD chunks are re-encoded in the original row order, with the same
+nullable binary schema and zstd, with page breaks at the LOD's finest tile
+grid. Multiple pages may serve a dense tile, and a row-group boundary can split
+a tile. The row cap scales with the chunk's LOD density to target 2,048
+present values, up to 262,144 analytical rows per page, alongside an
+uncompressed byte target (64 KiB by default). The target is advisory: write
+batches and individual large values may exceed it. Runs of entirely null tiles
+are encoded together and omitted from the spatial directory; standard offset
+indexes still describe every page.
 
-Every column chunk remains contiguous. Interleaving pages from different
-chunks is not part of this profile. A tile may need both the coarse-prefix
-section and the main section, so two data requests can remain necessary.
-The public writer now emits only the main stream and can serve
-contiguous tile data in one range; row-group and directory boundaries can still
-introduce extra reads. Rewriting the logical order changes row IDs, unlike
-optimizing an existing file.
+Every column chunk remains contiguous; pages from different chunks are not
+interleaved. A tile's data is one contiguous range of its LOD column, so a
+cold tile normally costs one directory read and one data read; row-group and
+directory boundaries can add reads.
 
 ## Bootstrap
 
@@ -47,15 +44,17 @@ The compressed root is bounded by the first 16 KiB and contains:
 
 - `version: 1`, `file_bytes`: format and full file length checks.
 - `lod`, `primary`: copies of the logical LOD metadata and primary column name.
-- `bounds`, `columns`: map extent and inspectable scalar source columns, so
-  the demo can initialize through the tile worker without another reader open.
+- `bounds`, `columns`: map extent and inspectable scalar source columns, so a
+  map can initialize without another reader open.
 - `codecs`: LOD name to its Parquet compression codec.
-- `directory_encoding: "delta"` and `streams`: directory series for each LOD,
-  ordered `[prefix, main]`. With no prefix, the first series is empty.
+- `directory_encoding: "delta"` and `streams`: LOD name to a list of directory
+  series. The reference writer emits one series per LOD; readers search every
+  series for a tile's own pages and take its copy host from the last non-empty
+  one.
 
-Each root series is `[initial_byte_offset, depth, triples]`. Triples are a
-flat array of `[delta_min_cell, max_cell_minus_min_cell, compressed_length]`.
-The first minimum is relative to zero; subsequent minima are relative to the
+Each series is `[initial_byte_offset, depth, triples]`. Triples are a flat
+array of `[delta_min_cell, max_cell_minus_min_cell, compressed_length]`. The
+first minimum is relative to zero; subsequent minima are relative to the
 previous one. Shards are contiguous, so their byte offsets follow from their
 lengths. Cells are Hilbert cells at `min(key.depth, finest_LOD_zoom)`.
 Directory bounds reconstructed from cells conservatively include whole cells.
@@ -74,133 +73,35 @@ A page record is:
  first_global_row, row_count, fences, valid_key_rows]
 ```
 
-`fences` is a flat array of `[cell, relative_first_row]` pairs, starting at row
-zero, at the same finest-LOD grid. Tile-aligned pages normally have one pair.
-Keep-pages mode can have several. These fences enforce exact tile membership
-without fetching the key column. `valid_key_rows` excludes trailing null-key
-source rows; those rows remain in the analytical table and have null LODs.
+`fences` is a flat array of `[cell, relative_first_row]` pairs, starting at
+row zero, at the same finest-LOD grid. Tile-aligned pages normally have one
+pair. These fences enforce exact tile membership without fetching the key
+column. `valid_key_rows` excludes trailing null-key source rows; those rows
+remain in the analytical table and have null LODs.
 
-For each section, look up pages whose key bounds intersect the tile interval.
-At a coarse-prefix LOD, skip ordinary main-section matches. Additionally,
-retrieve the main section's first page whose maximum key reaches the interval
-start, or its final page if none does. That page contains the tile's copy host
-when any copies exist. If the main section is absent, hosts are in the prefix.
+To read a tile: look up the pages whose key bounds intersect the tile's key
+interval, plus the first page whose maximum key reaches the interval start, or
+the final page if none does. That page contains the tile's copy host when any
+copies exist. Read consecutive pages together. Decode the standard Parquet
+page with the root's codec and the required-struct/nullable-binary schema.
+Use the fences to retain own rows inside the tile interval, and the host row
+for its copies tagged with the requested tile. Global row indices are the
+feature ids. A reader can scan definition-level runs in v1 PLAIN pages
+directly and skip null rows, falling back to a general decoder for other
+encodings. The directory stores no geometry or styling payload and is not an
+MVT archive.
 
-Read consecutive pages together. Decode the standard Parquet page with the
-root's codec and the existing required-struct/nullable-binary schema. Use the
-fences to retain own rows inside the tile interval, and the host row for its
-copies tagged with the requested tile. Keep global row indices as feature ids.
-The reader can scan definition-level runs in v1 PLAIN pages directly and
-skip null rows, falling back to the general decoder for other encodings.
-Selected geometries decode into typed coordinate buffers; MVT generation uses
-reusable scratch buffers and retains the reference clipping behavior. The directory stores
-no geometry or styling payload and is not an MVT archive.
+## Analytical access and publishing
 
-## Caching and analytical access
+Exact source-row reads and tiles beyond the finest LOD open the normal Parquet
+footer lazily; the standard page indexes describe every page, so ordinary
+Parquet readers see an ordinary file. Publish files immutably: the profile is
+specific to one file write, and ordinary Parquet writers need not preserve it.
+The reference `write()` builds the layout as its final step, writes to
+temporary files, and publishes only after the completed footer is readable.
+Its layout pass rejects encrypted or external chunks, bloom filters, legacy
+index pages, and dictionary-encoded LOD chunks.
 
-The reader caches up to 16 MiB of compressed data pages and 128 directory
-shards, including pending requests. A tile cancellation does not cancel a
-request shared with another tile. Exact source-row reads and tiles beyond the
-finest LOD lazily open the normal Parquet reader.
-
-Pending work tracks independent consumers. The last consumer leaving aborts
-the shared transport, including directory and bbox page reads and analytical
-footer opening. Abandoned entries are replaced on lookup; a late failure may
-remove only the entry it belongs to. Completed cache entries stay reusable.
-
-Publish files immutably. This physical profile is specific to one file write;
-ordinary Parquet writers need not preserve it. The reference `write()` build
-includes layout finalization and reconstructs the index when rebuilding from
-source GeoParquet. It writes to temporary files and publishes only after the
-completed footer is readable. Its internal layout pass rejects encrypted/external
-chunks, bloom filters, and legacy index pages. The private keep-pages test mode
-additionally rejects dictionary-encoded LOD chunks.
-
-## Parallel rendering
-
-The MapLibre adapter keeps directory lookup, range coalescing, pending-fetch
-sharing, and the compressed-page LRU in one coordinator. It sends selected
-compressed page copies and their row/key fences to a bounded set of CPU workers.
-Those workers decompress, decode packed values, and encode MVT without fetching
-anything. Cached originals are never transferred/detached. Queued jobs hold
-references; copies are made only when a worker is available. Cancellation drops
-queued work or discards an active result, leaving shared fetches intact.
-
-The default uses two CPU workers, or local rendering on devices reporting at
-most two logical cores. The public `setWorkerCount` accepts 1–4 before the first
-worker is created; one retains the serial path. Exact-primary fallback and
-analytical reads remain on the coordinator. Each CPU worker has its own decoder
-and bounded projection cache, so more workers consume more memory. They reuse the coordinator’s `worker.js` URL
-to avoid an additional JavaScript asset. This is a reader change, with no file-format change.
-
-## Optional separated-attribute ablation
-
-`separate` converts a logical packed file to experimental
-`geo.lod_columns.encoding = "packed_geometry"` with `pack_version: 1`.
-Older packed-only readers must reject this encoding. It adds
-`attribute_columns: {LOD_name: {attribute_name: physical_column_name}}`.
-`attributes` continues to describe all carried display values in their original
-order. Geometry blobs use the existing packing with **zero attribute fields**:
-every own/copy attribute presence bitmap is zero, and there are no trailing
-attribute strings. Geometry bytes and copy tile/source IDs are otherwise
-unchanged. Original source columns and row order are preserved.
-
-Every companion is a standard nullable Parquet three-level
-`LIST<nullable original_scalar_type>`, with path `column.list.element`.
-A null geometry row has a null list. A present row has exactly `1 + spill_count`
-slots: own display value first, then copy values in blob order. An empty own
-geometry still has slot zero. Null values, per-LOD overrides, and existing copy
-values are preserved; looking up the source row alone cannot reproduce all
-of those values. Dictionary-coded string attributes become ordinary string
-lists. The lists are accessible to standard Parquet readers.
-
-Optimization requires tile pages for this encoding. Each companion has exactly
-one v1 PLAIN, ZSTD-compressed data page per geometry-page row span, without a
-Parquet dictionary. Nullable LIST levels use the ordinary Parquet encoding.
-Standard footer column chunks and offset indexes include every row. Pages for
-null geometry spans remain in the table even when absent from the spatial
-lookup directory. A single very large record may exceed the page byte target.
-
-Separated directory page records append a ninth field:
-
-```text
-[..., valid_key_rows, [[attr0_offset, attr0_length], [attr1_offset, attr1_length], ...]]
-```
-
-The companion references follow metadata `attributes` order. Each inherits the
-geometry page's `first_global_row` and `row_count`. Readers fetch only requested
-companions, alongside geometry; CPU workers receive their compressed page
-copies. Companion columns remain physically clustered by column, so fetching
-more columns may require more ranges. The standard packed profile has no ninth
-field and retains its original access path.
-
-This ablation is not the default. See [measured tradeoffs](../docs/parity-separate.md):
-modest geometry-only byte savings did not outweigh companion decode and request
-costs for styled views. Arbitrary source-column projection and whole-feature
-queries work with either profile. Source projection loads the ordinary footer
-and indexes lazily; it does not require companions.
-
-## Decoded tile reuse
-
-The MapLibre coordinator additionally retains indexed packed overview tiles in
-an LRU bounded to 32 MiB of estimated storage and 64 entries. Cache keys include
-the source URL and z/x/y, so properties and layer names can change independently.
-The entry stores whole decoded geometry, source IDs, carried values, and hydrated
-scalar source columns. Point filtering precedes caching; MVT encoding reads the
-entry without modifying it. Typed buffers are copied at dispatch so cached
-originals remain attached. This cache does not apply to exact-primary or the
-separated-attribute experiment's geometry path.
-
-Cold carried-style work decodes and encodes in one CPU job, returning geometry
-for reuse. A new source attribute uses a row-ID projection through ordinary
-footer/page indexes. The coordinator fetches source-page runs and dictionaries;
-the CPU pool decodes them and returns only selected values. Hydrated scalar
-columns count toward the decoded-tile budget and avoid repeated source joins.
-One-worker mode executes these stages locally. Eviction or an oversized tile
-causes a later geometry read to decode again. Shared pending loads can finish
-after one requester cancels while another still needs them; the last departure
-cancels pending work. Failed or abandoned loads are removed or replaced.
-
-No stored data, page lookup rules, feature IDs, or analytical semantics change.
-See [measurements and limits](../docs/parity-styles.md) for the cold-load and
-memory tradeoffs; the cache budget is not a bound on total browser memory.
+The reference reader's caching, worker pool, and cancellation behaviour are
+described in the [usage guide](../docs/usage.md#reader-behaviour); none of it
+changes the stored bytes.

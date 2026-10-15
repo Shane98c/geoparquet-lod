@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import pyarrow as pa
-import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from .encoding import ENCODING, PACK_VERSION
@@ -18,8 +18,13 @@ class ValidationError(Exception):
     pass
 
 
-def validate(path: str | Path, sample_rows: int = 2000) -> dict:
-    """Raise ValidationError on the first problem; return a summary otherwise."""
+def validate(path: str | Path, sample_rows: int = 2000, *, full: bool = False) -> dict:
+    """Check metadata and a quick sample, or every packed row and index with full=True.
+
+    Full mode streams one row group at a time. sample_rows bounds quick mode only.
+    """
+    if not isinstance(sample_rows, int) or sample_rows < 0:
+        raise ValueError('sample_rows must be a nonnegative integer')
     f = pq.ParquetFile(path)
     md = f.metadata
     geo = json.loads(dict(f.schema_arrow.metadata or {}).get(b'geo', b'{}') or b'{}')
@@ -30,7 +35,7 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
     ours = LOD_VERSION.split('.')
     if major != ours[0] or (major == '0' and minor != ours[1]):
         raise ValidationError(f'version {lod.get("version")} is not compatible with {LOD_VERSION}')
-    if lod.get('encoding') not in (ENCODING, 'packed_geometry'):
+    if lod.get('encoding') != ENCODING:
         raise ValidationError(f'geometry encoding {lod.get("encoding")!r} is not {ENCODING}')
     if lod.get('pack_version') != PACK_VERSION:
         raise ValidationError(f'pack_version {lod.get("pack_version")!r} is not {PACK_VERSION}')
@@ -65,16 +70,19 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
             raise ValidationError(f'{column}.{name} must be a nullable binary column')
         for key in ('scale', 'offset'):
             v = child.get(key)
-            if not (isinstance(v, list) and len(v) == 2):
+            if not (
+                isinstance(v, list)
+                and len(v) == 2
+                and all(isinstance(x, (int, float)) and math.isfinite(x) for x in v)
+            ):
                 raise ValidationError(f'lod {name}: {key} must be an [x, y] pair')
         if min(child['scale']) <= 0:
             raise ValidationError(f'lod {name}: scale must be positive')
         placeholder = child.get('placeholder')
-        if not (isinstance(placeholder, (int, float)) and placeholder > 0):
+        if not (
+            isinstance(placeholder, (int, float)) and math.isfinite(placeholder) and placeholder > 0
+        ):
             raise ValidationError(f'lod {name}: placeholder must be a positive width in grid cells')
-    prefix = lod.get('prefix')
-    if prefix and not (0 <= prefix['row_group_end'] < md.num_row_groups):
-        raise ValidationError('prefix row_group_end out of range')
 
     # statistics on the covering and page indexes on every column, in every row group
     for g in range(md.num_row_groups):
@@ -88,73 +96,58 @@ def validate(path: str | Path, sample_rows: int = 2000) -> dict:
                     raise ValidationError(f'row group {g}: {c.path_in_schema} has no column index')
             if not c.has_offset_index:
                 raise ValidationError(f'row group {g}: {c.path_in_schema} has no offset index')
-    if prefix:
-        # prefix row groups hold only rows shown at some zoom at or below the prefix zoom
-        coarse = [n for n, b in lods.items() if min(b['zooms']) <= prefix['zoom']]
-        for g in range(prefix['row_group_end'] + 1):
-            col = f.read_row_group(g, columns=[column]).column(column).combine_chunks()
-            shown = None
-            for n in coarse:
-                valid = col.field(n).is_valid()
-                shown = valid if shown is None else pc.or_(shown, valid)
-            if shown is not None and not pc.all(shown).as_py():
-                raise ValidationError(
-                    f'prefix row group {g} holds rows not shown by z{prefix["zoom"]}'
-                )
-
-    separate = lod.get('encoding') == 'packed_geometry'
-    companions = lod.get('attribute_columns', {})
-    if separate:
-        for name in lods:
-            for attr in lod.get('attributes', []):
-                column_name = companions.get(name, {}).get(attr['name'])
-                if not column_name or column_name not in f.schema_arrow.names:
-                    raise ValidationError(f'lod {name}: missing companion for {attr["name"]}')
-                typ = f.schema_arrow.field(column_name).type
-                if not pa.types.is_list(typ) or typ.value_type != pa.type_for_alias(attr['type']):
-                    raise ValidationError(f'lod {name}: invalid companion type for {attr["name"]}')
-
-    # a sample of every LOD: non-empty parts, closed rings
-    projected = [column] + (
-        [c for cols in companions.values() for c in cols.values()] if separate else []
-    )
-    head = f.read_row_group(0, columns=projected).slice(0, sample_rows)
+    # every LOD's packed rows: non-empty parts, closed rings, valid copies
     fields = [pa.field(a['name'], pa.type_for_alias(a['type'])) for a in lod.get('attributes', [])]
     dictionaries = {a['name']: a['values'] for a in lod.get('attributes', []) if 'values' in a}
-    if separate:
-        fields = []
-    checked = {}
-    for name, child in lods.items():
-        values = head.column(column).combine_chunks().field(name)
-        shown = values.filter(values.is_valid())
-        for index, blob in enumerate(values.slice(0, 200).to_pylist()):
-            if blob is None:
-                if separate and any(
-                    head[c][index].as_py() is not None for c in companions[name].values()
-                ):
-                    raise ValidationError(f'lod {name}: attributes on an absent geometry row')
-                continue
-            u = Unpacker(blob, child['geometry_type'], fields, dictionaries)
-            row = u.row()
-            if u.pos != len(blob):
-                raise ValidationError(f'lod {name}: a packed row has trailing bytes')
-            if separate:
-                for c in companions[name].values():
-                    value = head[c][index].as_py()
-                    if value is None or len(value) != 1 + len(row['spill']):
-                        raise ValidationError(f'lod {name}: companion slots do not match geometry')
-            _check_geometry(name, child['geometry_type'], row['geometry'], bool(row['spill']))
-            for copy in row['spill']:
-                _check_geometry(name, child['geometry_type'], copy['geometry'])
-        checked[name] = len(shown)
+    checked = dict.fromkeys(lods, 0)
+    groups = range(md.num_row_groups) if full else range(1)
+    for group in groups:
+        head = f.read_row_group(group, columns=[column])
+        if not full:
+            head = head.slice(0, sample_rows)
+        for name, child in lods.items():
+            values = head.column(column).combine_chunks().field(name)
+            shown = values.filter(values.is_valid())
+            for index, blob in enumerate(values.to_pylist()):
+                if blob is None:
+                    continue
+                try:
+                    u = Unpacker(blob, child['geometry_type'], fields, dictionaries)
+                    row = u.row()
+                except Exception as exc:
+                    raise ValidationError(
+                        f'row group {group}, row {index}, lod {name}: invalid packed row: {exc}'
+                    ) from exc
+                if u.pos != len(blob):
+                    raise ValidationError(f'lod {name}: a packed row has trailing bytes')
+                _check_geometry(name, child['geometry_type'], row['geometry'], bool(row['spill']))
+                for copy in row['spill']:
+                    zoom, cell = divmod(copy['tile'], 1 << 48)
+                    if zoom not in child['zooms'] or not 0 <= cell < 4**zoom:
+                        raise ValidationError(f'lod {name}: invalid spill tile tag')
+                    if not 0 <= copy['id'] < md.num_rows:
+                        raise ValidationError(f'lod {name}: spill row id out of range')
+                    _check_geometry(name, child['geometry_type'], copy['geometry'])
+            checked[name] += len(shown)
+    if full:
+        _check_spatial_index(path, f, lod)
     return {
         'rows': md.num_rows,
         'row_groups': md.num_row_groups,
         'footer_bytes': md.serialized_size,
         'lods': list(lods),
-        'prefix': prefix,
-        'sampled_non_null': checked,
+        'mode': 'full' if full else 'quick',
+        'checked_non_null': checked,
     }
+
+
+def _check_spatial_index(path, parquet, lod):
+    from ._validate_index import check_index
+
+    try:
+        check_index(path, parquet, lod)
+    except Exception as exc:
+        raise ValidationError(f'spatial index: {exc}') from exc
 
 
 def _check_geometry(name: str, gtype: str, g, hosts: bool = False) -> None:
@@ -181,12 +174,12 @@ def _check_geometry(name: str, gtype: str, g, hosts: bool = False) -> None:
 
 
 def inspect(path: str | Path) -> dict:
-    """Metadata plus per-leaf column sizes in the first body row group."""
+    """Metadata plus per-leaf column sizes in the first row group."""
     f = pq.ParquetFile(path)
     md = f.metadata
     geo = json.loads(dict(f.schema_arrow.metadata or {}).get(b'geo', b'{}') or b'{}')
     lod = geo.get(LOD_KEY, {})
-    g = min(md.num_row_groups - 1, (lod.get('prefix') or {}).get('row_group_end', -1) + 1)
+    g = 0
     rg = md.row_group(g)
     sizes = {}
     for i in range(rg.num_columns):

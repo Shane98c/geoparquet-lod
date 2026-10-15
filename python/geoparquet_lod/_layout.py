@@ -1,4 +1,4 @@
-"""Cluster existing LOD column chunks and add a compact spatial page directory.
+"""Cluster the LOD column chunks and add a compact spatial page directory.
 
 The output is still the same Parquet table, including every LOD value. No
 geometry, attribute or row id is changed. Tile alignment re-encodes LOD
@@ -150,35 +150,6 @@ def _append_page_chunks(path, target):
     return combined, {1: (9, (12, pages))}
 
 
-def _companion_pages(parquet, group, column, geometry_index, work, target):
-    table = parquet.read_row_group(group, columns=[column])
-    pages = get(geometry_index, 1)[1]
-    path = work / 'attributes.parquet'
-    # A companion page covers exactly the same source rows as its geometry page.
-    # One write per row span and an oversized byte target prevent splitting a
-    # list-valued host record across pages. Ordinary offset indexes remain valid.
-    with pq.ParquetWriter(
-        path,
-        table.schema,
-        compression='zstd',
-        compression_level=9,
-        use_dictionary=False,
-        write_statistics=False,
-        write_page_index=True,
-        data_page_size=2**31 - 1,
-        max_rows_per_page=2**31 - 1,
-    ) as writer:
-        for i, page in enumerate(pages):
-            first = get(page, 3)
-            end = get(pages[i + 1], 3) if i + 1 < len(pages) else len(table)
-            writer.write_table(table.slice(first, end - first), row_group_size=end - first)
-    combined, index = _append_page_chunks(path, target)
-    actual = get(index, 1)[1]
-    if [get(p, 3) for p in actual] != [get(p, 3) for p in pages]:
-        raise ValueError('companion pages did not align with geometry pages')
-    return combined, index
-
-
 def finalize_layout(
     src,
     out,
@@ -205,7 +176,7 @@ def finalize_layout(
     parquet = pq.ParquetFile(src)
     geo = json.loads(parquet.schema_arrow.metadata[b'geo'])
     lod = geo['lod_columns']
-    if lod.get('encoding') not in ('packed', 'packed_geometry') or lod.get('pack_version') != 1:
+    if lod.get('encoding') != 'packed' or lod.get('pack_version') != 1:
         raise ValueError('layout finalization requires packed LOD version 1')
     key_column = lod['key']['column']
     if not 0 <= lod['key']['depth'] <= 26:
@@ -229,16 +200,7 @@ def finalize_layout(
                 if np.isfinite(value):
                     bounds[i] = min(bounds[i], value) if i < 2 else max(bounds[i], value)
     root['bounds'] = bounds if bounds[0] <= bounds[2] else [-180, -85.051129, 180, 85.051129]
-    prefix_end = lod['prefix']['row_group_end'] if lod.get('prefix') else -1
     names = list(lod['lods'])
-    companion_columns = {
-        column: (name, i)
-        for name, columns in lod.get('attribute_columns', {}).items()
-        for i, attribute in enumerate(lod['attributes'])
-        for column in [columns[attribute['name']]]
-    }
-    if companion_columns and not tile_pages:
-        raise ValueError('separated attributes require --tile-pages')
     with src.open('rb') as original:
         if original.read(4) != b'PAR1':
             raise ValueError('not an unencrypted Parquet file')
@@ -277,12 +239,10 @@ def finalize_layout(
             for g, _group in enumerate(groups):
                 values = parquet.read_row_group(g, columns=[key_column]).column(0)
                 # Null/empty source geometries remain analytical rows at the end
-                # of the main section, but are absent from every overview.
+                # of the file, but are absent from every overview.
                 values = values.fill_null(4 ** lod['key']['depth']).to_numpy()
-                if g == prefix_end + 1:
-                    last = None
                 if np.any(values[1:] < values[:-1]) or (last is not None and values[0] < last):
-                    raise ValueError('keys are not sorted within each section')
+                    raise ValueError('keys are not sorted')
                 last = values[-1]
                 starts.append(start)
                 keys[start : start + len(values)] = values
@@ -292,8 +252,7 @@ def finalize_layout(
             # row-group/column positions in the standard footer remain unchanged.
             columns = len(get(groups[0], 1)[1])
             pending_indexes = []
-            geometry_indexes, directory_pages = {}, {}
-            directory = {name: [[], []] for name in names}
+            directory = {name: [] for name in names}
             output = work / 'output.parquet'
             with output.open('w+b') as target:
                 target.write(b'PAR1' + bytes(BOOTSTRAP_BYTES - 4))
@@ -304,17 +263,7 @@ def finalize_layout(
                         path = [p.decode() for p in get(cm, 3)[1]]
                         name = path[1] if len(path) == 2 and path[0] == lod['column'] else None
                         present = None
-                        companion = companion_columns.get(path[0])
-                        if companion:
-                            lod_name, _ = companion
-                            cm, index = _companion_pages(
-                                parquet, g, path[0], geometry_indexes[g, lod_name], work, target
-                            )
-                            set_value(chunk, 3, cm)
-                            set_value(chunk, 2, 0)
-                            chunk.pop(6, None)
-                            chunk.pop(7, None)
-                        elif name and tile_pages:
+                        if name and tile_pages:
                             local_keys = keys[starts[g] : starts[g] + get(group, 3)]
                             cm, index, present = _tile_pages(
                                 parquet,
@@ -359,14 +308,7 @@ def finalize_layout(
                                 present = array.is_valid().to_numpy(zero_copy_only=False)
                         if index is not None:
                             pages = get(index, 1)[1]
-                            if companion:
-                                lod_name, attribute_index = companion
-                                for page in pages:
-                                    entry = directory_pages.get((g, lod_name, get(page, 3)))
-                                    if entry is not None:
-                                        entry[8][attribute_index] = [get(page, 1), get(page, 2)]
                             if name:
-                                geometry_indexes[g, name] = index
                                 for p, page in enumerate(pages):
                                     local_first = get(page, 3)
                                     local_end = (
@@ -399,10 +341,7 @@ def finalize_layout(
                                         fences,
                                         valid_rows,
                                     ]
-                                    if lod.get('encoding') == 'packed_geometry':
-                                        entry.append([None] * len(lod['attributes']))
-                                    directory[name][int(g > prefix_end)].append(entry)
-                                    directory_pages[g, name, local_first] = entry
+                                    directory[name].append(entry)
                             pending_indexes.append((chunk, 4, 5, dumps(index)))
                         elif name:
                             raise ValueError('LOD column has no offset index')
@@ -419,22 +358,16 @@ def finalize_layout(
                     set_value(chunk, length_field, len(raw))
                     target.write(raw)
                 directory_bytes = 0
-                for name, sections in directory.items():
-                    root['streams'][name] = [[], []]
-                    for section, pages in enumerate(sections):
-                        for first in range(0, len(pages), leaf_pages):
-                            batch = pages[first : first + leaf_pages]
-                            raw = _json(batch)
-                            root['streams'][name][section].append(
-                                [
-                                    batch[0][0],
-                                    batch[-1][1],
-                                    target.tell(),
-                                    len(raw),
-                                ]
-                            )
-                            target.write(raw)
-                            directory_bytes += len(raw)
+                for name, pages in directory.items():
+                    root['streams'][name] = [[]]
+                    for first in range(0, len(pages), leaf_pages):
+                        batch = pages[first : first + leaf_pages]
+                        raw = _json(batch)
+                        root['streams'][name][0].append(
+                            [batch[0][0], batch[-1][1], target.tell(), len(raw)]
+                        )
+                        target.write(raw)
+                        directory_bytes += len(raw)
                 # Keep the first request bounded even for very large datasets.
                 # Extra directory levels are fetched lazily, then shared by a pan.
                 while len(_root_json(root)) > _ROOT_TARGET_BYTES:

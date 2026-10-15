@@ -41,7 +41,7 @@ const nested = new Proxy(fast, {
     return typeof value === 'function' ? value.bind(target) : value
   },
 })
-const legacy = await LodReader.open(coalescing(await makeSource(newPath)))
+const footer = await LodReader.open(coalescing(await makeSource(newPath)))
 const canonical = (buffer) => {
   const tile = new VectorTile(new PbfReader(new Uint8Array(buffer)))
   const features = []
@@ -59,7 +59,7 @@ const { cases, expected } = JSON.parse(await readFile(casesPath, 'utf8'))
 // read while a second caller still needs those bytes, as during rapid zooming.
 for (const cancelBoth of [false, true]) {
   const data = await readFile(newPath)
-  const bboxRanges = legacy.metadata.row_groups.flatMap((group) =>
+  const bboxRanges = footer.metadata.row_groups.flatMap((group) =>
     group.columns
       .filter((c) => c.meta_data.path_in_schema[0] === 'bbox')
       .map((c) => {
@@ -97,11 +97,11 @@ for (const cancelBoth of [false, true]) {
     },
   })
   const cancelled = new AbortController()
-  const a = reader.readPrimary(legacy.bounds, [], cancelled.signal)
+  const a = reader.readPrimary(footer.bounds, [], cancelled.signal)
   const rejected = assert.rejects(a, { name: 'AbortError' })
   await firstPage
   const other = new AbortController()
-  const b = reader.readPrimary(legacy.bounds, [], other.signal)
+  const b = reader.readPrimary(footer.bounds, [], other.signal)
   const secondRejected = cancelBoth ? assert.rejects(b, { name: 'AbortError' }) : undefined
   // All ungated source reads resolve immediately. Drain them so b reaches
   // the shared pages before cancelling a.
@@ -111,14 +111,14 @@ for (const cancelBoth of [false, true]) {
   hold = false
   for (const release of releases) release()
   const [, live] = await Promise.all([rejected, secondRejected ?? b])
-  const control = await legacy.readPrimary(legacy.bounds)
+  const control = await footer.readPrimary(footer.bounds)
   if (cancelBoth) assert.ok(abortedReads > 0, 'last neighbour departure stops shared bbox reads')
   else {
     assert.equal(abortedReads, 0, 'live neighbour keeps shared reads alive')
     assert.ok(live.rows.length, 'live neighbour retains exact features')
     assert.deepEqual(live, control, 'cancelled neighbour cannot poison shared bbox pages')
   }
-  assert.deepEqual(await reader.readPrimary(legacy.bounds), control, 'cache remains reusable')
+  assert.deepEqual(await reader.readPrimary(footer.bounds), control, 'cache remains reusable')
 }
 
 // Leaving exact-detail view while its analytical footer opens must stop that
@@ -154,7 +154,7 @@ for (const cancelBoth of [false, true]) {
     },
   })
   const controller = new AbortController()
-  const request = reader.readPrimary(legacy.bounds, [], controller.signal)
+  const request = reader.readPrimary(footer.bounds, [], controller.signal)
   const rejected = assert.rejects(request, { name: 'AbortError' })
   await trailer
   controller.abort()
@@ -162,11 +162,11 @@ for (const cancelBoth of [false, true]) {
   release()
   await rejected
   assert.ok(aborted, 'abandoned analytical opening aborts its transport')
-  assert.deepEqual(await reader.readPrimary(legacy.bounds), await legacy.readPrimary(legacy.bounds))
+  assert.deepEqual(await reader.readPrimary(footer.bounds), await footer.readPrimary(footer.bounds))
 }
 
 for (const [i, [z, x, y]] of cases.entries()) {
-  const [a, b, c] = await Promise.all([old, fast, legacy].map((r) => renderTile(r, z, x, y)))
+  const [a, b, c] = await Promise.all([old, fast, footer].map((r) => renderTile(r, z, x, y)))
   assert.deepEqual(canonical(c), canonical(a), `standard reader of relocated pages ${z}/${x}/${y}`)
   assert.deepEqual(
     new Uint8Array(b),
@@ -218,7 +218,7 @@ aborted.abort()
 await assert.rejects(renderTile(cached, z, x, y, { signal: aborted.signal }), {
   name: 'AbortError',
 })
-console.log(`spatial tests passed: ${cases.length} tiles, analytical rows, legacy reads and cache`)
+console.log(`spatial tests passed: ${cases.length} tiles, analytical rows, footer reads and cache`)
 
 for (const workers of [1, 2, 4]) {
   const client = await workerClient(newPath, workers)

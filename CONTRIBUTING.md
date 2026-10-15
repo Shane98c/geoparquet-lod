@@ -25,8 +25,16 @@ a fixture; pytest supplies one and checks it. Tests generate their own small
 data and do not need the Japan archives. DuckDB may download its spatial
 extension on first use. CI runs both language suites and bundles the demo.
 
-For a complete small example, run `uv run python examples/quickstart.py /tmp/lod-example`.
-Choose a fresh output directory; the example does not overwrite existing files.
+For a build smoke test without an external dataset:
+
+```sh
+uv run python examples/quickstart.py /tmp/lod-example
+uv run geoparquet-lod validate /tmp/lod-example/buildings.lod.parquet
+```
+
+This creates 5,000 synthetic rectangles to check the build pipeline, not to
+demonstrate realistic map performance. Choose a fresh output directory; the
+example does not overwrite existing files.
 For a local comparison with your own archives:
 
 ```sh
@@ -34,7 +42,9 @@ npm --prefix js run demo:compare -- --lod /path/indexed.parquet --pmtiles /path/
 ```
 
 Optional `--cogp` and `--esri` paths enable the other readers. See
-[the reader guide](docs/usage.md) and [hosting notes](docs/r2-comparison.md).
+[the reader guide](docs/usage.md) and [hosting notes](docs/hosted-comparison.md).
+For a scripted four-reader measurement, see
+[the comparison page](docs/comparison.md#reproducing).
 
 ## Changes and reports
 
@@ -51,6 +61,8 @@ Optional `--cogp` and `--esri` paths enable the other readers. See
   Avoid general speed rankings from a single dataset or unequal output.
 - Keep generated datasets, credentials, caches, and deployment state out of
   commits. Commit small measurement results and reproducible scripts instead.
+- Pull requests run a [reader performance gate](docs/performance-checks.md)
+  that rejects increases in bytes, requests, or CPU time on a synthetic fixture.
 
 Useful next work includes independent readers, conformance fixtures, other
 geometry workloads, memory measurements, adaptive thinning, and opportunities
@@ -66,7 +78,7 @@ to bring the physical access design into other GeoParquet overview proposals.
 | `tests/`, `js/test/`     | Correctness tests and measurement harnesses          |
 | `examples/`              | Small runnable construction examples                 |
 | `benchmarks/`            | Dataset-specific builds and recorded results         |
-| `docs/`                  | Usage, limitations, historical experiments           |
+| `docs/`                  | Usage, comparisons, evaluation, design alternatives  |
 | `demo/`                  | Local and hosted comparison UI                       |
 
 See [THIRD_PARTY.md](THIRD_PARTY.md) before modifying or redistributing vendored

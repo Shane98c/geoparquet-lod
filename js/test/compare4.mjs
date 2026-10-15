@@ -5,7 +5,7 @@
 // COGP file to measure, such as the one behind COGP's own demo, and LOD another file in this layout:
 //   npx esbuild vendor/esri-sop/index.ts --bundle --platform=node --format=esm --outfile=test/esri-node.mjs
 //   node test/compare4.mjs
-import { LodReader, httpSource, coalescing, renderTile, tileBounds } from '../dist/index.js'
+import { openReader, httpSource, coalescing, renderTile, tileBounds } from '../dist/index.js'
 import { CogpReader, MVT_BUFFER, MVT_EXTENT, toMvt } from '@cogp/reader'
 import { PMTiles } from 'pmtiles'
 import { Query } from './esri-node.mjs'
@@ -68,7 +68,7 @@ const open = async (name, fn) => {
   await new Promise((resolve) => setTimeout(resolve, 1500))
   return { r, open: delta(a, snap(name)) }
 }
-const lodOpen = async () => LodReader.open(coalescing(await httpSource([lodFile])))
+const lodOpen = async () => openReader(coalescing(await httpSource([lodFile])))
 const cogpOpen = () => CogpReader.open(cogpFile)
 const pmOpen = async () => {
   const p = new PMTiles(base + pmFile)

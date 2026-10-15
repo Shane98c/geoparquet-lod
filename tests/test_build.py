@@ -45,7 +45,6 @@ def test_cli_build(tmp_path):
     )
     assert result.exit_code == 0, result.output + repr(result.exception)
     assert output.read_bytes()[4:12] == b'LODIDX01'
-    assert json.loads(pq.read_schema(output).metadata[b'geo'])['lod_columns']['prefix'] is None
     assert pq.read_table(output, columns=['id', 'geometry']).sort_by('id').equals(table)
     assert set(tmp_path.iterdir()) == {source, output}
     assert set(cli.commands) == {'write', 'inspect', 'validate'}

@@ -1,6 +1,0 @@
-{
-  "rows": 53742978,
-  "every_column_equal_raw_to_indexed": true,
-  "check_table_output": "All 53,742,978 rows, every column identical; 16.8s",
-  "validator_output": "OK /private/tmp/japan.shared-detail.spatial.parquet: {\"rows\": 53742978, \"row_groups\": 52, \"footer_bytes\": 267083, \"lods\": [\"f0\", \"f1\", \"f2\", \"f3\", \"f4\", \"f5\", \"f6\", \"f7\", \"f8\", \"f9\", \"f10\", \"f11\", \"f12\", \"f13\", \"f14\"], \"prefix\": null, \"sampled_non_null\": {\"f0\": 0, \"f1\": 0, \"f2\": 0, \"f3\": 0, \"f4\": 1, \"f5\": 2, \"f6\": 5, \"f7\": 18, \"f8\": 29, \"f9\": 28, \"f10\": 70, \"f11\": 162, \"f12\": 527, \"f13\": 1178, \"f14\": 2000}}"
-}

@@ -1,6 +1,6 @@
 """Test closer PMTiles display density while retaining all Japan analysis rows.
 
-Budgets are scaled from the matched XYZ tile feature counts in dropping/before.json.
+Budgets are scaled from the matched XYZ tile feature counts in dropping/demo-density.json.
 Only z8, z11 and z12 change; the preserved demo and library defaults do not.
 """
 
@@ -15,7 +15,7 @@ from geoparquet_lod.writer import _write_unindexed as write
 
 
 def calibrated_budgets():
-    profile = json.loads((Path(__file__).parent / 'dropping/before.json').read_text())
+    profile = json.loads((Path(__file__).parent / 'dropping/demo-density.json').read_text())
     result = {}
     for zoom in (8, 11, 12):
         samples = [row for row in profile if row['z'] == zoom]
@@ -54,7 +54,6 @@ if __name__ == '__main__':
         thinning=chain(drop_smallest(budget), tiny_polygons()),
         carry=['height', 'class'],
         workers=12,
-        prefix_zoom=None,
         zooms=list(range(17)),
         complete_from=14,
         # Reuse the existing small-dataset sharing mechanism for this ablation.

@@ -365,7 +365,7 @@ def write(
 ) -> Path:
     """Build an indexed GeoParquet file with display overviews in one call.
 
-    Rows use one global Hilbert order, with no coarse-prefix partition.
+    Rows use one global Hilbert order.
     ``thinning`` chooses displayed rows at each zoom. ``complete_from`` sets
     the zoom where every feature is shown; 'auto' derives it from the data.
     ``carry`` embeds selected attributes in the overviews for fast styling.
@@ -394,7 +394,6 @@ def write(
             complete_from=complete_from,
             carry=carry,
             geometry=geometry,
-            prefix_zoom=None,
             single_lod_bytes=single_lod_bytes,
             row_group_rows=row_group_rows,
             page_bytes=page_bytes,
@@ -423,7 +422,6 @@ def _write_unindexed(
     complete_from: int | None | str = 'auto',
     carry=(),
     geometry: str = 'geometry',
-    prefix_zoom: int | None = 6,
     single_lod_bytes: int = 16 * 1024 * 1024,
     row_group_rows: int = 1_048_576,
     page_bytes: int = 16384,
@@ -640,19 +638,6 @@ def _write_unindexed(
     dot_cells = float(getattr(thinning, 'placeholder_pixels', DOT_CELLS / SUBPIXELS)) * SUBPIXELS
     grids = {b['name']: (grid(b['grid_zoom'], degrees=degrees), origin) for b in lod_plan}
     shape_lods = [b for b in lod_plan if b['geometry_type'] != 'Point']
-    # the prefix covers the zooms up to prefix_zoom that the file actually thins
-    prefix_candidates = [
-        z
-        for z in zooms
-        if prefix_zoom is not None
-        and z <= prefix_zoom
-        and (complete_from is None or z < complete_from)
-    ]
-    prefix_level = zooms.index(prefix_candidates[-1]) if prefix_candidates else None
-    prefix_mask = 0 if prefix_level is None else (1 << (prefix_level + 1)) - 1
-    prefix_rows = int(np.count_nonzero(levels & prefix_mask))
-    prefix_end = -(-prefix_rows // row_group_rows) - 1 if prefix_rows else -1
-
     # 3b. straddlers: a feature reaching into a tile beyond its own gets a copy of its LOD
     # geometry on the first row of that tile's key interval, so a tile is one interval
     lod_bit = {b['name']: zooms.index(b['zooms'][0]) for b in lod_plan}
@@ -667,14 +652,9 @@ def _write_unindexed(
     keys = np.full(n_rows, -1, np.int64)
     keys[valid_ids] = extent['__h']
     del extent
-    in_prefix = (levels & prefix_mask) != 0
     by_key = valid_ids[np.argsort(keys[valid_ids], kind='stable')]
-    section_rows = {
-        True: by_key[in_prefix[by_key]],
-        False: by_key[~in_prefix[by_key]],
-    }
     file_pos = np.full(n_rows, -1, np.int64)
-    file_pos[np.concatenate([section_rows[True], section_rows[False]])] = np.arange(len(valid_ids))
+    file_pos[by_key] = np.arange(len(valid_ids))
     spill_entries: dict[str, tuple] = {}  # LOD name -> (host, zoom, tile, src), sorted by host
     for b in lod_plan:
         shown = np.flatnonzero((levels >> lod_bit[b['name']]) & 1)
@@ -703,9 +683,7 @@ def _write_unindexed(
                 z,
             )
             src = large[src]
-            # hosts live in the main section, which a reader always searches
-            rows_in = section_rows[False] if len(section_rows[False]) else section_rows[True]
-            host = hosts(tiles, z, KEY_DEPTH, keys[rows_in], rows_in)
+            host = hosts(tiles, z, KEY_DEPTH, keys[by_key], by_key)
             parts.append((host, (z << 48) | tiles, src))
         if parts:
             host, tile_of, src = (np.concatenate(c) for c in zip(*parts, strict=True))
@@ -735,9 +713,6 @@ def _write_unindexed(
         'key': {'column': KEY_COLUMN, 'depth': KEY_DEPTH},
         'zooms': zooms,
         'tile_size': 512,
-        'prefix': None
-        if prefix_end < 0
-        else {'zoom': zooms[prefix_level], 'row_group_end': prefix_end},
         'encoding': ENCODING,
         'pack_version': PACK_VERSION,
         'attributes': [
@@ -792,9 +767,9 @@ def _write_unindexed(
         max_rows_per_page=page_rows,
         data_page_version='1.0',
     )
-    log(f'  {len(lod_plan)} LODs, batch {batch_rows} rows, prefix row groups {prefix_end + 1}')
+    log(f'  {len(lod_plan)} LODs, batch {batch_rows} rows')
 
-    # 5. write: prefix rows first, then everything else, each in Hilbert order
+    # 5. write every row in Hilbert order
     writer = pq.ParquetWriter(out, schema, **options)
     # workers keep the largest batch they rendered; recycling them bounds the pool's memory
     pool = ProcessPoolExecutor(max_workers=workers, max_tasks_per_child=16)
@@ -973,16 +948,7 @@ def _write_unindexed(
         for t, f in pending:
             flush(t, f)
 
-    if prefix_end >= 0:
-        log(f'  prefix: rows shown by z{zooms[prefix_level]} come first')
-        write_rows(f'(r.levels & {prefix_mask}) != 0')
-        if row_groups - 1 != prefix_end:
-            raise RuntimeError(
-                f'prefix wrote {row_groups} row groups, metadata expected {prefix_end + 1}'
-            )
-        write_rows(f'(r.levels & {prefix_mask}) = 0')
-    else:
-        write_rows('TRUE')
+    write_rows('TRUE')
     writer.close()
     pool.shutdown()
     sorted_path.unlink()

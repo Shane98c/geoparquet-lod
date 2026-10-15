@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>GeoParquet LOD · deck.gl</title>
+  <style>
+    body {
+      margin: 0;
+      font: 14px system-ui;
+      background: #101b23;
+      color: #fff;
+    }
+    #map {
+      position: absolute;
+      inset: 0;
+    }
+    #controls {
+      position: fixed;
+      z-index: 2;
+      top: 16px;
+      left: 16px;
+      padding: 16px;
+      background: #172832ee;
+      border-radius: 8px;
+      max-width: 520px;
+    }
+    input[type='url'] {
+      width: 320px;
+    }
+    button,
+    input {
+      font: inherit;
+    }
+    #status {
+      margin-top: 10px;
+      max-width: 480px;
+    }
+  </style>
+  <div id="map"></div>
+  <form id="controls">
+    <strong>GeoParquet LOD · deck.gl</strong>
+    <p>Pan and zoom to read unclipped features.</p>
+    <input id="url" type="url" aria-label="Parquet URL" /><button>Open</button>
+    <p>
+      <label><input id="primary" type="checkbox" /> Original geometry</label>
+    </p>
+    <div id="status" role="status">Opening…</div>
+  </form>
+  <script src="https://unpkg.com/deck.gl@9.1.14/dist.min.js"></script>
+  <script type="module" src="./main.js"></script>
+</html>

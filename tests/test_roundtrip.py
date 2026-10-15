@@ -129,8 +129,7 @@ def test_points_importance_and_cluster(points, tmp_path):
         workers=1,
         log=lambda *_: None,
     )
-    s = validate(out)
-    assert s['prefix'] is None
+    validate(out)
     out2 = write(
         points,
         tmp_path / 'cl.parquet',
@@ -147,7 +146,7 @@ def test_points_importance_and_cluster(points, tmp_path):
     assert len(values) < 2000
 
 
-def test_explicit_zooms_use_single_order(buildings, tmp_path):
+def test_explicit_zooms(buildings, tmp_path):
     out = write(
         buildings,
         tmp_path / 'z.parquet',
@@ -157,7 +156,9 @@ def test_explicit_zooms_use_single_order(buildings, tmp_path):
         workers=1,
         log=lambda *_: None,
     )
-    assert validate(out)['prefix'] is None
+    validate(out)
+    meta = json.loads(pq.read_schema(out).metadata[b'geo'])['lod_columns']
+    assert meta['zooms'] == list(range(9, 15))
 
 
 def test_lines_roundtrip(tmp_path):
@@ -314,19 +315,11 @@ def test_straddlers_are_copied_into_the_tiles_they_reach(buildings, tmp_path):
         Unpacker(b, 'MultiPolygon', []).row()['spill'] if b is not None else None
         for b in column.to_pylist()
     ]
-    f = pq.ParquetFile(out)
-    prefix = meta['prefix']
-    main_start = (
-        sum(f.metadata.row_group(g).num_rows for g in range(prefix['row_group_end'] + 1))
-        if prefix
-        else 0
-    )
-    main_keys = keys[main_start:]
     for row, tile in list(zip(src, tiles, strict=True))[:50]:
         start = int(hilbert_key(np.array([tile // n]), np.array([tile % n]), finest)[0]) * span
-        # the tile's own rows, plus the first main-section row at or past its interval
+        # the tile's own rows, plus the first row at or past its interval
         inside = np.flatnonzero((keys >= start) & (keys < start + span))
-        host = main_start + min(int(np.searchsorted(main_keys, start)), len(main_keys) - 1)
+        host = min(int(np.searchsorted(keys, start)), len(keys) - 1)
         inside = np.unique(np.concatenate([inside, [host]]))
         copies = [
             e

@@ -192,10 +192,6 @@ function copyWork(work: TileWork): TileWork {
     task: {
       ...work.task,
       payloads: work.task.payloads.map((bytes) => bytes.slice(0)),
-      attributePages: work.task.attributePages?.map((attr) => ({
-        ...attr,
-        payloads: attr.payloads.map((bytes) => bytes.slice(0)),
-      })),
     },
   }
 }
@@ -215,8 +211,5 @@ function workTransfers(work: TileWork): ArrayBuffer[] {
       ...work.task.runs.map((run) => run.bytes),
       ...(work.task.dictionary ? [work.task.dictionary] : []),
     ]
-  return [
-    ...work.task.payloads,
-    ...(work.task.attributePages ?? []).flatMap((attr) => attr.payloads),
-  ]
+  return [...work.task.payloads]
 }

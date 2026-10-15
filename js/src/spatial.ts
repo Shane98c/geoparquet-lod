@@ -10,8 +10,6 @@ import { GeometryBuilder } from './geometry.js'
 import { tileInterval } from './key.js'
 import {
   LodReader,
-  displayValue,
-  validateCompanionMetadata,
   type Bbox,
   type Lod,
   type LodMetadata,
@@ -21,8 +19,8 @@ import {
 
 export const BOOTSTRAP_BYTES = 16384
 const MAGIC = 'LODIDX01'
-// [minimum key, maximum key, offset, length, first global row, row count]
-type Page = [number, number, number, number, number, number, number[], number?, [number, number][]?]
+// [minimum key, maximum key, offset, length, first global row, row count, fences, valid key rows]
+type Page = [number, number, number, number, number, number, number[], number?]
 type Shard = [number, number, number, number, number?]
 interface SpatialRoot {
   columns?: string[]
@@ -33,7 +31,8 @@ interface SpatialRoot {
   lod: LodMetadata
   primary: string
   codecs: Record<string, string>
-  streams: Record<string, [Shard[], Shard[]]>
+  /** One or more directory series per LOD; the reference writer emits one. */
+  streams: Record<string, Shard[][]>
 }
 
 export function hasSpatialIndex(bytes: ArrayBuffer): boolean {
@@ -72,12 +71,11 @@ export async function openReader(file: RangeSource): Promise<TileReader> {
     throw new Error('invalid spatial index version or file length')
   if (
     root.lod.version !== '0.1.0' ||
-    !['packed', 'packed_geometry'].includes(root.lod.encoding) ||
+    root.lod.encoding !== 'packed' ||
     root.lod.pack_version !== 1 ||
     !root.lod.key
   )
     throw new Error('unsupported spatial LOD encoding')
-  validateCompanionMetadata(root.lod)
   if (root.directory_encoding === 'delta') {
     const encoded = root.streams as unknown as Record<string, [number, number, number[]][]>
     root.streams = Object.fromEntries(
@@ -100,7 +98,7 @@ export async function openReader(file: RangeSource): Promise<TileReader> {
           }
           return shards
         })
-        return [name, streams as [Shard[], Shard[]]]
+        return [name, streams]
       }),
     )
   } else if (root.directory_encoding !== undefined)
@@ -135,7 +133,7 @@ export class SpatialReader implements TileReader {
     this.lods = Object.fromEntries(
       Object.entries(this.lod.lods).map(([name, lod]) => [name, { ...lod, name }]),
     )
-    this.fields = (this.lod.encoding === 'packed_geometry' ? [] : this.lod.attributes).map((a) =>
+    this.fields = this.lod.attributes.map((a) =>
       a.values
         ? { name: a.name, kind: 'enum', values: a.values }
         : { name: a.name, kind: attributeKind(a.type) },
@@ -307,29 +305,23 @@ export class SpatialReader implements TileReader {
     x: number,
     y: number,
     signal?: AbortSignal,
-    attributes: string[] = this.lod.attributes.map((a) => a.name),
   ): Promise<PreparedTile> {
     signal?.throwIfAborted()
     const [start, end] = tileInterval(this.lod.key!.depth, z, x, y)
     const streams = this.root.streams[lod.name]
     if (!streams) throw new Error(`missing spatial directory for ${lod.name}`)
-    const hostSection = streams[1].length ? 1 : 0
-    const coarse = this.lod.prefix && Math.max(...lod.zooms) <= this.lod.prefix.zoom
+    // Copies are hosted in the last series; every series may hold a tile's own rows.
+    let hostSection = 0
+    streams.forEach((shards, section) => {
+      if (shards.length) hostSection = section
+    })
     const selected = await Promise.all(
       streams.map((shards, section) =>
-        this.lookup(
-          shards,
-          start,
-          end,
-          !(coarse && section === 1),
-          section === hostSection,
-          signal,
-        ),
+        this.lookup(shards, start, end, true, section === hostSection, signal),
       ),
     )
     signal?.throwIfAborted()
     const pages = selected.flat().sort((a, b) => a[4] - b[4])
-    const prefixPages = new Set(selected[0].map((p) => p[2]))
     const span = 4 ** Math.max(0, this.lod.key!.depth - Math.max(...lod.zooms))
     const firstCell = start / span,
       endCell = end / span
@@ -345,31 +337,7 @@ export class SpatialReader implements TileReader {
           ? fences[fence + 1]
           : (hostPage[7] ?? hostPage[5]) - 1)
     }
-    const carried = this.lod.attributes
-    const companions = this.lod.attribute_columns?.[lod.name]
-    const [payloads, attributePages] = await Promise.all([
-      this.pageData(pages, signal),
-      Promise.all(
-        (companions ? attributes : []).map(async (name) => {
-          const index = carried.findIndex((a) => a.name === name)
-          if (index < 0 || !companions![name]) throw new Error(`attribute ${name} is not carried`)
-          const selected = pages.map((page) => {
-            const reference = page[8]?.[index]
-            if (!reference) throw new Error(`missing companion page for ${name}`)
-            const copy: Page = [...page]
-            copy[2] = reference[0]
-            copy[3] = reference[1]
-            return copy
-          })
-          return {
-            name,
-            type: carried[index].type,
-            column: companions![name],
-            payloads: await this.pageData(selected, signal),
-          }
-        }),
-      ),
-    ])
+    const payloads = await this.pageData(pages, signal)
     signal?.throwIfAborted()
     return {
       lod,
@@ -377,13 +345,9 @@ export class SpatialReader implements TileReader {
       x,
       y,
       fields: this.fields,
-      defaultAttributes: this.lod.attributes.map((a) => a.name),
-      attributePages,
       column: this.lod.column,
       codec: this.root.codecs[lod.name],
       pages,
-      prefixPages: [...prefixPages],
-      coarse: !!coarse,
       firstCell,
       endCell,
       hostRow,
@@ -402,22 +366,14 @@ export class SpatialReader implements TileReader {
   ): Promise<LodRows> {
     const carried = attributes.filter((a) => this.lod.attributes.some((f) => f.name === a))
     const source = attributes.filter((a) => !carried.includes(a))
-    const prepared = await this.prepareTile(lod, z, x, y, signal, carried)
+    const prepared = await this.prepareTile(lod, z, x, y, signal)
     const out = decodeTile(prepared, carried, builder, signal)
     if (source.length) Object.assign(out.columns, await this.readColumns(out.rows, source, signal))
     return out
   }
 }
 
-export interface AttributePages {
-  name: string
-  type: string
-  column: string
-  payloads: ArrayBuffer[]
-}
 export interface PreparedTile {
-  defaultAttributes?: string[]
-  attributePages?: AttributePages[]
   lod: Lod
   z: number
   x: number
@@ -426,8 +382,6 @@ export interface PreparedTile {
   column: string
   codec: string
   pages: Page[]
-  prefixPages: number[]
-  coarse: boolean
   firstCell: number
   endCell: number
   hostRow: number
@@ -442,26 +396,10 @@ export function decodeTile(
   signal?: AbortSignal,
 ): LodRows {
   signal?.throwIfAborted()
-  const {
-    lod,
-    z,
-    x,
-    y,
-    fields,
-    column,
-    codec,
-    pages,
-    coarse,
-    firstCell,
-    endCell,
-    hostRow,
-    payloads,
-  } = task
-  const prefixPages = new Set(task.prefixPages)
+  const { lod, z, x, y, fields, column, codec, pages, firstCell, endCell, hostRow, payloads } = task
   const wanted = attributes.map((a) => fields.findIndex((f) => f.name === a))
   for (const [i, name] of attributes.entries())
-    if (wanted[i] < 0 && !task.attributePages?.some((a) => a.name === name))
-      throw new Error(`attribute ${name} was not prepared`)
+    if (wanted[i] < 0) throw new Error(`attribute ${name} is not carried`)
   const out: LodRows = {
     rows: [],
     coords: [],
@@ -486,34 +424,22 @@ export function decodeTile(
     utf8: false,
   }
   const tile = z * 2 ** 48 + x * 2 ** z + y
-  let relativeRow = 0
-  let companionValues: Record<string, unknown[]> = {}
-  const addColumnar = (id: number, attrs: unknown[], slot: number) => {
+  const addColumnar = (id: number, attrs: unknown[]) => {
     out.rows.push(id)
-    attributes.forEach((a, i) =>
-      out.columns[a].push(
-        wanted[i] >= 0
-          ? attrs[wanted[i]]
-          : displayValue((companionValues[a][relativeRow] as unknown[] | null)?.[slot] ?? null),
-      ),
-    )
+    attributes.forEach((a, i) => out.columns[a].push(attrs[wanted[i]]))
   }
-  const add = (id: number, geometry: unknown, attrs: unknown[], slot: number) => {
+  const add = (id: number, geometry: unknown, attrs: unknown[]) => {
     out.coords.push(geometry)
-    addColumnar(id, attrs, slot)
+    addColumnar(id, attrs)
   }
   for (let i = 0; i < pages.length; i++) {
     const page = pages[i]
-    companionValues = Object.fromEntries(
-      (task.attributePages ?? []).map((attr) => [attr.name, readCompanion(attr, i, page[5])]),
-    )
     let fence = 0
     const visit = (relative: number, value: Uint8Array) => {
-      relativeRow = relative
       const row = page[4] + relative
       while (fence + 2 < page[6].length && page[6][fence + 3] <= relative) fence += 2
       const cell = page[6][fence]
-      const own = (!coarse || prefixPages.has(page[2])) && cell >= firstCell && cell < endCell
+      const own = cell >= firstCell && cell < endCell
       if (!own && row !== hostRow) return
       if (builder) {
         decodeSelectedRow(
@@ -530,9 +456,9 @@ export function decodeTile(
       } else {
         const decoded = decodeRow(value, lod.geometry_type, fields)
         if (own && (lod.geometry_type === 'Point' || (decoded.geometry as unknown[]).length))
-          add(row, decoded.geometry, decoded.attrs, 0)
-        for (const [slot, copy] of decoded.spill.entries())
-          if (copy.tile === tile) add(copy.id, copy.geometry, copy.attrs, slot + 1)
+          add(row, decoded.geometry, decoded.attrs)
+        for (const copy of decoded.spill)
+          if (copy.tile === tile) add(copy.id, copy.geometry, copy.attrs)
       }
     }
     if (visitPlainPage(payloads[i], codec, page[5], visit)) continue
@@ -550,62 +476,4 @@ export function decodeTile(
       }
   }
   return out
-}
-
-/** The companion is an ordinary nullable LIST of nullable scalars, one page
- * per geometry page. Lists retain LOD override and boundary-copy values. */
-function readCompanion(attr: AttributePages, page: number, rows: number): unknown[] {
-  const kind = attributeKind(attr.type)
-  const half = ['halffloat', 'float16'].includes(attr.type)
-  const type = half
-    ? 'FIXED_LEN_BYTE_ARRAY'
-    : kind === 'string'
-      ? 'BYTE_ARRAY'
-      : kind === 'bool'
-        ? 'BOOLEAN'
-        : kind === 'float32'
-          ? 'FLOAT'
-          : kind === 'float64'
-            ? 'DOUBLE'
-            : /64/.test(attr.type)
-              ? 'INT64'
-              : 'INT32'
-  const element = {
-    name: 'element',
-    type,
-    repetition_type: 'OPTIONAL',
-    ...(half ? { type_length: 2, logical_type: { type: 'FLOAT16' } } : {}),
-    ...(kind === 'string'
-      ? { converted_type: 'UTF8' }
-      : /^uint(32|64)$/.test(attr.type)
-        ? { converted_type: attr.type === 'uint32' ? 'UINT_32' : 'UINT_64' }
-        : {}),
-  }
-  const pathInSchema = [attr.column, 'list', 'element']
-  const schemaPath = getSchemaPath(
-    [
-      { name: 'schema', num_children: 1 },
-      { name: attr.column, repetition_type: 'OPTIONAL', converted_type: 'LIST', num_children: 1 },
-      { name: 'list', repetition_type: 'REPEATED', num_children: 1 },
-      element,
-    ] as never,
-    pathInSchema,
-  )
-  const { data } = readColumn(
-    { view: new DataView(attr.payloads[page]), offset: 0 },
-    { groupStart: 0, groupRows: rows, selectStart: 0, selectEnd: rows } as never,
-    {
-      type,
-      codec: 'ZSTD',
-      element,
-      pathInSchema,
-      schemaPath,
-      compressors,
-      parsers: DEFAULT_PARSERS,
-      utf8: kind === 'string',
-    } as never,
-  )
-  return data.flatMap((chunk) =>
-    Array.from(chunk, (value) => (value as unknown[] | null)?.[0] ?? null),
-  )
 }

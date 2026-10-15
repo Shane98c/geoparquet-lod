@@ -9,9 +9,10 @@ import {
   type FileMetaData,
   type SchemaTree,
 } from 'hyparquet'
+import { assembleNested } from 'hyparquet/src/assemble.js'
 import { readColumn } from 'hyparquet/src/column.js'
 import { DEFAULT_PARSERS } from 'hyparquet/src/convert.js'
-import { getSchemaPath } from 'hyparquet/src/schema.js'
+import { isListLike, isMapLike, getSchemaPath } from 'hyparquet/src/schema.js'
 import { compressors } from 'hyparquet-compressors'
 import { attributeKind, decodeRow, type AttributeField } from './decode.js'
 import { decodeProjection, type ProjectionExecutor, type ProjectionTask } from './projection.js'
@@ -41,13 +42,11 @@ export interface LodMetadata {
   order: string
   zooms: number[]
   tile_size: number
-  prefix: { zoom: number; row_group_end: number } | null
   /** Stored Hilbert key column and its depth, when rows are ordered by it. */
   key?: { column: string; depth: number }
   encoding: string
   pack_version: number
   attributes: { name: string; type: string; values?: string[] }[]
-  attribute_columns?: Record<string, Record<string, string>>
   thinning: Record<string, unknown>
   lods: Record<string, Omit<Lod, 'name'>>
 }
@@ -89,7 +88,7 @@ const BBOX_LEAVES = ['bbox.xmin', 'bbox.ymin', 'bbox.xmax', 'bbox.ymax'] as cons
 /**
  * Footer-based access to source columns, exact geometry, and unindexed LOD
  * files. The indexed map path uses SpatialReader and opens this reader lazily
- * for analytical queries. Older prefix layouts remain readable here.
+ * for analytical queries.
  */
 export class LodReader {
   readonly metadata: FileMetaData
@@ -112,6 +111,7 @@ export class LodReader {
   // and Map entries; this is an estimated 32 MiB budget, not a heap guarantee.
   private readonly projected = new Map<string, { value: unknown; bytes: number }>()
   private projectedBytes = 0
+  private readonly schema: SchemaTree
   private readonly elements = new Map<string, SchemaTree['element']>()
   private readonly footer: ArrayBuffer | undefined
   private digest: Promise<string> | undefined
@@ -131,10 +131,7 @@ export class LodReader {
     if (major !== ourMajor || (major === '0' && minor !== ourMinor)) {
       throw new Error(`${LOD_KEY} version ${lod.version} is not compatible with ${LOD_VERSION}`)
     }
-    if (
-      ![ENCODING, 'packed_geometry'].includes(lod.encoding) ||
-      lod.pack_version !== PACK_VERSION
-    ) {
+    if (lod.encoding !== ENCODING || lod.pack_version !== PACK_VERSION) {
       throw new Error(
         `${LOD_KEY} encoding ${lod.encoding}/${lod.pack_version} is not ${ENCODING}/${PACK_VERSION}`,
       )
@@ -145,8 +142,7 @@ export class LodReader {
       }
     }
     if (!lod.key) throw new Error(`${LOD_KEY} file stores no key column`)
-    validateCompanionMetadata(lod)
-    this.fields = (lod.encoding === 'packed_geometry' ? [] : lod.attributes).map((a) =>
+    this.fields = lod.attributes.map((a) =>
       a.values
         ? { name: a.name, kind: 'enum' as const, values: a.values }
         : { name: a.name, kind: attributeKind(a.type) },
@@ -167,7 +163,8 @@ export class LodReader {
       if (node.children.length) node.children.forEach(visit)
       else this.elements.set(node.path.join('.'), node.element)
     }
-    visit(parquetSchema(metadata))
+    this.schema = parquetSchema(metadata)
+    visit(this.schema)
   }
 
   /** Top-level scalar columns of the file other than the covering, the LODs and the primary geometry. */
@@ -210,9 +207,7 @@ export class LodReader {
       initialFetchSize: 8,
     })
     signal?.throwIfAborted()
-    const reader = new LodReader(file, metadata, footer)
-    reader.warmPrefix()
-    return reader
+    return new LodReader(file, metadata, footer)
   }
 
   /** The LOD whose zooms contain `zoom`, clamped to the coarsest or finest LOD. */
@@ -252,8 +247,6 @@ export class LodReader {
       coords: [],
       columns: Object.fromEntries(attributes.map((a) => [a, []])),
     }
-    const prefix = this.lod.prefix
-    const coarse = prefix && Math.max(...lod.zooms) <= prefix.zoom
     const interval = tileInterval(key.depth, z, x, y)
     const [start, end] = interval
     const stats = (g: number) => {
@@ -262,27 +255,23 @@ export class LodReader {
         ? [unsigned(s.min_value), unsigned(s.max_value)]
         : [-Infinity, Infinity]
     }
-    const mainFirst = prefix ? prefix.row_group_end + 1 : 0
     const all = this.metadata.row_groups.map((_, g) => g)
     const groups = all.filter((g) => {
-      if (coarse && g >= mainFirst) return false
       const [lo, hi] = stats(g)
       return lo < end && hi >= start
     })
-    // the host of copies for this tile: the first main-section row with key >= start
-    const hostGroup = all.find((g) => g >= mainFirst && stats(g)[1] >= start) ?? all[all.length - 1]
+    // the host of copies for this tile: the first row with key >= start
+    const hostGroup = all.find((g) => stats(g)[1] >= start) ?? all[all.length - 1]
     if (hostGroup !== undefined && !groups.includes(hostGroup)) groups.push(hostGroup)
     const leaf = this.lodLeaf(lod)
     const tile = z * 2 ** 48 + x * 2 ** z + y
     const wanted = attributes.map((a) => this.fields.findIndex((f) => f.name === a))
 
-    const hosts: number[] = [],
-      slots: number[] = []
     // groups adjacent in key order are spatial neighbours: warm their indexes so a pan
     // seldom meets a group cold
     for (const g of groups) {
       for (const n of [g - 1, g + 1]) {
-        if (n < mainFirst || n >= all.length) continue
+        if (n < 0 || n >= all.length) continue
         void this.offsetIndex(n, key.column).catch(() => undefined)
         void this.columnIndex(n, key.column).catch(() => undefined)
         void this.offsetIndex(n, leaf).catch(() => undefined)
@@ -313,28 +302,23 @@ export class LodReader {
         const decoded = decodeRow(raw as Uint8Array, lod.geometry_type, this.fields)
         const own = decoded.geometry as unknown[]
         if (
-          (!coarse || g < mainFirst) &&
           Number(keys.get(row)) >= start &&
           Number(keys.get(row)) < end &&
           (lod.geometry_type === 'Point' || own.length)
         ) {
-          hosts.push(rowStart + row)
-          slots.push(0)
           out.rows.push(rowStart + row)
           out.coords.push(decoded.geometry)
           attributes.forEach((a, i) => out.columns[a].push(decoded.attrs[wanted[i]]))
         }
-        for (const [slot, copy] of decoded.spill.entries()) {
+        for (const copy of decoded.spill) {
           if (copy.tile !== tile) continue
-          hosts.push(rowStart + row)
-          slots.push(slot + 1)
           out.rows.push(copy.id)
           out.coords.push(copy.geometry)
           attributes.forEach((a, i) => out.columns[a].push(copy.attrs[wanted[i]]))
         }
       }
     }
-    await this.hydrateColumns(out, lod, attributes, hosts, slots, signal)
+    await this.hydrateColumns(out, attributes, signal)
     return out
   }
 
@@ -505,37 +489,20 @@ export class LodReader {
         }
       }
     }
-    await this.hydrateColumns(
-      out,
-      finest,
-      attributes,
-      out.rows,
-      out.rows.map(() => 0),
-      signal,
-    )
+    await this.hydrateColumns(out, attributes, signal)
     return out
   }
 
+  /** Attributes that are not carried in the LOD payload come from the source columns. */
   private async hydrateColumns(
     out: { rows: number[]; columns: Record<string, unknown[]> },
-    lod: Lod,
     attributes: string[],
-    hosts: number[],
-    slots: number[],
     signal?: AbortSignal,
   ): Promise<void> {
-    const companions = this.lod.attribute_columns?.[lod.name] ?? {}
     await Promise.all(
       attributes.map(async (name) => {
-        if (companions[name]) {
-          const leaf = `${companions[name]}.list.element`
-          const values = (await this.readColumns(hosts, [leaf], signal))[leaf]
-          out.columns[name] = values.map((value, i) =>
-            displayValue((value as unknown[][] | null)?.[0]?.[slots[i]] ?? null),
-          )
-        } else if (!this.fields.some((f) => f.name === name)) {
+        if (!this.fields.some((f) => f.name === name))
           out.columns[name] = (await this.readColumns(out.rows, [name], signal))[name]
-        }
       }),
     )
   }
@@ -549,8 +516,45 @@ export class LodReader {
     execute?: ProjectionExecutor,
   ): Promise<Record<string, unknown[]>> {
     signal?.throwIfAborted()
-    for (const column of columns)
-      if (!this.elements.has(column)) throw new Error(`unknown column ${column}`)
+    const logical = new Map<string, { tree: SchemaTree; parts: string[] }>()
+    for (const column of columns) {
+      const exactTop = this.schema.children.find((node) => node.element.name === column)
+      if (exactTop && !exactTop.children.length) continue
+      if (!/^[^.[\]]+(?:\.[^.[\]]+|\[\d+\])*$/.test(column))
+        throw new Error(`invalid column path ${column}`)
+      const parts = column.replace(/\[(\d+)\]/g, '.$1').split('.')
+      const top = this.schema.children.find((node) => node.element.name === parts[0])
+      // An explicit physical LIST/MAP leaf path reads that leaf directly.
+      if (
+        this.elements.has(column) &&
+        getSchemaPath(this.metadata.schema, column.split('.')).some(
+          (node) => isListLike(node) || isMapLike(node),
+        )
+      )
+        continue
+      const prune = (tree: SchemaTree, depth: number): SchemaTree => {
+        if (depth === parts.length - 1) return tree
+        if (isListLike(tree)) {
+          if (!/^\d+$/.test(parts[depth + 1]))
+            throw new Error(`list path needs an index: ${column}`)
+          let child = tree.children[0]
+          if (child.children.length === 1) child = child.children[0]
+          prune(child, depth + 1) // validate remaining path; preserve complete list shape
+          return tree
+        }
+        if (isMapLike(tree)) {
+          prune(tree.children[0].children[1], depth + 1) // map key then optional value path
+          return tree
+        }
+        const child = tree.children.find((node) => node.element.name === parts[depth + 1])
+        if (!child) throw new Error(`unknown column ${column}`)
+        return { ...tree, children: [prune(child, depth + 1)] }
+      }
+      if (!top) throw new Error(`unknown column ${column}`)
+      const tree = prune(top, 0)
+      if (top.children.length) logical.set(column, { tree, parts })
+    }
+
     const total = Number(this.metadata.num_rows)
     const groups = new Map<number, { local: number; output: number }[]>()
     rows.forEach((row, output) => {
@@ -583,8 +587,40 @@ export class LodReader {
             })
             if (!missing.length) return
             const sorted = [...new Set(missing.map((e) => e.local))].sort((a, b) => a - b)
-            const task = await this.prepareProjection(g, name, sorted, signal)
-            const projected = execute ? await execute(task, signal) : decodeProjection(task)
+            const nested = logical.get(name)
+            let projected: unknown[]
+            if (nested) {
+              const leaves: SchemaTree[] = []
+              const visit = (tree: SchemaTree) => {
+                if (tree.children.length) tree.children.forEach(visit)
+                else leaves.push(tree)
+              }
+              visit(nested.tree)
+              const data = new Map<string, unknown[]>()
+              await Promise.all(
+                leaves.map(async (leaf) => {
+                  const path = leaf.path.join('.')
+                  const repeated = getSchemaPath(this.metadata.schema, leaf.path).some(
+                    (node) => node.element.repetition_type === 'REPEATED',
+                  )
+                  const task = await this.prepareProjection(g, path, sorted, signal, repeated)
+                  data.set(path, execute ? await execute(task, signal) : decodeProjection(task))
+                }),
+              )
+              assembleNested(data, nested.tree, RAW_GEOMETRY_PARSERS)
+              projected = data.get(nested.parts[0])!.map((value) => {
+                for (const part of nested.parts.slice(1)) {
+                  if (value == null) return null
+                  value = Object.hasOwn(value as object, part)
+                    ? (value as Record<string, unknown>)[part]
+                    : null
+                }
+                return normalizeNested(value)
+              })
+            } else {
+              const task = await this.prepareProjection(g, name, sorted, signal)
+              projected = execute ? await execute(task, signal) : decodeProjection(task)
+            }
             signal?.throwIfAborted()
             const values = new Map(sorted.map((row, i) => [row, projected[i]]))
             for (const entry of missing) {
@@ -620,13 +656,14 @@ export class LodReader {
     leaf: string,
     rows: number[],
     signal?: AbortSignal,
+    wholeGroup = false,
   ): Promise<ProjectionTask> {
     const pages = await this.offsetIndex(g, leaf)
     const runs: PageLocation[][] = []
     let selected = 0
     for (const page of pages) {
       while (selected < rows.length && rows[selected] < page.rowStart) selected++
-      if (selected === rows.length || rows[selected] >= page.rowEnd) continue
+      if (!wholeGroup && (selected === rows.length || rows[selected] >= page.rowEnd)) continue
       const last = runs.at(-1)
       if (last && last.at(-1)!.byteEnd === page.byteStart && last.at(-1)!.rowEnd === page.rowStart)
         last.push(page)
@@ -752,23 +789,6 @@ export class LodReader {
     return values
   }
 
-  /**
-   * The prefix row groups' bbox indexes, and the offset indexes of the LODs
-   * served from them: a map opening at a coarse zoom wants all of these, and
-   * they sit together in the file.
-   */
-  private warmPrefix(): void {
-    const prefix = this.lod.prefix
-    const key = this.lod.key
-    if (!prefix || !key) return
-    const coarse = Object.values(this.lods).filter((lod) => Math.max(...lod.zooms) <= prefix.zoom)
-    for (let g = 0; g <= prefix.row_group_end; g++) {
-      void this.offsetIndex(g, key.column).catch(() => undefined)
-      void this.columnIndex(g, key.column).catch(() => undefined)
-      for (const lod of coarse) void this.offsetIndex(g, this.lodLeaf(lod)).catch(() => undefined)
-    }
-  }
-
   private rowGroupBbox(g: number): Bbox {
     if (!Number(this.metadata.row_groups[g].num_rows)) return [1, 1, 0, 0]
     const stat = (leaf: string) => this.chunk(g, leaf).meta_data!.statistics
@@ -847,9 +867,9 @@ export class LodReader {
     const chunk = this.chunk(g, leaf)
     return {
       ...chunk.meta_data!,
-      pathInSchema: leaf.split('.'),
+      pathInSchema: chunk.meta_data!.path_in_schema,
       element: this.elements.get(leaf)!,
-      schemaPath: getSchemaPath(this.metadata.schema, leaf.split('.')),
+      schemaPath: getSchemaPath(this.metadata.schema, chunk.meta_data!.path_in_schema),
       compressors,
       parsers: RAW_GEOMETRY_PARSERS,
       utf8: isString(this.elements.get(leaf)!),
@@ -1023,18 +1043,13 @@ const intersectRanges = (a: [number, number][], b: [number, number][]): [number,
   return out
 }
 
-/** Carried integers retain the existing display API’s numeric representation. */
-export const displayValue = (value: unknown): unknown =>
-  typeof value === 'bigint' ? Number(value) : value
-
-export function validateCompanionMetadata(lod: LodMetadata): void {
-  if (lod.encoding !== 'packed_geometry') return
-  const seen = new Set<string>()
-  for (const name of Object.keys(lod.lods))
-    for (const attr of lod.attributes) {
-      const column = lod.attribute_columns?.[name]?.[attr.name]
-      if (!column || typeof column !== 'string' || seen.has(column))
-        throw new Error(`missing or duplicate companion column for ${name}.${attr.name}`)
-      seen.add(column)
-    }
+/** hyparquet uses undefined for null optional structs inside repeated values. */
+function normalizeNested(value: unknown): unknown {
+  if (value == null) return null
+  if (Array.isArray(value)) return Array.from(value, normalizeNested)
+  if (typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype)
+    return Object.fromEntries(
+      Object.entries(value).map(([name, child]) => [name, normalizeNested(child)]),
+    )
+  return value
 }

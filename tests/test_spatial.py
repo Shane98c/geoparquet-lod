@@ -24,18 +24,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.parametrize(
-    'family,prefix,tile_pages,leaf_pages,page_bytes',
+    'family,tile_pages,leaf_pages,page_bytes',
     [
-        ('polygon', 11, True, 16, 16384),
-        ('polygon', None, True, 1, 32768),
-        ('point', None, False, 16, 16384),
-        ('point', None, True, 16, 65536),
-        ('line', None, True, 16, 131072),
+        ('polygon', True, 16, 16384),
+        ('polygon', True, 1, 32768),
+        ('point', False, 16, 16384),
+        ('point', True, 16, 65536),
+        ('line', True, 16, 131072),
     ],
 )
-def test_spatial_roundtrip(
-    tmp_path, monkeypatch, family, prefix, tile_pages, leaf_pages, page_bytes
-):
+def test_spatial_roundtrip(tmp_path, monkeypatch, family, tile_pages, leaf_pages, page_bytes):
     rng = np.random.default_rng(913)
     sparse = family == 'point' and tile_pages
     n = 12000 if sparse else 1200
@@ -77,7 +75,6 @@ def test_spatial_roundtrip(
     options = dict(
         zooms=range(10, 15),
         complete_from=13,
-        prefix_zoom=prefix,
         thinning=drop_rate(10 if sparse else 2.5),
         carry=['height', 'name'],
         row_group_rows=n if sparse else 256,
@@ -111,14 +108,9 @@ def test_spatial_roundtrip(
             importlib.import_module('geoparquet_lod._layout'), '_ROOT_TARGET_BYTES', 800
         )
     if family == 'line':
-        # Exercise the public single build against the legacy table and the
+        # Exercise the public build against the unindexed table and the
         # independent JS membership/MVT assertions below.
-        build(
-            src,
-            new,
-            **{k: v for k, v in options.items() if k != 'prefix_zoom'},
-            lod_page_bytes=page_bytes,
-        )
+        build(src, new, **options, lod_page_bytes=page_bytes)
         assert not list(tmp_path.glob('.lod-build-*'))
     else:
         finalize_layout(
@@ -148,7 +140,7 @@ def test_spatial_roundtrip(
             section[1] > 0 for sections in root['streams'].values() for section in sections
         ), 'fixture exercises directory branches'
     assert old.read_bytes() == before, 'source is immutable'
-    assert validate(new)['rows'] == n
+    assert validate(new, full=True)['rows'] == n
     a, b = pq.read_table(old), pq.read_table(new)
     # Arrow equality treats NaN != NaN in the covering of empty geometries.
     assert a.drop(['bbox']).equals(b.drop(['bbox'])), (
@@ -175,7 +167,7 @@ def test_spatial_roundtrip(
     # selection must still work. Distant empty views must remain empty.
     cases.extend([[14, 0, 0], [14, 16383, 16383]])
     # Independent full-table reference: exact key membership plus all matching
-    # boundary copies. Do not inherit the old reader's page overfetch behaviour.
+    # boundary copies, computed without either reader.
     meta = json.loads(a.schema.metadata[b'geo'])['lod_columns']
     fields = [pa.field(f['name'], pa.type_for_alias(f['type'])) for f in meta['attributes']]
     dictionaries = {f['name']: f['values'] for f in meta['attributes'] if 'values' in f}

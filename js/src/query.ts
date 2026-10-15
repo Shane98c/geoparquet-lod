@@ -70,10 +70,11 @@ export async function readFeatures(
     result.columns = await reader.readColumns(result.rows, columns, signal)
     return result
   }
-  const z = Math.max(
-    Math.min(...reader.lod.zooms),
-    Math.min(reader.finestZoom, Math.ceil(Math.log2(360 / (reader.lod.tile_size * resolution)))),
-  )
+  // Sparse profiles have no payload or spill tags at intervening zooms.
+  // Choose the first declared zoom at least as detailed as the requested one.
+  const targetZoom = Math.ceil(Math.log2(360 / (reader.lod.tile_size * resolution)))
+  const declared = [...new Set(reader.lod.zooms)].sort((a, b) => a - b)
+  const z = declared.find((zoom) => zoom >= targetZoom) ?? declared[declared.length - 1]
   const lod = reader.lodForZoom(z)
   const n = 2 ** z
   const tileX = (lon: number) => Math.max(0, Math.min(n - 1, Math.floor(((lon + 180) / 360) * n)))

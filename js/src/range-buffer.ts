@@ -5,7 +5,7 @@ import type { RangeSource } from './reader.js'
  * Browsers allow six HTTP/1.1 connections per host, so spreading a tile's
  * requests over several hosts lets them run in fewer waves.
  *
- * Indexed files open with one leading 16 KiB GET. Legacy files then fetch the
+ * Indexed files open with one leading 16 KiB GET. Unindexed files then fetch the
  * tail and, if needed, the remainder of the footer. Content-Range supplies the
  * size; HEAD is needed only when CORS does not expose that response header.
  */
@@ -17,7 +17,7 @@ export const httpSource = async (
   { tail = 64 * 1024, signal }: { tail?: number; signal?: AbortSignal } = {},
 ): Promise<RangeSource> => {
   if (!urls.length) throw new Error('at least one URL is required')
-  // A fixed leading range opens indexed files in one request. Legacy files
+  // A fixed leading range opens indexed files in one request. Unindexed files
   // use Content-Range for their size, then continue through the normal footer.
   const first = await fetch(urls[0], {
     headers: { Range: 'bytes=0-16383' },

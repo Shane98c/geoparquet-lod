@@ -24,3 +24,19 @@ Project code is MIT; the MVT encoder includes code adapted from `@cogp/reader`
 with its MIT copyright notice retained in source and compiled output. See
 `src/COGP-LICENSE.txt`. The optional vendored Esri comparison reader is not
 included in this package.
+
+Use `readGeometryBatch(reader, { bbox, resolution, columns, geometry })` for a
+renderer-neutral result with typed coordinate buffers, hierarchy offsets, source
+row IDs and attributes. `toGeometryBatch` converts a `readFeatures`
+result. `batchToGeoJSON`, `batchToGeoArrow` (Arrow IPC), and `batchToMvt` consume
+the same batch. GeoArrow conversion uses the `@cogp/reader` dependency; nested or
+mixed attributes become display strings. GeoJSON is intended for small results.
+The runnable deck.gl example is `demo/deck/index.html` after `npm run demo:bundle`
+and serving the repository with Range support.
+
+`readColumns` and query `columns` accept struct paths (`details.height`), list
+indexes (`floors[0].name`), and map keys (`tags.name`). Null/missing values become
+`null`. Struct scalars project only selected leaf pages; collections reconstruct
+all selected row-group pages before extracting elements. Flat scalars use the
+sparse page projection. See [usage documentation](../docs/usage.md) for
+path ambiguity, collection representation, validation scope and adapter limits.

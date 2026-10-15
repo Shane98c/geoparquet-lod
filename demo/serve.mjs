@@ -66,7 +66,11 @@ const server = createServer(async (req, res) => {
       path = resolve(root, decodeURIComponent(url.pathname.slice('/demo/'.length)))
       if (
         !path.startsWith(root.endsWith(sep) ? root : root + sep) ||
-        !(path.endsWith('.html') || path.startsWith(resolve(root, 'dist') + sep))
+        !(
+          path.endsWith('.html') ||
+          path.startsWith(resolve(root, 'dist') + sep) ||
+          (path.startsWith(resolve(root, 'deck') + sep) && path.endsWith('.js'))
+        )
       ) {
         res.writeHead(404).end()
         return

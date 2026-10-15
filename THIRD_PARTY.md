@@ -7,7 +7,7 @@ That license does not replace dependency licenses or dataset terms.
 
 - [COGP](https://github.com/Kanahiro/cloud-optimized-geoparquet) and
   [GeoParquet PR 305](https://github.com/opengeospatial/geoparquet/pull/305):
-  coarse prefixes and the quantized coordinate transform informed this layout.
+  the quantized coordinate transform informed this layout.
   The JS reader uses `@cogp/reader`. `js/src/mvt.ts` is adapted from its
   MVT, clipping, and property code; Kanahiro Iguchi's MIT notice is retained in
   that file and [COGP-LICENSE.txt](js/src/COGP-LICENSE.txt).
@@ -41,5 +41,5 @@ Esri's SOP example. The root software license does not license that data.
 Consult the [Overture attribution documentation](https://docs.overturemaps.org/attribution/)
 and the source records for dataset-specific attribution and terms. Benchmark
 archive versions, sizes, checksums, and links are in
-[the provenance record](docs/r2-comparison.md). No large data files are included
+[the provenance record](docs/hosted-comparison.md). No large data files are included
 in this source repository.

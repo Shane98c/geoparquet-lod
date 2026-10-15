@@ -237,7 +237,6 @@ scope.addEventListener('message', (event: MessageEvent<WorkerRequest | CpuReques
                 request.x,
                 request.y,
                 controller.signal,
-                properties,
               )
               return cpu.run(task, options)
             }

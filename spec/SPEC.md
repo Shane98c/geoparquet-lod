@@ -4,8 +4,9 @@ _A layout and metadata contract for GeoParquet files that serve a zoomable
 map directly. Implemented by the writer and reader in this repository. Draft 0.1.0._
 
 The key words MUST, SHOULD and MAY are to be interpreted as in RFC 2119.
-'Layout', 'Metadata' and 'Geometry' are the contract; 'Reader algorithm'
-describes the reference reader and binds no one.
+'Layout', 'Metadata' and 'Geometry' are the contract; 'Reading without the
+spatial index' describes the reference reader and binds no one. The optional
+[spatial index](SPATIAL-INDEX.md) is a physical profile over this layout.
 
 ## Goal
 
@@ -42,14 +43,14 @@ column alongside the source columns.
 A conforming file MUST satisfy:
 
 1. **Order.** Rows sorted by a space-filling curve over the primary
-   geometry, within each section below (one section when `prefix` is null). `order` names the curve:
+   geometry. `order` names the curve:
    `hilbert_webmercator` is the standard Hilbert curve over the Web Mercator
    world square divided into `2^depth` cells per side, numbered as XYZ tiles
    are, on the cell holding the bbox centre with latitude clamped to the
    Mercator limit. The curve's quadtree prefix property makes a tile at zoom
    `z <= depth` with Hilbert index `h` the key interval
    `[h * 4^(depth - z), (h + 1) * 4^(depth - z))`, so a tile's rows are one
-   contiguous run in each section. The key is stored in the `key` column
+   contiguous run. The key is stored in the `key` column
    with row group statistics and a page index; a reader finds a tile's row
    groups from the footer, its key pages from the page index, and its exact
    rows by reading the two boundary key pages, then reads only those rows of
@@ -59,27 +60,21 @@ A conforming file MUST satisfy:
    hosts: the tile each serves as `zoom << 48 | x * 2^zoom + y`, the
    feature's file row index, its geometry on that LOD's grid and its
    attributes. The writer MUST place every
-   copy a tile needs on the tile's _host_: the first row of the main section
-   whose key is at or past the tile's interval start, or the last row when
-   none is, and a row shown only to host copies has an empty geometry. A
+   copy a tile needs on the tile's _host_: the first row whose key is at or
+   past the tile's interval start, or the last row when none is, and a row
+   shown only to host copies has an empty geometry. A
    shape under a pixel at the zoom draws as a placeholder square its own
    tile shows whole, so the reference writer copies only shapes a pixel or
    larger. A reader therefore reads the interval's rows plus the host row
    and keeps the copies whose `tile` is the tile's. The per-row
    uniform `u` the reference writer hands thinnings is a hash of the
    geometry bytes, so it does not depend on sort order.
-2. **Prefix (historical construction).** The public writer sets `prefix` to
-   null and uses a single global order. Existing experimental files may have
-   a prefix. When `prefix` is present, every row whose coarsest zoom is at
-   or below `prefix.zoom` is stored in row groups `0..prefix.row_group_end`,
-   and no other row is. Those row groups are sorted on their own; the rest of
-   the file is sorted on its own.
-3. **Covering.** A `bbox` struct column of four float32 values with the
+2. **Covering.** A `bbox` struct column of four float32 values with the
    GeoParquet 1.1 covering declaration, column statistics on every row
    group, and a column index (page statistics) and offset index on each of
    its four leaves. Values are rounded outward.
-4. **Page indexes.** Every column has an offset index.
-5. **LOD columns.** A top-level required struct column named by `column`
+3. **Page indexes.** Every column has an offset index.
+4. **LOD columns.** A top-level required struct column named by `column`
    with one nullable binary child per LOD, named by the LOD. The child is
    non-null for a row when it is shown at the LOD's zooms or hosts boundary copies;
    since zooms sharing an LOD agree on row selection, that is one condition
@@ -89,11 +84,11 @@ A conforming file MUST satisfy:
    primary geometry is null or empty is shown at no LOD.
 
 The validator checks the metadata, the schema shapes, covering statistics,
-page indexes, that prefix row groups hold only prefix rows, and a sample
-decode of every LOD from the first row group. It does not verify the sort
-order or that every row is shown at the finest LOD; those are what the
-reference writer does, and a conformance suite with fixtures for them is
-open work.
+page indexes, and a sample decode of every LOD from the first row group; in
+full mode it decodes every LOD value and copy, verifies the key order, and
+checks the spatial index against the footer. It does not verify that every
+row is shown at the finest LOD; that is what the reference writer does, and a
+conformance suite with fixtures for it is open work.
 
 The following SHOULD hold and are what the reference writer does:
 
@@ -110,25 +105,24 @@ The following SHOULD hold and are what the reference writer does:
 
 Under the `geo` key, a `lod_columns` object:
 
-| field          | type           | meaning                                                                                                                                                                                                            |
-| -------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `version`      | string         | `0.1.0`; readers reject a different major version, and while the major is 0 a different minor as well, since minors may change the layout                                                                          |
-| `column`       | string         | name of the LOD struct column                                                                                                                                                                                      |
-| `order`        | string         | `hilbert_webmercator`, see Layout 1                                                                                                                                                                                |
-| `key`          | object         | `{column, depth}`: the nullable int64 column holding each row's Hilbert index at `depth` of its Web Mercator cell, with statistics and a page index, see Layout 1                                                  |
-| `zooms`        | int[]          | every zoom the file serves, ascending                                                                                                                                                                              |
-| `tile_size`    | int            | pixels per tile the zooms assume (512)                                                                                                                                                                             |
-| `prefix`       | object or null | `{zoom, row_group_end}`, see Layout 2                                                                                                                                                                              |
-| `encoding`     | string         | `packed`, see Geometry                                                                                                                                                                                             |
-| `pack_version` | int            | `1`, the packed row format version                                                                                                                                                                                 |
-| `attributes`   | object[]       | `{name, type, values?}` of carried attributes; `type` is the Arrow type name used to decode packed values; optional `values` is a string dictionary                                                                |
-| `thinning`     | object         | description of the rule used; informational                                                                                                                                                                        |
-| `lods`         | object         | LOD name to `{zooms, geometry_type, scale, offset, placeholder}`; `scale` and `offset` are `[x, y]` pairs in degrees, `placeholder` the width in grid cells of the square drawn for a shape too small for the grid |
+| field          | type     | meaning                                                                                                                                                                                                            |
+| -------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `version`      | string   | `0.1.0`; readers reject a different major version, and while the major is 0 a different minor as well, since minors may change the layout                                                                          |
+| `column`       | string   | name of the LOD struct column                                                                                                                                                                                      |
+| `order`        | string   | `hilbert_webmercator`, see Layout 1                                                                                                                                                                                |
+| `key`          | object   | `{column, depth}`: the nullable int64 column holding each row's Hilbert index at `depth` of its Web Mercator cell, with statistics and a page index, see Layout 1                                                  |
+| `zooms`        | int[]    | every zoom the file serves, ascending                                                                                                                                                                              |
+| `tile_size`    | int      | pixels per tile the zooms assume (512)                                                                                                                                                                             |
+| `encoding`     | string   | `packed`, see Geometry                                                                                                                                                                                             |
+| `pack_version` | int      | `1`, the packed row format version                                                                                                                                                                                 |
+| `attributes`   | object[] | `{name, type, values?}` of carried attributes; `type` is the Arrow type name used to decode packed values; optional `values` is a string dictionary                                                                |
+| `thinning`     | object   | description of the rule used; informational                                                                                                                                                                        |
+| `lods`         | object   | LOD name to `{zooms, geometry_type, scale, offset, placeholder}`; `scale` and `offset` are `[x, y]` pairs in degrees, `placeholder` the width in grid cells of the square drawn for a shape too small for the grid |
 
-All fields are required. Every zoom in `zooms` MUST appear in exactly one
-LOD, `zooms` MUST be contiguous, and `scale` and `offset` MUST be finite. The
-prefix's `zoom` MUST be in `zooms` and `row_group_end` MUST be less than the
-row group count. Every row with a non-null, non-empty primary geometry MUST
+All fields are required; readers MUST ignore fields they do not know. Every
+zoom in `zooms` MUST appear in exactly one LOD, `zooms` MUST be contiguous,
+and `scale` and `offset` MUST be finite. Every row with a non-null, non-empty
+primary geometry MUST
 be shown at the finest LOD. Membership at the other LODs is the writer's
 choice per LOD and need not nest: a row may be shown zoomed out and hidden
 one zoom in, as tippecanoe's per-zoom dropping produces. An LOD's zooms are
@@ -150,7 +144,6 @@ the `geo` key beside the usual GeoParquet fields (only two LOD entries shown):
   "key": { "column": "hilbert", "depth": 24 },
   "zooms": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
   "tile_size": 512,
-  "prefix": null,
   "encoding": "packed",
   "pack_version": 1,
   "attributes": [{ "name": "height", "type": "float" }, { "name": "class", "type": "string" }],
@@ -229,25 +222,23 @@ Carried attributes keep their declared Arrow types and nulls. A thinning
 that overrides an attribute writes the overridden value, cast to the
 declared type, into that LOD's rows; copies carry the source row's values.
 
-## Reader algorithm
+## Reading without the spatial index
 
 The indexed map path is described in [SPATIAL-INDEX.md](SPATIAL-INDEX.md).
-The following describes the footer-based reader retained for analytical access
-and experimental files without the spatial index.
+The logical layout alone is enough to read a tile; this is how the reference
+reader serves files without the index and how it reaches analytical rows.
 
-1. Read the footer. The reference HTTP source first probes for the optional
-   [spatial index profile](SPATIAL-INDEX.md), which can bypass this algorithm
-   for LOD tiles. Otherwise it reads a 64 KiB tail and any missing footer bytes.
-   Validate `lod_columns`. Start fetching the prefix row groups' key and
-   LOD offset indexes.
+1. Read the footer. The reference HTTP source first probes the first 16 KiB
+   for the [spatial index](SPATIAL-INDEX.md), which bypasses this algorithm
+   for LOD tiles. Otherwise it reads a 64 KiB tail and any missing footer bytes
+   and validates `lod_columns`.
 2. For a tile at zoom z choose the LOD containing z, clamping to the
    coarsest LOD below `zooms`. Finer than the finest zoom, read the primary
    geometry instead: every row is shown at the finest LOD, so the bbox pages
    alone choose the rows, and their exact WKB is small at those zooms.
 3. The tile's key interval, see Layout 1. Candidate row groups: those whose
-   key statistics intersect it, plus the host group, the first main-section
-   group whose maximum key is at or past the interval start. If the LOD's
-   finest zoom is at or below `prefix.zoom`, only the prefix row groups.
+   key statistics intersect it, plus the host group, the first group whose
+   maximum key is at or past the interval start.
 4. In each group, the key pages whose statistics intersect the interval;
    read the first and last page of each run, and the host page, to find
    the exact rows, and the first row at or past the interval start as the
@@ -280,30 +271,50 @@ struct of binary columns a reader can drop.
 
 ## Relation to other proposals
 
-- GeoParquet PR 305 (COGP, Kanahiro) orders row groups coarse to fine and
-  declares each level as a cumulative row-group prefix; geometry is stored
-  once and an optional overview column may carry simplified shapes. Reading
-  a fine level means reading every coarser level's row groups that touch the
-  view, so requests grow with the level count. The current writer uses one
-  global order and moves zoom selection into nullable binary LOD columns,
-  with an index over their pages. Historical builds also supported a coarse
-  prefix; it is no longer a public construction option. Our
-  LOD geometry keeps COGP's `quantized_geoarrow` transform and grid, with
-  `Point` added, but packs each row into one binary value, so a COGP reader
-  cannot decode it and nothing is shared beyond the transform.
-- GeoParquet PR 299 (LOD extension, mmgeorge) declares simplified geometry
-  columns with a resolution each, nested paths allowed, with the primary
-  geometry as the fallback. What this layout adds is row selection per LOD
-  and per-LOD attribute state, which its relationships cannot express; the
-  metadata could become a PR 299 extension once that is settled. Our LOD
-  geometry is integer rather than a GeoParquet primary encoding for the
-  same reason COGP's overviews are: integer grids compress several times
-  better than float64 WKB and decode without a parser.
-- Esri Spatially Optimized Parquet, as its repository describes it, clusters
-  rows spatially, relies on page indexes, and adds multiscale LOD columns
-  for complex geometries. We have not found a published rule for which rows
-  appear at coarse scales.
-- GeoParquet 2.0: orthogonal. The primary geometry is WKB in both 1.1 and
+Several GeoParquet overview designs are in progress. Where they differ from
+this layout is in which rows a coarse view reads and how it finds them.
+
+- **COGP** ([Kanahiro/cloud-optimized-geoparquet](https://github.com/Kanahiro/cloud-optimized-geoparquet),
+  proposed to GeoParquet as [PR 305](https://github.com/opengeospatial/geoparquet/pull/305))
+  stores every feature once, orders row groups coarse to fine, and declares
+  each level as a cumulative row-group prefix in `geo.lod`, with resolutions
+  that strictly decrease. An optional overview column holds `quantized_geoarrow`
+  geometry: nested int32 coordinates with a scale and offset per LoD, derived
+  directly from the primary geometry rather than from the previous level.
+  Reading a fine level reads every coarser level's row groups that touch the
+  view, so requests grow with the level count, and a feature's level is fixed
+  by its row group. This layout keeps COGP's quantization transform and grid,
+  with `Point` added, but moves zoom selection into nullable per-LOD columns
+  so membership is decided per zoom and read at page granularity, and packs
+  each row into one binary value a COGP reader cannot decode. A review comment
+  on PR 305 suggested storing the level in a column with statistics for exactly
+  that page-level granularity; nullable LOD columns with an index over their
+  pages are one answer to it, and the [spatial index](SPATIAL-INDEX.md) could
+  be offered to COGP as an optional access profile.
+- **tylertoo** ([geoparquet-io/tylertoo](https://github.com/geoparquet-io/tylertoo))
+  writes overviews as rows with a `level` column and simplified WKB, declared
+  in `geo:overviews` metadata, either once per level or partitioned. Its
+  maintainers have decided to converge that output on COGP, which makes COGP
+  the layout most other tooling will produce. The question this repository
+  asks is whether the page-level access path is worth adding to it.
+- **GeoParquet PR 299** ([LOD extension, mmgeorge](https://github.com/opengeospatial/geoparquet/pull/299))
+  declares simplified geometry columns with a resolution each, nested paths
+  allowed, with the primary geometry as the fallback. It reduces geometric
+  detail but not feature count. What this layout adds is row selection per
+  LOD and per-LOD attribute state; its metadata could become a PR 299
+  extension once that is settled. Our LOD geometry is integer rather than a
+  GeoParquet primary encoding for the same reason COGP's overviews are:
+  integer grids compress several times better than float64 WKB and decode
+  without a parser. The [design alternatives](../docs/design-alternatives.md)
+  quantify that difference.
+- **Esri Spatially Optimized Parquet** ([Esri/spatially-optimized-parquet](https://github.com/Esri/spatially-optimized-parquet))
+  clusters rows by an XZ-order code, relies on the Parquet page index for
+  extent queries, and adds per-level geometry columns of delta-encoded
+  protobuf simplified with Douglas-Peucker on a power-of-two scale ladder,
+  declared under a `geodisplay` key. Every feature appears at every level, so
+  coarse views read many pages and the reference reader caps feature counts.
+  This layout drops features per zoom instead, as tippecanoe does.
+- **GeoParquet 2.0**: orthogonal. The primary geometry is WKB in both 1.1 and
   2.0; 2.0 annotates it with Parquet's `GEOMETRY` type and gains row-group
   geospatial statistics. 2.0 allows no other primary encoding, which is why
   the GeoArrow-shaped layout appears only in the LOD columns. Page pruning

@@ -157,10 +157,12 @@ def write_cmd(
 
 @cli.command('validate')
 @click.argument('path')
-def validate_cmd(path):
+@click.option('--full', is_flag=True, help='Decode every overview row and verify spatial indexes.')
+@click.option('--sample-rows', default=2000, type=click.IntRange(min=0), show_default=True)
+def validate_cmd(path, full, sample_rows):
     """Check the layout contract and decode a sample of every LOD."""
     try:
-        summary = validate(path)
+        summary = validate(path, sample_rows=sample_rows, full=full)
     except ValidationError as e:
         raise click.ClickException(str(e)) from e
     click.echo(f'OK {path}: ' + json.dumps(summary))

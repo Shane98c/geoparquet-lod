@@ -114,7 +114,7 @@ export interface DecodedTile {
 
 export function decodePreparedTile(
   task: PreparedTile,
-  names = task.defaultAttributes ?? task.fields.map((f) => f.name),
+  names = task.fields.map((f) => f.name),
   signal?: AbortSignal,
 ): DecodedTile {
   const builder = new GeometryBuilder()
@@ -175,7 +175,7 @@ function normalizeTile(
   const { rows, columns } = data
   let { geometry } = data
   if (pointFamily) {
-    // Keep the existing lon/lat bbox rule before projection. Point offsets
+    // Apply the lon/lat bbox rule before projection. Point offsets
     // are the identity sequence; compact coordinates and attributes in place.
     let count = 0
     for (let i = 0; i < rows.length; i++) {

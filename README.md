@@ -5,7 +5,7 @@
 This experimental layout keeps original feature geometries and source attributes
 alongside compact, thinned display overviews. A spatial page index lets a browser
 fetch the relevant Parquet pages without opening the full footer. Ordinary
-GeoParquet tools can query the original columns; the map uses a custom reader.
+GeoParquet tools query the original columns; the map uses a custom reader.
 
 **Draft 0.1.0: a research prototype, not an adopted standard or a production
 release.** The format can still change. Python and JavaScript packages are not
@@ -15,6 +15,7 @@ published to registries yet.
 [Format specification](spec/SPEC.md) ·
 [Spatial index](spec/SPATIAL-INDEX.md) ·
 [Writer and reader guide](docs/usage.md) ·
+[Comparison with other formats](docs/comparison.md) ·
 [Contributing](CONTRIBUTING.md)
 
 ## Why this exists
@@ -26,69 +27,83 @@ column. Display geometry, selected attributes, and tile-boundary copies add
 storage, but there is no separate archive of pre-encoded MVT tiles.
 
 The intended use is a static dataset that people need to both explore and query.
-If map delivery is the only requirement, PMTiles is the simpler choice. This
-project builds on COGP, Esri's Spatially Optimized Parquet, and Tippecanoe;
-see [prior work and attribution](THIRD_PARTY.md).
+If map delivery is the only requirement, PMTiles is the simpler choice. Several
+other GeoParquet overview designs exist: COGP, Esri's Spatially Optimized
+Parquet, tylertoo's overviews, and the GeoParquet LOD extension draft. The
+[specification](spec/SPEC.md#relation-to-other-proposals) describes how this
+layout differs from each; [prior work and attribution](THIRD_PARTY.md) lists
+what it builds on.
 
 ## Try it
 
-The [hosted demo](https://geoparquet-lod-compare.pages.dev/) defaults to GeoParquet
-LOD and PMTiles using the same Japan building source. COGP and Esri are optional:
-select their checkboxes and click **Apply readers**. Disabled readers do not load.
-Esri can make coarse views very expensive, so the four-pane view is best used
-as a diagnostic comparison. All panes share the browser's resources.
-
-The public GeoParquet file preserves the `6c3a4f9` dataset. The newer
-[density experiment](docs/tippecanoe-dropping.md) is reproducible from this repo
-but has not replaced that hosted file. [Dataset versions and demo measurement
-semantics](docs/r2-comparison.md) explain exactly what is being compared.
-
-For a small local example, install Python 3.12+, Node 22+, and uv, then from a clone:
-
-```sh
-uv sync --locked --group dev
-npm --prefix js ci
-npm --prefix js run build
-uv run python examples/quickstart.py
-uv run geoparquet-lod validate buildings.lod.parquet
-npm --prefix js run demo
-```
-
-The example creates 5,000 synthetic building footprints, writes LODs, and adds
-the spatial index. No external dataset is needed. The first writer run may
-fetch DuckDB's spatial extension; the demo loads MapLibre from a CDN. Open
-`http://localhost:8091/demo/?url=/buildings.lod.parquet` if it does not open
-automatically. Click a building to inspect its source row.
+The [hosted demo](https://geoparquet-lod-compare.pages.dev/) shows GeoParquet
+LOD and PMTiles built from the same Japan building source. COGP and Esri panes
+are optional: select their checkboxes and click **Apply readers**. Start over
+Tokyo, zoom out to see the overviews, then zoom into a neighbourhood. Pan the
+maps together and compare the request and byte counters. Switch from geometry
+styling to an attribute style to exercise more than geometry delivery. The
+browser reads ranges from the hosted files; nothing needs downloading. See the
+[hosted comparison notes](docs/hosted-comparison.md) for what the counters
+measure and where the files come from.
 
 ## Build your own file
 
 Input is GeoParquet with WKB geometry in longitude/latitude (OGC:CRS84 or
-EPSG:4326 in x/y order), one geometry family per file. This example uses the
-current indexed access path; thinning budgets should be tuned to your data.
+EPSG:4326 in x/y order), one geometry family per file. Thinning budgets should
+be tuned to your data.
+
+With Python 3.12+ and uv installed, run `uv sync --locked` from a clone.
+Save the following as `build.py` and run `uv run python build.py`. Supply your
+own `buildings.parquet`; `height` and `class` here are example source columns
+to carry into the fast map path. The first build may download DuckDB's spatial
+extension.
 
 ```python
 from geoparquet_lod import chain, drop_smallest, tiny_polygons, write
 
-write(
-    "buildings.parquet", "buildings.lod.parquet",
-    thinning=chain(drop_smallest(850_000), tiny_polygons()),
-    carry=["height", "class"],
-)
+if __name__ == "__main__":
+    write(
+        "buildings.parquet", "buildings.lod.parquet",
+        thinning=chain(drop_smallest(850_000), tiny_polygons()),
+        carry=["height", "class"],
+    )
 ```
 
-Put writer calls in an `if __name__ == "__main__":` guard when running scripts
-with multiprocessing. Host the final file at an immutable URL with HTTP Range
-support and CORS exposing `Content-Range`. `write()` produces the final indexed
-file in one build: overview generation in one Hilbert order, tile-aligned pages,
-and the spatial directory. Intermediate files are cleaned up automatically; the existing output
-is replaced only after the build succeeds. The CLI does the same with
-`geoparquet-lod write source.parquet output.parquet`; there is no separate
-`optimize` command or public API. `lod_page_bytes` / `--lod-page-bytes` controls
-the final overview page target (64 KiB by default).
+The output still contains the original geometries and all source attributes,
+including columns you did not choose for `carry`. For example, query the same
+file with DuckDB from `uv run python`:
 
-A generic Parquet rewrite loses the spatial access path. Rebuild from your
-source GeoParquet to produce an indexed file again. Internally the build still
-uses two phases, so allow temporary disk space for the intermediate file.
+```python
+import duckdb
+
+duckdb.sql("""
+    SELECT class, count(*) AS buildings, avg(height) AS mean_height
+    FROM read_parquet('buildings.lod.parquet')
+    GROUP BY class
+""").show()
+```
+
+This query counts source features, not the thinned display overviews.
+
+To view your output locally, install Node 22+ and run:
+
+```sh
+npm --prefix js ci
+npm --prefix js run demo
+```
+
+The demo opens `buildings.lod.parquet` from the repository root. Click a
+building to inspect its source row. It loads MapLibre from a CDN. A tiny
+synthetic fixture for checking installation is available in the
+[contributor guide](CONTRIBUTING.md#development).
+
+Host the final file at an immutable URL with HTTP Range support and CORS
+exposing `Content-Range`. `write()` builds the overviews, tile-aligned pages,
+and the spatial directory in one call and replaces the output only after the
+build succeeds; allow temporary disk space beside the output for its
+intermediate file. The CLI does the same with
+`geoparquet-lod write source.parquet output.parquet`. A generic Parquet rewrite
+loses the spatial access path; rebuild from the source GeoParquet instead.
 
 In a MapLibre app, after creating the map and loading its style:
 
@@ -109,69 +124,80 @@ map.addLayer({
 ```
 
 Install the JS package from the built local `js/` directory. Its worker asset
-must remain available to your bundler. See the [guide](docs/usage.md) for source
-attributes, whole-feature reads, custom thinning, and worker configuration.
+must remain available to your bundler. The reader also exposes whole-feature
+geometry batches with typed coordinate buffers, plus GeoJSON, GeoArrow IPC, and
+MVT adapters; the [deck.gl example](demo/deck/index.html) renders outside
+MapLibre. See the [guide](docs/usage.md) for source attributes, nested fields,
+custom thinning, validation, and worker configuration.
 
 ## What we have measured
 
-The latest density experiment uses 53,742,978 Japan building rows. These are
-cold, same-XYZ tile reads after opening, with geometry requested from our
-reader. They exclude each reader's separate 16 KiB opening request.
+Four readers against the hosted Japan archives, all derived from the same
+53,742,978 Overture building footprints: this layout, released COGP 2.2.2,
+PMTiles written by tippecanoe, and Esri's Spatially Optimized Parquet with its
+reference reader. Each cell is a cold read on a fresh reader after one open,
+geometry only, served from the same public bucket. Bytes are decimal.
 
-| Tokyo tile | GeoParquet LOD bytes | PMTiles bytes | Requests, each |
-| ---------- | -------------------: | ------------: | -------------: |
-| z8         |              619,573 |       499,425 |              2 |
-| z11        |              322,650 |       306,211 |              2 |
-| z12        |              411,748 |       363,153 |              2 |
+| Tile                  | GeoParquet LOD                | COGP 2.2.2                  | PMTiles                      | Esri SOP                    |
+| --------------------- | ----------------------------- | --------------------------- | ---------------------------- | --------------------------- |
+| open                  | 16 KB, 1 req                  | 1.50 MB, 3 req              | 16 KB, 1 req                 | 2.62 MB, 3 req              |
+| z8 metro, Tokyo       | 0.73 MB, 2 req, 115,775 feat. | 0.12 MB, 8 req, 1,152 feat. | 0.50 MB, 2 req, 95,774 feat. | 26.65 MB, 1,048 req, 28,000 |
+| z11 city, Tokyo       | 0.36 MB, 2 req, 28,201        | 0.25 MB, 17 req, 860        | 0.31 MB, 2 req, 24,373       | 5.39 MB, 143 req, 177,679   |
+| z13 downtown, Shibuya | 0.36 MB, 2 req, 29,834        | 0.68 MB, 42 req, 2,739      | 0.35 MB, 2 req, 28,908       | 2.61 MB, 92 req, 51,996     |
+| z13 suburbs, Chiba    | 0.08 MB, 2 req, 4,955         | 0.44 MB, 34 req, 454        | 0.06 MB, 2 req, 4,929        | 1.30 MB, 55 req, 6,841      |
+| z15 street, Tokyo     | 0.04 MB, 2 req, 229           | 0.86 MB, 82 req, 213        | 0.03 MB, 2 req, 1,441        | 1.30 MB, 62 req, 229        |
+| z15 street, Osaka     | 0.07 MB, 2 req, 1,357         | 0.80 MB, 80 req, 1,287      | 0.11 MB, 2 req, 6,523        | 1.01 MB, 57 req, 1,362      |
 
-On held-out sample tiles, aggregate feature counts differ by -3.03% at z8,
--0.22% at z11, and +0.37% at z12. Individual z8 locations differ more. Counts
-and visual coverage matter: different thinning, properties, tile buffers, and
-overzoom rules can make smaller responses do less work.
+The four files do not agree on what a tile should contain, so bytes only mean
+something next to the feature counts. COGP's conversion keeps very few features
+at coarse levels; PMTiles stops at z14 and serves the overzoomed parent at z15;
+Esri's reader returns every feature in the extent, simplified. This layout's
+hosted file shows about 20% more features than PMTiles at z8, which the
+[Japan evaluation](docs/japan-evaluation.md) brings within 3% by calibrating
+thinning budgets. [The comparison page](docs/comparison.md) has definitions,
+provenance, and reproduction steps.
 
 This supports competitive request counts and nearby transfer sizes on this
 workload, **not a claim that this is universally faster than PMTiles, COGP, or
 Esri**. We have not established broad device, dataset, or network parity.
-[Current results](docs/tippecanoe-dropping.md) include raw measurements and
-integrity checks; [the experiment index](docs/README.md) separates them from
-older layouts and modified-upstream experiments.
 
 ## Main tradeoffs
 
-- **Storage and construction.** The latest Japan file is 7.67 GB, versus the
-  4.84 GB cleaned analytical source and 1.30 GB PMTiles archive. Those files
-  provide different capabilities. Building overviews and then indexing is an
-  additional offline step; updates currently require rebuilding.
+- **Storage and construction.** The evaluated Japan file is 7.67 GB, versus the
+  4.84 GB analytical source and 1.30 GB PMTiles archive. Those files provide
+  different capabilities. Building overviews and indexing is an offline step;
+  updates require rebuilding.
 - **A custom display encoding and index.** Ordinary tools read original
-  geometries and attributes, but cannot interpret these display payloads
-  automatically. There is one implementation, a draft spec, and no independent
-  conformance suite. Compatibility has been exercised with PyArrow and DuckDB,
-  not every Parquet reader or rewriter.
-- **Fast styles require choices.** Packed attributes are cheap to render but
-  repeated across LODs. Other scalar source columns can be fetched on demand;
-  their first read can be substantially more expensive. Nested source values
-  remain analytical data, not arbitrary packed styling values.
+  geometries and attributes, but cannot interpret the display payloads. There
+  is one implementation, a draft spec, and no independent conformance suite.
+  Compatibility has been exercised with PyArrow and DuckDB, not every Parquet
+  reader or rewriter. [Design alternatives](docs/design-alternatives.md)
+  records what standard encodings cost in the same role.
+- **Fast styles require choices.** Carried attributes are cheap to render but
+  repeated across LODs. Other source columns, including nested fields, can be
+  fetched on demand; their first read can be substantially more expensive.
 - **Overviews are selective.** Thinning and quantization serve display; they
   are not an exact analytical summary. Whole-feature overview queries preserve
   thinning and use bbox overlap, not exact intersection. Use original geometry
   for exact work. The Japan density tuning is not yet a general policy.
 - **Browser work and memory.** Pages must be decoded and converted to MVT, with
-  caches and a worker pool. Cancellation helps navigation, but low-memory
-  devices and prolonged sessions need more testing.
+  caches and a worker pool. Low-memory devices and prolonged sessions need more
+  testing.
 - **Coverage and maturity.** Performance work focuses on buildings. Points and
   lines have correctness fixtures, but large overlapping polygons, antimeridian
-  behavior, unthinnable data, and broader CRS needs require further evaluation.
-  Validation samples payloads; it does not prove every spatial-index entry,
-  sort order, or finest-LOD membership correct.
+  behaviour, unthinnable data, and broader CRS needs require further evaluation.
+  Full validation checks overview payloads and index consistency, but does not
+  prove polygon topology, source-data equality, or finest-LOD completeness.
 
 ## Help evaluate the idea
 
 Useful contributions are independent reader implementations, reproducible
 comparisons on other datasets and devices, adversarial geometry fixtures, and
-ways to simplify the layout or integrate its access ideas into existing work.
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, tests, and what to include in
-performance reports. The [logical format](spec/SPEC.md) and [physical index
-profile](spec/SPATIAL-INDEX.md) are separate design surfaces for discussion.
+ways to simplify the layout or integrate its access ideas into the other
+overview proposals. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, tests,
+and what to include in performance reports. The [logical format](spec/SPEC.md)
+and [physical index profile](spec/SPATIAL-INDEX.md) are separate design
+surfaces for discussion.
 
 ## License
 

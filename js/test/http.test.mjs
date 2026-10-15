@@ -45,9 +45,9 @@ try {
   calls.length = 0
   file.fill(0, 4, 12)
   new DataView(file.buffer).setUint32(file.length - 8, 200, true)
-  const legacy = await httpSource(['https://example.test/data.parquet'])
-  assert.equal(calls.length, 2, 'legacy startup needs prefix and tail, no redundant margin read')
-  await legacy.slice(file.length - 208, file.length)
+  const unindexed = await httpSource(['https://example.test/data.parquet'])
+  assert.equal(calls.length, 2, 'unindexed startup needs head and tail, no redundant margin read')
+  await unindexed.slice(file.length - 208, file.length)
   assert.equal(calls.length, 2)
   status = 200
   await assert.rejects(httpSource(['https://example.test/data.parquet']), /range request failed/)

@@ -12,3 +12,11 @@ export { openReader, SpatialReader } from './spatial.js'
 export type { TileReader } from './spatial.js'
 export { readFeatures } from './query.js'
 export type { FeatureQuery, FeatureResult } from './query.js'
+export {
+  toGeometryBatch,
+  readGeometryBatch,
+  batchToGeoJSON,
+  batchToGeoArrow,
+  batchToMvt,
+} from './batch.js'
+export type { GeometryBatch, GeometryColumn, GeoArrowOptions, MvtTileOptions } from './batch.js'

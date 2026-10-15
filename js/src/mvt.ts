@@ -178,7 +178,7 @@ function partIntersectsTile(
     if (y < minY) minY = y
     if (y > maxY) maxY = y
   }
-  // Leave non-finite inputs to the existing projection and clipping path.
+  // Leave non-finite inputs to the general projection and clipping path.
   if (
     !Number.isFinite(minX) ||
     !Number.isFinite(minY) ||
