@@ -1,6 +1,7 @@
 // Bundled by `npm --prefix js run demo:bundle` into demo/dist/deck.js.
 import { openReader, httpSource, readGeometryBatch, batchToGeoArrow } from '../../js/src/index.ts'
-import { Deck, MapView, WebMercatorViewport } from '@deck.gl/core'
+import { Deck, MapView } from '@deck.gl/core'
+import { TileLayer } from '@deck.gl/geo-layers'
 import {
   GeoArrowPathLayer,
   GeoArrowPolygonLayer,
@@ -10,12 +11,11 @@ import { tableFromIPC } from 'apache-arrow'
 
 const status = document.querySelector('#status'),
   url = document.querySelector('#url'),
+  primary = document.querySelector('#primary'),
   params = new URLSearchParams(location.search)
 url.value = new URL(params.get('url') ?? url.value, location.href).href
 let reader,
-  request,
-  timer,
-  rows = [],
+  generation = 0,
   state = { longitude: -105, latitude: 40, zoom: 10, pitch: 0, bearing: 0 }
 const map = new Deck({
   parent: document.querySelector('#map'),
@@ -24,33 +24,28 @@ const map = new Deck({
   initialViewState: state,
   onViewStateChange: ({ viewState }) => {
     state = viewState
-    schedule()
   },
-  onResize: () => schedule(),
-  getTooltip: ({ index }) =>
-    index >= 0 && index < rows.length ? `Source row ${rows[index]}` : null,
+  getTooltip: ({ index, tile }) =>
+    tile?.content?.rows && index >= 0 ? `Source row ${tile.content.rows[index]}` : null,
 })
-function schedule() {
-  clearTimeout(timer)
-  timer = setTimeout(draw, 120)
-}
-const fill = [52, 185, 163, 140],
+// Whole features straddling tile edges are drawn by both tiles; an almost opaque
+// fill keeps that from showing as brighter overlaps.
+const fill = [52, 185, 163, 225],
   line = [113, 237, 209]
 // The GeoArrow layers read coordinates from the Arrow buffers directly; polygon
-// triangulation runs in a worker pool, served from the bundle rather than a CDN.
+// triangulation runs in a worker pool served from the bundle rather than a CDN.
 const earcutWorkerUrl = new URL('../dist/earcut-worker.min.js', import.meta.url).href
-function layerFor(table, zoom) {
-  const family = table.schema.fields
+function family(table) {
+  return table.schema.fields
     .map((f) => f.metadata.get('ARROW:extension:name'))
     .find((name) => name?.startsWith('geoarrow.'))
-  const shared = { id: 'features', data: table, pickable: true, _validate: false }
-  if (family === 'geoarrow.multipoint' || family === 'geoarrow.point')
-    return new GeoArrowScatterplotLayer({
-      ...shared,
-      getFillColor: line,
-      radiusMinPixels: 3,
-    })
-  if (family === 'geoarrow.multilinestring' || family === 'geoarrow.linestring')
+}
+function featureLayer(id, table, zoom) {
+  const shared = { id, data: table, pickable: true, _validate: false }
+  const kind = family(table)
+  if (kind === 'geoarrow.multipoint' || kind === 'geoarrow.point')
+    return new GeoArrowScatterplotLayer({ ...shared, getFillColor: line, radiusMinPixels: 3 })
+  if (kind === 'geoarrow.multilinestring' || kind === 'geoarrow.linestring')
     return new GeoArrowPathLayer({ ...shared, getColor: line, widthMinPixels: 1 })
   return new GeoArrowPolygonLayer({
     ...shared,
@@ -63,36 +58,44 @@ function layerFor(table, zoom) {
     earcutWorkerPoolSize: 4,
   })
 }
-async function draw() {
-  if (!reader) return
-  request?.abort()
-  request = new AbortController()
-  const signal = request.signal
-  try {
-    const viewport = new WebMercatorViewport({ ...state, width: innerWidth, height: innerHeight })
-    let [west, south, east, north] = viewport.getBounds()
-    const wrap = (lon) => ((((lon + 180) % 360) + 360) % 360) - 180
-    const bbox =
-      east - west >= 360 ? [-180, south, 180, north] : [wrap(west), south, wrap(east), north]
-    bbox[1] = Math.max(-85, bbox[1])
-    bbox[3] = Math.min(85, bbox[3])
-    const batch = await readGeometryBatch(reader, {
-      bbox,
-      resolution: 360 / (512 * 2 ** state.zoom),
-      signal,
-      geometry: document.querySelector('#primary').checked ? 'primary' : 'overview',
-    })
-    signal.throwIfAborted()
-    const table = tableFromIPC(batchToGeoArrow(batch, { crs: 'OGC:CRS84' }))
-    rows = batch.rowIndex
-    map.setProps({ layers: [layerFor(table, state.zoom)] })
-    status.textContent = `${batch.rowIndex.length.toLocaleString()} ${batch.source} features · zoom ${state.zoom.toFixed(1)}`
-  } catch (error) {
-    if (!signal.aborted) status.textContent = error.message
-  }
+// One tile per LOD tile: deck's TileLayer caches loaded tiles and their GPU
+// buffers, cancels abandoned loads, and overzooms the finest level.
+function tileLayer() {
+  const exact = primary.checked
+  const zooms = reader.lod.zooms
+  return new TileLayer({
+    id: `tiles-${generation}-${exact ? 'primary' : 'overview'}`,
+    tileSize: reader.lod.tile_size,
+    minZoom: exact ? Math.max(14, Math.min(...zooms)) : Math.min(...zooms),
+    maxZoom: exact ? 18 : Math.max(...zooms),
+    extent: reader.bounds,
+    getTileData: async ({ index, bbox, signal }) => {
+      const batch = await readGeometryBatch(reader, {
+        bbox: [bbox.west, bbox.south, bbox.east, bbox.north],
+        resolution: 360 / (reader.lod.tile_size * 2 ** index.z),
+        signal,
+        geometry: exact ? 'primary' : 'overview',
+        maxTiles: 16,
+      })
+      return {
+        table: tableFromIPC(batchToGeoArrow(batch, { crs: 'OGC:CRS84' })),
+        rows: batch.rowIndex,
+        source: batch.source,
+      }
+    },
+    renderSubLayers: ({ id, tile, data }) =>
+      data?.rows.length ? featureLayer(id, data.table, tile.index.z) : null,
+    onViewportLoad: (tiles) => {
+      const loaded = tiles.filter((t) => t.content)
+      const features = loaded.reduce((n, t) => n + t.content.rows.length, 0)
+      status.textContent = `${features.toLocaleString()} ${loaded[0]?.content.source ?? 'overview'} features in ${loaded.length} tiles · zoom ${state.zoom.toFixed(1)}`
+    },
+    onTileError: (error) => {
+      if (error?.name !== 'AbortError') status.textContent = error.message
+    },
+  })
 }
 async function open() {
-  request?.abort()
   status.textContent = 'Opening…'
   try {
     reader = await openReader(await httpSource([url.value]))
@@ -109,8 +112,8 @@ async function open() {
       pitch: 0,
       bearing: 0,
     }
-    map.setProps({ initialViewState: state })
-    schedule()
+    generation++
+    map.setProps({ initialViewState: state, layers: [tileLayer()] })
   } catch (error) {
     status.textContent = error.message
   }
@@ -119,5 +122,5 @@ document.querySelector('form').addEventListener('submit', (event) => {
   event.preventDefault()
   open()
 })
-document.querySelector('#primary').addEventListener('change', schedule)
+primary.addEventListener('change', () => reader && map.setProps({ layers: [tileLayer()] }))
 open()

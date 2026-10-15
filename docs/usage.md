@@ -341,15 +341,17 @@ A second renderer is hosted at
 <https://geoparquet-lod-compare.pages.dev/deck/> and runnable locally at
 `http://localhost:8091/demo/deck/index.html?url=/buildings.lod.parquet` after
 `npm --prefix js run demo`. `demo/deck/main.js` bundles deck.gl 9.1 with the
-GeoArrow deck.gl layers: each settled view reads the viewport as a geometry
-batch, converts it to a GeoArrow table, and hands the table to
-`GeoArrowPolygonLayer` (or the path and scatterplot layers for lines and
-points), so coordinates move from Arrow buffers into GPU attributes without
-per-feature objects. Polygon triangulation still runs on the CPU, as for any
-deck.gl polygon layer, and each view change re-reads and re-uploads the
-viewport; a streaming application would keep tiles resident instead. Outlines
-are drawn from zoom 14, where features are larger than the placeholder squares
-coarse overviews use. `?view=lon,lat,zoom` opens at a place and `?url=` opens
-another file; there is no basemap dependency. For external files use the
-comparison server's `/demo/deck/index.html?url=/data/current.parquet` route
-and its `--lod` option.
+GeoArrow deck.gl layers under a `TileLayer`: each tile reads its extent as a
+geometry batch at the tile's zoom, converts it to a GeoArrow table, and
+renders through `GeoArrowPolygonLayer` (or the path and scatterplot layers
+for lines and points), so coordinates move from Arrow buffers into GPU
+attributes without per-feature objects. The tile layer keeps loaded tiles and
+their GPU buffers while panning, cancels abandoned loads, and overzooms the
+finest overview. Polygon triangulation runs in an earcut worker pool served
+from the bundle. Whole features that straddle a tile edge are read by both
+tiles, so counts in the status line include those repeats. Outlines are drawn
+from zoom 14, where features are larger than the placeholder squares coarse
+overviews use. `?view=lon,lat,zoom` opens at a place and `?url=` opens another
+file; there is no basemap dependency. For external files use the comparison
+server's `/demo/deck/index.html?url=/data/current.parquet` route and its
+`--lod` option.
