@@ -26,14 +26,14 @@
   ],
   "results": [
     {
-      "path": "/private/tmp/claude-501/-Users-shaneloeffler-dev-carbonplan-geoparquet-lod/d381515f-9625-4789-8845-832ecdedf85f/scratchpad/japan/japan_buildings.parquet",
+      "path": "japan_buildings.parquet",
       "rows": 53742978,
       "xor": 8283320748669911015,
       "sum": 495692940698573223043586965,
       "seconds": 4.747461291030049
     },
     {
-      "path": "/private/tmp/japan.tippecanoe-density.parquet",
+      "path": "japan.tippecanoe-density.parquet",
       "rows": 53742978,
       "xor": 8283320748669911015,
       "sum": 495692940698573223043586965,

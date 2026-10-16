@@ -2,14 +2,18 @@
 
 Polls QgsMapRendererParallelJob.renderedImage() while the job runs, the same
 partial image the canvas shows as a preview, and records the fraction of the
-final painted pixels present at each sample. Run with the QGIS bundle's Python:
+final painted pixels present at each sample. Needs QGIS's bundled Python, not
+the project environment. On macOS:
 
-    A=/Applications/QGIS-final-4_2_1.app/Contents
-    PROJ_LIB=$A/Resources/qgis/proj PYTHONHOME=$A/Frameworks QT_QPA_PLATFORM=offscreen \
-      $A/MacOS/python3.12 benchmarks/standard-overviews/qgis-progressive.py
+    export QGIS_CONTENTS=/Applications/QGIS.app/Contents
+    PROJ_LIB=$QGIS_CONTENTS/Resources/qgis/proj PYTHONHOME=$QGIS_CONTENTS/Frameworks \
+      QT_QPA_PLATFORM=offscreen $QGIS_CONTENTS/MacOS/python3.12 \
+      benchmarks/standard-overviews/qgis-progressive.py packed.parquet prefix.parquet out.json
 """
 
 import json
+import os
+import sys
 import time
 
 from qgis.core import (
@@ -25,16 +29,11 @@ from qgis.core import (
 from qgis.PyQt.QtCore import QCoreApplication, QSize
 from qgis.PyQt.QtGui import QColor
 
-A = '/Applications/QGIS-final-4_2_1.app/Contents'
-
-QgsApplication.setPrefixPath(A + '/MacOS', True)
+QgsApplication.setPrefixPath(os.environ['QGIS_CONTENTS'] + '/MacOS', True)
 app = QgsApplication([], False)
 app.initQgis()
 
-FILES = {
-    'single': '/private/tmp/std-overviews/tokyo.packed.parquet',
-    'prefix': '/private/tmp/std-overviews/tokyo.prefix.parquet',
-}
+FILES = {'single': sys.argv[1], 'prefix': sys.argv[2]}
 EXTENTS = {
     'full': QgsRectangle(139.39, 35.45, 140.10, 35.90),
     'city': QgsRectangle(139.65, 35.62, 139.87, 35.74),
@@ -96,5 +95,5 @@ for run in range(3):
                 [next((c for t, c in r['samples'] if t >= s), 1.0) for s in (1, 2, 5)],
                 flush=True,
             )
-json.dump(out, open('/private/tmp/std-overviews/qgis_progressive.json', 'w'), indent=1)
+json.dump(out, open(sys.argv[3], 'w'), indent=1)
 app.exitQgis()
