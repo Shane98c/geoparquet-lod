@@ -59,8 +59,6 @@ For a scripted four-reader measurement, see
   Avoid general speed rankings from a single dataset or unequal output.
 - Keep generated datasets, credentials, caches, and deployment state out of
   commits. Commit small measurement results and reproducible scripts instead.
-- Pull requests run a [reader performance gate](docs/performance-checks.md)
-  that rejects increases in bytes, requests, or CPU time on a synthetic fixture.
 
 Useful next work includes independent readers, conformance fixtures, other
 geometry workloads, memory measurements, adaptive thinning, and opportunities

@@ -14,8 +14,6 @@ Start with the [project overview](../README.md), [usage guide](usage.md),
   provenance, counter definitions, and how to rebuild the page.
 - [Design alternatives](design-alternatives.md): layouts and encodings measured
   in the same role and why the current ones were chosen.
-- [Reader performance checks](performance-checks.md): the regression gate run
-  on pull requests.
 
 Raw measurements sit in `benchmarks/`. Local paths inside them identify the
 measured fixtures; they are not download locations. Full archives are
