@@ -1,3 +1,8 @@
+/*!
+ * GeometryBuilder is adapted from @cogp/reader 2.1.4 (geometry.ts),
+ * Copyright (c) 2026 Kanahiro Iguchi, MIT License; see COGP-LICENSE.txt.
+ */
+
 /**
  * Assembles decoded LOD rows (nested arrays of grid coordinates in the
  * family's shape) into the columnar GeometryColumn our MVT encoder consumes. Coordinates stay in grid units; `finish` records the

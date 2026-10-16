@@ -20,8 +20,9 @@ Serve immutable files with HTTP Range support and CORS exposing `Content-Range`.
 MapLibre integration requires the distributed `worker.js` and its imports to
 remain available to your bundler. Other dependencies remain external in `dist`.
 
-Project code is MIT; the MVT encoder includes code adapted from `@cogp/reader`
-with its MIT copyright notice retained in source and compiled output. See
+Project code is MIT; the MVT encoder and geometry builder include code adapted
+from `@cogp/reader` with its MIT copyright notice retained in source and
+compiled output. See
 `src/COGP-LICENSE.txt`. The optional vendored Esri comparison reader is not
 included in this package.
 

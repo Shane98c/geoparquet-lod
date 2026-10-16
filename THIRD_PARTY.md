@@ -9,8 +9,9 @@ That license does not replace dependency licenses or dataset terms.
   [GeoParquet PR 305](https://github.com/opengeospatial/geoparquet/pull/305):
   the quantized coordinate transform informed this layout.
   The JS reader uses `@cogp/reader`. `js/src/mvt.ts` is adapted from its
-  MVT, clipping, and property code; Kanahiro Iguchi's MIT notice is retained in
-  that file and [COGP-LICENSE.txt](js/src/COGP-LICENSE.txt).
+  MVT, clipping, and property code, and `js/src/geometry.ts`'s `GeometryBuilder`
+  from its geometry builder; Kanahiro Iguchi's MIT notice is retained in
+  those files and [COGP-LICENSE.txt](js/src/COGP-LICENSE.txt).
 - [GeoParquet PR 299](https://github.com/opengeospatial/geoparquet/pull/299) and
   [Esri Spatially Optimized Parquet](https://github.com/Esri/spatially-optimized-parquet):
   per-resolution geometry columns and page-index-based spatial access.
@@ -27,8 +28,8 @@ That license does not replace dependency licenses or dataset terms.
 [`Esri/spatially-optimized-parquet`](https://github.com/Esri/spatially-optimized-parquet/tree/10ff683874db8b2d99c0f03b98354b5ea5f8199c/viewer/src),
 commit `10ff683874db8b2d99c0f03b98354b5ea5f8199c`, under Apache-2.0.
 The [upstream license](js/vendor/esri-sop/LICENSE) is retained. The implementation
-files are unchanged; `common/dataset/datasets.ts` reduces the demo dataset type,
-and `index.ts` is a local export adapter. This code serves only the optional
+files are unchanged; `common/dataset/datasets.ts` reduces the demo dataset type
+and is marked as modified, and `index.ts` is a local export adapter. This code serves only the optional
 comparison pane, not the GeoParquet LOD reader.
 
 ## Example and benchmark data

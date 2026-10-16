@@ -24,8 +24,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
-import type { FeatureSource, GeometryColumn } from '@cogp/reader'
 import { clipPolygon, clipPolyline } from 'lineclip'
+import type { FeatureSource, GeometryColumn } from '@cogp/reader'
 
 /** Tile coordinate extent written by `toMvt`. */
 export const MVT_EXTENT = 4096
