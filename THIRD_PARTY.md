@@ -18,9 +18,10 @@ That license does not replace dependency licenses or dataset terms.
 - [Tippecanoe](https://github.com/felt/tippecanoe): inspiration for zoom selection,
   feature dropping, and tiny-polygon display. Our estimated-byte thinning is
   not an exact implementation of Tippecanoe's compressed-tile decisions.
-- The implementation also depends on DuckDB, PyArrow, NumPy, Shapely,
+- The implementation also depends on DuckDB, PyArrow, NumPy, Shapely, click,
   hyparquet, hyparquet-compressors, and lineclip. Dependency manifests and lock
-  files record the actual versions. MapLibre and PMTiles power the demo.
+  files record the actual versions. MapLibre, PMTiles, deck.gl,
+  @geoarrow/deck.gl-layers, and apache-arrow power the demo.
 
 ## Vendored Esri comparison reader
 

@@ -15,6 +15,6 @@ Start with the [project overview](../README.md), [usage guide](usage.md),
 - [Design alternatives](design-alternatives.md): layouts and encodings measured
   in the same role and why the current ones were chosen.
 
-Raw measurements sit in `benchmarks/`. Local paths inside them identify the
+Raw measurements sit in `benchmarks/`. File names inside them identify the
 measured fixtures; they are not download locations. Full archives are
 intentionally excluded from Git.

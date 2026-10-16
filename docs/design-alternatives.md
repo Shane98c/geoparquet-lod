@@ -39,12 +39,12 @@ painted pixels):
 | Extent, file           | 0.5 s | 1 s  | 2 s  | 5 s  | Done   |
 | ---------------------- | ----- | ---- | ---- | ---- | ------ |
 | Whole Tokyo, one order | 0.02  | 0.04 | 0.09 | 0.23 | 29.9 s |
-| Whole Tokyo, prefix    | 0.40  | 0.44 | 0.48 | 0.56 | 29.9 s |
-| City, one order        | 0.10  | 0.22 | 0.50 | 1.00 | 5.0 s  |
-| City, prefix           | 0.41  | 0.48 | 0.63 | 1.00 | 5.0 s  |
+| Whole Tokyo, prefix    | 0.21  | 0.44 | 0.48 | 0.56 | 29.9 s |
+| City, one order        | 0.12  | 0.22 | 0.50 | 1.00 | 5.0 s  |
+| City, prefix           | 0.39  | 0.48 | 0.63 | 1.00 | 5.0 s  |
 
 With one order QGIS fills the map region by region along the curve; with the
-prefix the coarse selection covers the whole extent inside the first half
+prefix the coarse selection covers the whole extent within the first
 second, because GDAL delivers row groups in file order and the selection is
 the first group. The layout keeps one order for now; the prefix is the lever
 if sequential readers matter more than a request per tile, and the spatial
@@ -125,12 +125,14 @@ results.
 | z15 street, Shinjuku      | 0.05 MB, 2 req, 1,107 feat.   | 0.04 MB, 2 req | 0.02 MB, 1 req | 0.03 MB, 1 req |
 
 Request counts are identical. The standard table costs 40 to 55% more bytes
-at city zooms, slightly fewer at street zooms, and 344 MB against 219 MB for
-the packed overview columns. Styled reads cost the same as geometry-only in
-both: with 4,096-row groups the attribute chunks sit inside the gaps the
-coalescer bridges anyway. The table is ordinary Parquet; DuckDB queries it
-and reads the nested coordinates directly, though no tool treats them as
-geometry without the level's scale and offset. Not measured: decode CPU,
+at city zooms; at street zooms it costs slightly fewer on a cold read and 29%
+more on the next tile; and it stores 344 MB against 219 MB for the packed
+overview columns. Styled reads cost the same as geometry-only in the packed
+rows and at most 3% more in the standard table, apart from its z8 next tile
+at 14% more: with 4,096-row groups the attribute chunks mostly sit inside the
+gaps the coalescer bridges anyway. The table is ordinary Parquet; DuckDB
+queries it and reads the nested coordinates directly, though no tool treats
+them as geometry without the level's scale and offset. Not measured: decode CPU,
 which the standard-geometry ablation above puts at about twice the packed
 rows, and larger datasets, where the 15,345 row groups here become hundreds
 of thousands and the directory must carry them.

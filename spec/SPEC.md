@@ -61,7 +61,8 @@ A conforming file MUST satisfy:
    feature's file row index, its geometry on that LOD's grid and its
    attributes. The writer MUST place every
    copy a tile needs on the tile's _host_: the first row whose key is at or
-   past the tile's interval start, or the last row when none is, and a row
+   past the tile's interval start, or the last row with a non-null key when
+   none is, and a row
    shown only to host copies has an empty geometry. A
    shape under a pixel at the zoom draws as a placeholder square its own
    tile shows whole, so the reference writer copies only shapes a pixel or
@@ -83,12 +84,14 @@ A conforming file MUST satisfy:
    attributes and the straddler copies it hosts, see Layout 1. A host-only row has empty own geometry. A row whose
    primary geometry is null or empty is shown at no LOD.
 
-The validator checks the metadata, the schema shapes, covering statistics,
-page indexes, and a sample decode of every LOD from the first row group; in
-full mode it decodes every LOD value and copy, verifies the key order, and
-checks the spatial index against the footer. It does not verify that every
-row is shown at the finest LOD; that is what the reference writer does, and a
-conformance suite with fixtures for it is open work.
+The validator checks the version, encoding and per-LOD metadata, the schema
+shapes, covering statistics, page indexes, and a sample decode of every LOD
+from the first row group; in full mode it decodes every LOD value and copy
+and, when the file has the [spatial index](SPATIAL-INDEX.md), checks it and
+the key order against the footer. It does not check the rules on `zooms`
+below, nor that every row is shown at the finest LOD; that is what the
+reference writer does, and a conformance suite with fixtures for it is open
+work.
 
 The following SHOULD hold and are what the reference writer does:
 
@@ -128,7 +131,7 @@ choice per LOD and need not nest: a row may be shown zoomed out and hidden
 one zoom in, as tippecanoe's per-zoom dropping produces. An LOD's zooms are
 contiguous and ascending. Which zooms share an LOD is writer policy: the
 reference writer gives each zoom its own LOD until the zoom from which the
-thinning keeps every row, pairs zooms above it, and uses one LOD for all
+thinning keeps every row, pairs zooms from it upward, and uses one LOD for all
 complete zooms when the full-detail geometry is small.
 
 ### Example
@@ -147,27 +150,27 @@ the `geo` key beside the usual GeoParquet fields (only two LOD entries shown):
   "encoding": "packed",
   "pack_version": 1,
   "attributes": [{ "name": "height", "type": "float" }, { "name": "class", "type": "string" }],
-  "thinning": { "rule": "combine(size_threshold(4), drop_rate(2.5))" },
+  "thinning": { "name": "combine(size_threshold(4), drop_rate(2.5))" },
   "lods": {
-    "f8": { "zooms": [8], "geometry_type": "MultiPolygon", "scale": [6.8665e-4, 6.8665e-4], "offset": [-105.1, 39.6], "placeholder": 1 },
-    "f13": { "zooms": [13, 14], "geometry_type": "MultiPolygon", "scale": [1.0729e-5, 1.0729e-5], "offset": [-105.1, 39.6], "placeholder": 1 }
+    "f8": { "zooms": [8], "geometry_type": "MultiPolygon", "scale": [6.8665e-4, 6.8665e-4], "offset": [-105.1, 39.6], "placeholder": 2 },
+    "f13": { "zooms": [13, 14], "geometry_type": "MultiPolygon", "scale": [1.0729e-5, 1.0729e-5], "offset": [-105.1, 39.6], "placeholder": 2 }
   }
 }
 ```
 
-and the physical schema, with `geometry` and the source attributes as the
+and the physical schema, with the source attributes and `geometry` as the
 source had them:
 
 ```
-geometry: binary (WKB)
-height: float
-class: string
 bbox: struct<xmin: float, ymin: float, xmax: float, ymax: float> not null
 hilbert: int64
 lod: struct<
   f8: binary,
   f13: binary
 > not null
+height: float
+class: string
+geometry: binary (WKB)
 ```
 
 ## Geometry
@@ -202,18 +205,21 @@ the transform and grid of COGP's `quantized_geoarrow`, in one private byte
 format a COGP reader cannot decode. Every ring is closed, every part has
 at least two vertices, and a row shown only to host copies has zero
 polygons; empty geometry is otherwise never written. Ring steps make a
-building a handful of one-byte varints: a placeholder square packs to about
-six bytes before compression, a footprint to about two bytes per vertex.
+building a handful of one-byte varints: a placeholder square packs to 15 to
+20 bytes before compression, a footprint to about two bytes per vertex.
 The reference writer uses a quarter of the LOD's finest zoom pixel as
 `scale` and the dataset's minimum corner as the origin. Quantization rounds
 half away from zero.
 
-A family keeps its geometry type at every zoom. A shape too small for an
-LOD's grid in both directions is a square on the grid cell holding its
+A family keeps its geometry type at every zoom. A polygon narrower in both
+directions than its placeholder square, or empty or invalid after snapping
+to the LOD's grid, becomes that square: on the grid cell holding its
 centroid, `placeholder` cells wide and as many cells tall as draw square on
 a Mercator screen at its latitude, half a pixel unless the thinning asks
 for another size, so a thinned set of buildings zoomed out reads as a faint
-texture of its density, as tippecanoe's tiny-polygon squares do. The grid
+texture of its density, as tippecanoe's tiny-polygon squares do. A line
+shorter than a cell in both directions becomes a segment `placeholder`
+cells long from its centroid's cell. The grid
 is a quarter pixel at the LOD's finest zoom, in nominal Web Mercator pixels
 at the equator, close to tippecanoe's eighth-pixel tolerance; features a
 pixel or two across keep their own shape.
@@ -256,11 +262,11 @@ analysis readers and the primary geometry fallback.
 ## Choosing zooms
 
 The extension does not fix zooms. The reference writer derives them from the
-data when not given: the coarsest zoom is the one at which the dataset extent
-fits a tile; shape LODs start at the zoom where the median feature spans
-one pixel; the finest zoom is where the median vertex spacing spans four
-pixels, capped at 18. Writers SHOULD record the zooms in `zooms` and MAY use
-any rule.
+data when not given: the coarsest zoom is one coarser than the zoom at which
+the dataset extent spans about one pixel; every feature is shown from the
+zoom where the median feature spans one pixel; the finest zoom is where the
+median vertex spacing spans four pixels, capped at 18. Writers SHOULD record
+the zooms in `zooms` and MAY use any rule.
 
 ## Analysis readers
 
@@ -311,8 +317,9 @@ this layout is in which rows a coarse view reads and how it finds them.
   clusters rows by an XZ-order code, relies on the Parquet page index for
   extent queries, and adds per-level geometry columns of delta-encoded
   protobuf simplified with Douglas-Peucker on a power-of-two scale ladder,
-  declared under a `geodisplay` key. Every feature appears at every level, so
-  coarse views read many pages and the reference reader caps feature counts.
+  declared under a `geodisplay` key. Every feature is stored at every level,
+  so coarse views read many pages; the reference reader skips geometries that
+  collapse at the level's resolution and stops at 650,000 features per query.
   This layout drops features per zoom instead, as tippecanoe does.
 - **GeoParquet 2.0**: orthogonal. The primary geometry is WKB in both 1.1 and
   2.0; 2.0 annotates it with Parquet's `GEOMETRY` type and gains row-group
@@ -327,8 +334,8 @@ this layout is in which rows a coarse view reads and how it finds them.
   COGP's `quantized_geoarrow` shape, tile-sized row groups and a directory
   over them. [Design alternatives](../docs/design-alternatives.md) measures
   it on Tokyo with identical tile membership: the same request counts, 40 to
-  55% more bytes at city zooms, 57% more overview storage, and about twice
-  the decode CPU, in exchange for overviews any Parquet reader can open.
+  55% more bytes at city zooms, 57% more overview storage, and an estimated
+  twice the decode CPU, in exchange for overviews any Parquet reader can open.
 - Whether `quantized_geoarrow` should admit a `Point` type, or point LODs
   should use a GeoArrow point struct in degrees at float64.
 - Partitioned datasets: one manifest listing files and their extents.

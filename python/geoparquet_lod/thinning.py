@@ -2,10 +2,11 @@
 
     def thin(rows: pa.Table, zoom: int, ctx: Context) -> pa.Table
 
-The writer calls `thin` once per zoom with every row, as tippecanoe builds
-each zoom from the whole dataset, and the function returns the rows to show
-there. The finest zoom shows every row regardless. Membership need not nest
-across zooms, so a rule answers only "which rows belong at this zoom?".
+The writer calls `thin` once per zoom with every row in Hilbert order, as
+tippecanoe builds each zoom from the whole dataset, and the function returns
+the rows to show there. The finest zoom shows every row regardless.
+Membership need not nest across zooms, so a rule answers only "which rows
+belong at this zoom?".
 
 `rows` always has: `id`, `cx`, `cy` (centroid), `diag` (bbox diagonal in CRS
 units), `area` (in CRS units squared), `nv` (vertex count), `u` (a uniform in
@@ -33,7 +34,7 @@ from .quantize import resolution
 Thin = Callable[[pa.Table, int, 'Context'], pa.Table]
 RESERVED = ('id', 'cx', 'cy', 'diag', 'nv', 'u')
 # `area` is also provided but a thinning may update it, as `tiny_polygons` does
-TINY_PIXELS = 0.25  # tippecanoe's tiny-polygon square, two units of a 4096-unit 256 px tile
+TINY_PIXELS = 0.25  # tippecanoe's tiny-polygon square, two units of a 4096-unit 512 px tile
 MAX_LATITUDE = 85.0511287798066
 
 
@@ -170,8 +171,8 @@ def density_budget(budget: int = 60_000) -> Thin:
         _, counts = np.unique(tiles, return_counts=True)
         busiest = int(counts.max()) if len(counts) else 1
         fraction = min(1.0, budget / max(busiest, 1))
-        # the rows handed in already passed finer zooms' cuts on u, so the
-        # fraction is taken of their u distribution, not of [0, 1)
+        # rows may arrive filtered, as under `chain` or `only`, so the fraction is
+        # taken of their u distribution, not of [0, 1)
         u = rows.column('u').to_numpy()
         keep = u < np.quantile(u, fraction) if len(u) and fraction < 1.0 else np.ones(len(u), bool)
         return _mask(rows, keep)
@@ -268,10 +269,11 @@ def importance(column: str, per_tile: int = 1000, descending: bool = True) -> Th
 
 
 def cluster(pixels: float = 8.0, count: str = 'count') -> Thin:
-    """Collapse rows within `pixels` of each other into one representative
-    carrying their total in attribute `count`, which must be a carried
-    attribute; an existing `count` column is summed, so a pre-aggregated
-    source keeps its totals."""
+    """Collapse the rows in each `pixels`-wide grid cell into one
+    representative, the cell's first row in Hilbert order, carrying their
+    total in attribute `count`, which must be a carried attribute; an
+    existing `count` column is summed, so a pre-aggregated source keeps its
+    totals."""
 
     def thin(rows, zoom, ctx):
         cells = ctx.cell_of(rows, zoom, pixels)

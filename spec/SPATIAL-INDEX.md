@@ -44,8 +44,9 @@ The compressed root is bounded by the first 16 KiB and contains:
 
 - `version: 1`, `file_bytes`: format and full file length checks.
 - `lod`, `primary`: copies of the logical LOD metadata and primary column name.
-- `bounds`, `columns`: map extent and inspectable scalar source columns, so a
-  map can initialize without another reader open.
+- `bounds`, `columns`: map extent and the scalar (non-nested) columns other
+  than the primary geometry, including the key column, so a map can
+  initialize without another reader open.
 - `codecs`: LOD name to its Parquet compression codec.
 - `directory_encoding: "delta"` and `streams`: LOD name to a list of directory
   series. The reference writer emits one series per LOD; readers search every
@@ -60,7 +61,8 @@ lengths. Cells are Hilbert cells at `min(key.depth, finest_LOD_zoom)`.
 Directory bounds reconstructed from cells conservatively include whole cells.
 
 A depth-zero shard contains page records. A deeper shard contains ordered
-descriptors `[min_key, max_key, byte_offset, compressed_length, child_depth]`.
+descriptors `[min_key, max_key, byte_offset, compressed_length, child_depth]`;
+`child_depth` is omitted when the children are leaf shards.
 Only the root uses delta-coded descriptors. Branch levels are added only when
 needed to keep the bootstrap bounded. Both branches and leaves are gzip JSON.
 
@@ -100,7 +102,8 @@ specific to one file write, and ordinary Parquet writers need not preserve it.
 The reference `write()` builds the layout as its final step, writes to
 temporary files, and publishes only after the completed footer is readable.
 Its layout pass rejects encrypted or external chunks, bloom filters, legacy
-index pages, and dictionary-encoded LOD chunks.
+index pages, and, when keeping LOD pages verbatim, dictionary-encoded LOD
+chunks; the default tile-aligned build re-encodes them.
 
 The reference reader's caching, worker pool, and cancellation behaviour are
 described in the [usage guide](../docs/usage.md#reader-behaviour); none of it

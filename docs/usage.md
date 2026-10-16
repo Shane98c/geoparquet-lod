@@ -47,13 +47,14 @@ few lines each and meant to be copied:
 | `chain(a, b)`                   | apply `b` to what `a` kept                                                                                                               | `drop_smallest` then `tiny_polygons`       |
 
 Anything the built-ins cannot express is a short function of a table. The
-writer's other options (zooms, the complete zoom, row group and page sizes,
-compression level) shape the file, not the row selection.
+writer's other options (row group and page sizes, compression level) shape
+the file, not the row selection.
 
-Zooms are derived from the data unless given: the coarsest zoom is where the
-dataset's extent fits a tile, the base zoom a rate-based thinning counts
-from is where the median feature spans a pixel, and the finest zoom is where
-the median vertex spacing spans four pixels. The writer logs the guess and
+Zooms are derived from the data unless given: the coarsest zoom is one
+coarser than where the dataset's whole extent spans about a pixel, the base
+zoom a rate-based thinning counts from is where the median feature spans a
+pixel, and the finest zoom is where the median vertex spacing spans four
+pixels. The writer logs the guess and
 records which zooms actually keep every row; pass `zooms=` or
 `complete_from=` to override. On Overture buildings for a city that is zooms
 2 to 16, complete from 13; on US counties, complete at every zoom; on census
@@ -79,7 +80,7 @@ functions can read any source column via `columns=` without carrying it.
 Points, lines and polygons, one family per file, and a family keeps its
 geometry type at every zoom, as tippecanoe does. Lines and polygons carry a
 quantized copy per LOD: one per zoom below the complete zoom, where the
-thinning changes the row set, and one per two zooms above it. Each LOD is
+thinning changes the row set, and one per two zooms from it up. Each LOD is
 one binary column: a row's value packs its geometry on the LOD's pixel grid
 as varint ring steps, its carried attributes, and copies of neighbouring
 features that reach into its tile, so a tile can read a contiguous range of
@@ -87,10 +88,10 @@ that column. Page, directory, and row-group boundaries can add requests. Grid
 coordinates decode as `offset + scale * integer`; the transform and grid are
 COGP's `quantized_geoarrow`, the byte format is this layout's own, a page of
 spec. When the full-detail shapes of the whole dataset are small (16 MB by
-default) a single LOD serves every zoom instead of copies, which is what
-happens for things like counties. Finer than the finest zoom the reader
-draws the exact primary geometry, so full detail is always reachable and
-costs nothing to store.
+default) a single LOD serves every zoom from the complete zoom up instead of
+copies, which is what happens for things like counties. Finer than the finest
+zoom the reader draws the exact primary geometry, so full detail is always
+reachable and costs nothing to store.
 
 ## Install
 
@@ -103,8 +104,8 @@ npm --prefix js run build
 ```
 
 Neither package is on PyPI or npm yet; install the Python package with
-`uv pip install -e .` or `pip install -e .`, and the JS package from the
-path or a git URL (`npm install ../geoparquet-lod/js`).
+`uv pip install -e .` or `pip install -e .`, and the JS package from a local
+path after building it (`npm install ../geoparquet-lod/js`).
 
 ## Quick start
 
@@ -120,7 +121,9 @@ uv run geoparquet-lod validate overture_denver.lod.parquet
 uv run geoparquet-lod inspect overture_denver.lod.parquet
 ```
 
-The same from the CLI with a thinning spec, or from Python:
+The same from the CLI with a thinning spec, or from Python. In a spec `+`
+unions thinnings (`combine`) and `>` chains them (`chain`), as in
+`smallest:600000>tiny`:
 
 ```bash
 uv run geoparquet-lod write buildings.parquet buildings.lod.parquet \
@@ -128,11 +131,11 @@ uv run geoparquet-lod write buildings.parquet buildings.lod.parquet \
 ```
 
 ```python
-from geoparquet_lod import write, drop_rate, only
+from geoparquet_lod import write, combine, drop_rate, only, size_threshold
 
 write(
     "buildings.parquet", "buildings.lod.parquet",
-    thinning=only("risk > 0", drop_rate(2.5)),
+    thinning=only("risk > 0", combine(size_threshold(4), drop_rate(2.5))),
     carry=["risk"],
 )
 ```
@@ -353,5 +356,5 @@ tiles, so counts in the status line include those repeats. Outlines are drawn
 from zoom 14, where features are larger than the placeholder squares coarse
 overviews use. `?view=lon,lat,zoom` opens at a place and `?url=` opens another
 file; there is no basemap dependency. For external files use the comparison
-server's `/demo/deck/index.html?url=/data/current.parquet` route and its
-`--lod` option.
+server's `/demo/deck/index.html?url=/data/current.parquet` route; the server
+needs both `--lod` and `--pmtiles`.

@@ -40,8 +40,9 @@ and ready status are shown explicitly; initial timing waits for data rendering.
 Objects live under `geoparquet-lod/releases/<tag>/` in the
 `live-classify-data` bucket. The tag is the commit whose recipe produced the
 object: `0fcab25` built the GeoParquet file with
-`benchmarks/write-japan-tippecanoe.py`; the other three archives were
-converted at `6c3a4f9` and have not changed.
+`benchmarks/write-japan-tippecanoe.py`; the PMTiles and COGP archives were
+converted at `6c3a4f9`, and the Esri SOP file, uploaded at that release, is
+Esri's original. None has changed.
 
 | Dataset    | Release   |         Bytes | MD5                                |
 | ---------- | --------- | ------------: | ---------------------------------- |

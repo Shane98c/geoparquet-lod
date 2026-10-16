@@ -6,7 +6,7 @@ copies it carries. Everything is an unsigned LEB128 varint except string
 bytes, which follow all of a row's varints in order, so a reader walks the
 varints knowing the structure and then takes string payloads in turn.
 
-    row     := varints(own) varints(attrs) [varints(spill)] strings...
+    row     := varints(own) varints(attrs) varints(spill) strings...
     own     := polygons: n, per polygon: rings, per ring: vertices, then
                zigzag(dx) zigzag(dy) per vertex, deltas within the ring and
                the first vertex from the origin

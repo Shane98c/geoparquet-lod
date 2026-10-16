@@ -62,7 +62,7 @@ do not establish equal whole-session performance across datasets or devices.
 
 The [hosted demo](hosted-comparison.md) serves this build; the
 [four-reader comparison](comparison.md) measures it beside COGP, PMTiles and
-Esri SOP over the public internet, so its numbers differ from this local run.
+Esri SOP over the public internet.
 
 ## Integrity and reproduction
 
@@ -79,9 +79,10 @@ complete build in one call. See the [usage guide](usage.md) for that workflow.
 
 Recorded measurements and integrity checks are in
 [`benchmarks/dropping/`](../benchmarks/dropping/). `demo-density*.json` profile
-the hosted demo build against PMTiles and `calibrated-density*.json` this
-build, each on the calibration and held-out tile sets. In `ranges.json`,
-`single` labels this build's GeoParquet file and `pmtiles` the archive.
+the uncalibrated baseline build the budgets were calibrated from against PMTiles
+and `calibrated-density*.json` this build, each on the calibration and
+held-out tile sets. In `ranges.json`, `prefix` labels the baseline build,
+`single` this build's GeoParquet file and `pmtiles` the archive.
 
 ## What remains to improve
 

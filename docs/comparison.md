@@ -48,9 +48,10 @@ something next to the feature counts.
   grow with the level count.
 - PMTiles stops at z14 and serves the overzoomed parent at z15, which is why
   its street tiles hold more features than the others.
-- Esri's reader returns every feature in the extent at the chosen level's
-  resolution and does not drop features. It reads many pages per view and has
-  a feature limit at coarse zooms.
+- Esri SOP stores every feature at every level. Its reader skips geometries
+  that collapse at the chosen level's resolution and stops at 650,000
+  features per query at any zoom, which no measured tile reached. It reads
+  many pages per view.
 - This layout's thinning budgets were calibrated against PMTiles feature
   counts at z8, z11 and z12, as the [Japan evaluation](japan-evaluation.md)
   describes, so the two agree within a few percent where both serve native

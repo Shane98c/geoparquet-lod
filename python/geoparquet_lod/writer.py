@@ -150,11 +150,11 @@ def _bbox_float32(column: pa.ChunkedArray) -> pa.Array:
 
 
 def guess_zooms(con, sorted_path, geometry, family, zooms, complete_from, extent, degrees, log):
-    """Tippecanoe's `-zg` in spirit: the coarsest zoom is where the extent fits
-    a tile, every feature is present from the zoom where the median feature
-    spans a pixel, and the finest zoom is where the median vertex spacing spans
-    four pixels, so the
-    finest grid does not visibly bend shapes when the map overzooms it.
+    """Tippecanoe's `-zg` in spirit: the coarsest zoom is one coarser than where
+    the whole extent spans about a pixel, every feature is present from the zoom
+    where the median feature spans a pixel, and the finest zoom is where the
+    median vertex spacing spans four pixels, so the finest grid does not
+    visibly bend shapes when the map overzooms it.
     Explicit values are kept; `'auto'` is replaced and logged."""
     import math
 
@@ -570,7 +570,7 @@ def _write_unindexed(
     )
     rows = con.execute(
         f'SELECT {slim}, (hash({geometry}) % 1000000007) / 1000000007.0 AS u '
-        f"FROM '{sorted_path}' WHERE __cx IS NOT NULL ORDER BY __id"
+        f"FROM '{sorted_path}' WHERE __cx IS NOT NULL ORDER BY __h, __id"
     ).to_arrow_table()
     # a string attribute with few distinct values is packed as an index into a value table
     dictionaries: dict[str, list] = {}
