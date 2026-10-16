@@ -8,11 +8,15 @@ the project environment. On macOS:
     export QGIS_CONTENTS=/Applications/QGIS.app/Contents
     PROJ_LIB=$QGIS_CONTENTS/Resources/qgis/proj PYTHONHOME=$QGIS_CONTENTS/Frameworks \
       QT_QPA_PLATFORM=offscreen $QGIS_CONTENTS/MacOS/python3.12 \
-      benchmarks/standard-overviews/qgis-progressive.py packed.parquet prefix.parquet out.json
+      benchmarks/standard-overviews/qgis-progressive.py tokyo.packed.parquet tokyo.prefix.parquet out.json
+
+write-tokyo.py builds the two files. The summary holds the median over runs of
+the render time and of the coverage at each listed second.
 """
 
 import json
 import os
+import statistics
 import sys
 import time
 
@@ -79,6 +83,10 @@ def render(path, extent):
     }
 
 
+def coverage_at(result, second):
+    return next((c for t, c in result['samples'] if t >= second), 1.0)
+
+
 out = {}
 for run in range(3):
     for name, path in list(FILES.items()) if run % 2 == 0 else list(FILES.items())[::-1]:
@@ -92,8 +100,20 @@ for run in range(3):
                 run,
                 r['seconds'],
                 's; coverage at 1s/2s/5s:',
-                [next((c for t, c in r['samples'] if t >= s), 1.0) for s in (1, 2, 5)],
+                [coverage_at(r, s) for s in (1, 2, 5)],
                 flush=True,
             )
-json.dump(out, open(sys.argv[3], 'w'), indent=1)
+
+
+summary = {
+    key: {
+        'seconds': round(statistics.median(r['seconds'] for r in results), 2),
+        'coverage': {
+            f'{s:g}': round(statistics.median(coverage_at(r, s) for r in results), 3)
+            for s in (0.5, 1, 2, 5, 10)
+        },
+    }
+    for key, results in out.items()
+}
+json.dump({'summary': summary, 'runs': out}, open(sys.argv[3], 'w'), indent=1)
 app.exitQgis()

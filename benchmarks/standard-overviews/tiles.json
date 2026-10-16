@@ -1,0 +1,44 @@
+[
+  {
+    "z": 8,
+    "x": 227,
+    "y": 100,
+    "label": "metro, Tokyo"
+  },
+  {
+    "z": 11,
+    "x": 1819,
+    "y": 806,
+    "label": "city, Tokyo"
+  },
+  {
+    "z": 12,
+    "x": 3638,
+    "y": 1612,
+    "label": "city, Tokyo"
+  },
+  {
+    "z": 13,
+    "x": 7274,
+    "y": 3226,
+    "label": "downtown, Shibuya"
+  },
+  {
+    "z": 13,
+    "x": 7273,
+    "y": 3228,
+    "label": "suburbs, Kawasaki"
+  },
+  {
+    "z": 15,
+    "x": 29105,
+    "y": 12903,
+    "label": "street, Tokyo station"
+  },
+  {
+    "z": 15,
+    "x": 29099,
+    "y": 12902,
+    "label": "street, Shinjuku"
+  }
+]

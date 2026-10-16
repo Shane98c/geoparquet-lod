@@ -48,8 +48,9 @@ prefix the coarse selection covers the whole extent within the first
 second, because GDAL delivers row groups in file order and the selection is
 the first group. The layout keeps one order for now; the prefix is the lever
 if sequential readers matter more than a request per tile, and the spatial
-index works either way. `benchmarks/standard-overviews/qgis-progressive.py`
-reproduces the measurement.
+index works either way. `benchmarks/standard-overviews/write-tokyo.py` builds
+both Tokyo files, the prefix from the writer at `0a06e75^`, which has the
+option, and `qgis-progressive.py` beside it reproduces the measurement.
 
 Without the index, removing the prefix initially doubled the coarse Tokyo
 tile's bytes, because a coarse overview is sparse and a fixed row cap left
@@ -108,8 +109,8 @@ a directory over the row groups replaces the 11 MB footer. The reader's
 coalescing policy is applied to both; the packed numbers are the real reader
 on the local file, the standard numbers a simulation from the footer with
 membership checked equal to the packed reader on every tile.
-`benchmarks/standard-overviews/` holds the converter, the simulator, and the
-results.
+`benchmarks/standard-overviews/` holds the Tokyo build, the converter, the
+simulator, and the results.
 
 4,881,955 Tokyo buildings, zooms 8 to 16, cold geometry-only reads after a
 16 KiB open, then the tile one column east on the same reader:
