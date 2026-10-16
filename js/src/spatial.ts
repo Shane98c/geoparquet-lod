@@ -10,6 +10,7 @@ import { GeometryBuilder } from './geometry.js'
 import { tileInterval } from './key.js'
 import {
   LodReader,
+  isCompatibleVersion,
   type Bbox,
   type Lod,
   type LodMetadata,
@@ -70,7 +71,7 @@ export async function openReader(file: RangeSource): Promise<TileReader> {
   if (root.version !== 1 || root.file_bytes !== file.byteLength)
     throw new Error('invalid spatial index version or file length')
   if (
-    root.lod.version !== '0.1.0' ||
+    !isCompatibleVersion(root.lod.version) ||
     root.lod.encoding !== 'packed' ||
     root.lod.pack_version !== 1 ||
     !root.lod.key

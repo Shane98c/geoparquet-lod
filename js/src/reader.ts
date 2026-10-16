@@ -26,6 +26,13 @@ export const LOD_VERSION = '0.1.0'
 export const ENCODING = 'packed'
 export const PACK_VERSION = 1
 
+/** Same major version, and the same minor while the major is 0. */
+export function isCompatibleVersion(version: string): boolean {
+  const [major, minor] = String(version).split('.')
+  const [ourMajor, ourMinor] = LOD_VERSION.split('.')
+  return major === ourMajor && (major !== '0' || minor === ourMinor)
+}
+
 export interface Lod {
   name: string
   zooms: number[]
@@ -126,9 +133,7 @@ export class LodReader {
     )
     const lod = geo[LOD_KEY] as LodMetadata | undefined
     if (!lod) throw new Error(`file has no geo.${LOD_KEY} metadata`)
-    const [major, minor] = String(lod.version).split('.')
-    const [ourMajor, ourMinor] = LOD_VERSION.split('.')
-    if (major !== ourMajor || (major === '0' && minor !== ourMinor)) {
+    if (!isCompatibleVersion(lod.version)) {
       throw new Error(`${LOD_KEY} version ${lod.version} is not compatible with ${LOD_VERSION}`)
     }
     if (lod.encoding !== ENCODING || lod.pack_version !== PACK_VERSION) {

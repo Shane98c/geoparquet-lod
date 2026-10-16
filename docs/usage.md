@@ -54,11 +54,8 @@ Zooms are derived from the data unless given: the coarsest zoom is one
 coarser than where the dataset's whole extent spans about a pixel, the base
 zoom a rate-based thinning counts from is where the median feature spans a
 pixel, and the finest zoom is where the median vertex spacing spans four
-pixels. The writer logs the guess and
-records which zooms actually keep every row; pass `zooms=` or
-`complete_from=` to override. On Overture buildings for a city that is zooms
-2 to 16, complete from 13; on US counties, complete at every zoom; on census
-tracts, complete from 4.
+pixels. The writer logs the guess and records which zooms actually keep every
+row; pass `zooms=` or `complete_from=` to override.
 
 ### Attributes
 
