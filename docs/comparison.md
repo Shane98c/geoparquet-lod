@@ -69,7 +69,7 @@ do not establish whole-session or cross-device parity.
 | COGP           | Coarse-to-fine row-group prefixes; feature once | Cumulative: a level adds row groups                                | Row-group prefix, then bbox statistics and page index         | Optional `quantized_geoarrow` nested int32 column                                           |
 | Esri SOP       | XZ-code clustering; feature once                | All features at every level                                        | Page index predicate skipping on the cluster code             | Per-level protobuf columns, Douglas-Peucker simplified                                      |
 | tylertoo       | `level` column with simplified WKB rows         | Per-level selection, written once per level in duplicating mode    | Level column and bbox                                         | WKB                                                                                         |
-| PMTiles        | Pre-cut MVT tiles                               | tippecanoe's per-zoom dropping                                     | MVT                                                           | Directory lookup                                                                            |
+| PMTiles        | Pre-cut MVT tiles                               | tippecanoe's per-zoom dropping                                     | Directory lookup                                              | Gzipped MVT per tile: integer coordinates on a 4096 grid, simplified and clipped per zoom   |
 
 The [specification](../spec/SPEC.md#relation-to-other-proposals) discusses the
 design differences and where this layout could fold into those proposals.
