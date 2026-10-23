@@ -9,6 +9,7 @@ without changing table values. Ordinary readers use the standard Parquet footer.
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import time
 from concurrent.futures import ProcessPoolExecutor
@@ -77,6 +78,128 @@ BBOX_FIELD = pa.field(
     ),
     nullable=False,
 )
+
+
+SORT_BUCKET_ROWS = 2_000_000
+SORT_FLUSH_ROWS = 65_536
+# rows per render job; a worker's memory follows the largest job it has rendered
+RENDER_ROWS = 131_072
+# The unsorted copy is only read in ways that ignore its order, so its row groups can be
+# small, which bounds what DuckDB buffers per thread while writing it.
+UNSORTED_ROW_GROUP_ROWS = 122_880
+
+
+def _sort_by_key(
+    unsorted_path: Path,
+    sorted_path: Path,
+    ids: np.ndarray,
+    keys: np.ndarray,
+    row_group_rows: int,
+    bucket_rows: int | None = None,
+) -> None:
+    """Rewrite `unsorted_path` in (key, id) order, rows without a key last by id.
+
+    `ids` (1-based `__id`) and `keys` cover the rows that have a key. Rows are
+    dealt by rank into buckets of `bucket_rows`, then each bucket is sorted in
+    memory and appended, so memory holds one bucket rather than the table."""
+    bucket_rows = bucket_rows or SORT_BUCKET_ROWS
+    source = pq.ParquetFile(unsorted_path)
+    n_rows = source.metadata.num_rows
+    rank = np.empty(n_rows, np.int64)
+    order = np.lexsort((ids, keys))
+    rank[ids[order] - 1] = np.arange(len(order))
+    keyless = np.ones(n_rows, bool)
+    keyless[ids - 1] = False
+    keyless = np.flatnonzero(keyless)
+    rank[keyless] = len(order) + np.arange(len(keyless))
+    key_of = np.zeros(n_rows, np.int64)
+    key_of[ids - 1] = keys
+    has_key = np.zeros(n_rows, bool)
+    has_key[ids - 1] = True
+    del order, keyless
+
+    drop = [c for c in ('__kx', '__ky') if c in source.schema_arrow.names]
+    schema = source.schema_arrow
+    for name in drop:
+        schema = schema.remove(schema.get_field_index(name))
+    schema = schema.append(pa.field('__h', pa.int64()))
+    bucket_count = max(1, -(-n_rows // bucket_rows))
+    buckets = [sorted_path.with_suffix(f'.bucket{b:05d}.parquet') for b in range(bucket_count)]
+    writers = [
+        pq.ParquetWriter(p, schema.remove(len(schema) - 1), compression='zstd') for p in buckets
+    ]
+    pending: list[list[pa.Table]] = [[] for _ in buckets]
+    pending_rows = [0] * bucket_count
+
+    def flush_bucket(b: int) -> None:
+        if pending[b]:
+            writers[b].write_table(pa.concat_tables(pending[b]))
+            pending[b], pending_rows[b] = [], 0
+
+    try:
+        for batch in source.iter_batches(batch_size=262_144):
+            table = pa.Table.from_batches([batch]).drop_columns(drop)
+            bucket = rank[table.column('__id').to_numpy() - 1] // bucket_rows
+            by_bucket = np.argsort(bucket, kind='stable')
+            table = table.take(pa.array(by_bucket))
+            bucket = bucket[by_bucket]
+            edges = np.flatnonzero(np.diff(bucket)) + 1
+            for start, end in zip(np.r_[0, edges], np.r_[edges, len(bucket)], strict=True):
+                b = int(bucket[start])
+                pending[b].append(table.slice(start, end - start))
+                pending_rows[b] += end - start
+                if pending_rows[b] >= SORT_FLUSH_ROWS:
+                    flush_bucket(b)
+        for b in range(bucket_count):
+            flush_bucket(b)
+    finally:
+        for w in writers:
+            w.close()
+    unsorted_path.unlink()
+
+    with pq.ParquetWriter(sorted_path, schema, compression='zstd') as out:
+        for path in buckets:
+            table = pq.read_table(path)
+            ids_b = table.column('__id').to_numpy() - 1
+            order = np.argsort(rank[ids_b])
+            ids_b = ids_b[order]
+            table = table.take(pa.array(order)).append_column(
+                '__h', pa.array(key_of[ids_b], mask=~has_key[ids_b])
+            )
+            out.write_table(table, row_group_size=row_group_rows)
+            del table, ids_b, order
+            path.unlink()
+
+
+def _rebatch(batches, rows: int):
+    """Single-chunk tables of exactly `rows` rows from a stream of batches, the
+    last one shorter. The writer cuts pages per chunk, so one chunk per row
+    group keeps page boundaries independent of how the input was batched."""
+    held: list[pa.RecordBatch] = []
+    count = 0
+    for batch in batches:
+        held.append(batch)
+        count += batch.num_rows
+        while count >= rows:
+            table = pa.Table.from_batches(held)
+            yield table.slice(0, rows).combine_chunks()
+            rest = table.slice(rows)
+            held = rest.to_batches()
+            count = rest.num_rows
+    if count:
+        yield pa.Table.from_batches(held).combine_chunks()
+
+
+def _first_rows(path: Path, columns: list[str], valid: str, rows: int) -> pa.Table:
+    """The first `rows` rows of `path` in file order whose `valid` column is not null."""
+    parts, count = [], 0
+    for batch in pq.ParquetFile(path).iter_batches(batch_size=rows, columns=[*columns, valid]):
+        kept = batch.filter(pc.is_valid(batch.column(valid)))
+        parts.append(kept.select(columns))
+        count += kept.num_rows
+        if count >= rows:
+            break
+    return pa.Table.from_batches(parts).slice(0, rows) if parts else pa.table({})
 
 
 def connect(memory_limit: str | None = None, temp_dir: str | None = None):
@@ -269,10 +392,15 @@ def _concat_parts(parts_list):
         [],
         [],
     )
+    # running ends, kept apart from the pieces since a batch with no shapes adds an empty one
+    geom_end = poly_end = ring_end = 0
     for g, p, r, x, y in parts_list:
-        geom.append(g[1:] + geom[-1][-1])
-        poly.append(p[1:] + poly[-1][-1])
-        ring.append(r[1:] + ring[-1][-1])
+        geom.append(g[1:] + geom_end)
+        poly.append(p[1:] + poly_end)
+        ring.append(r[1:] + ring_end)
+        geom_end += int(g[-1])
+        poly_end += int(p[-1])
+        ring_end += int(r[-1])
         xs.append(x)
         ys.append(y)
     return (
@@ -507,30 +635,21 @@ def _write_unindexed(
                 CASE WHEN {valid} THEN {cell_y} END AS __ky,
                 {passthrough}
             FROM read_parquet('{src}')
-        ) TO '{unsorted_path}' (FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE {row_group_rows})
+        ) TO '{unsorted_path}' (FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE {UNSORTED_ROW_GROUP_ROWS})
     """
     )
     cells_table = con.execute(
         f"SELECT __id, __kx, __ky FROM '{unsorted_path}' WHERE __kx IS NOT NULL"
     ).fetchnumpy()
-    keys = pa.table(
-        {
-            '__id': cells_table['__id'],
-            '__h': hilbert_key(cells_table['__kx'], cells_table['__ky'], KEY_DEPTH),
-        }
-    )
-    con.register('keys', keys)
-    con.execute(
-        f"""
-        COPY (
-            SELECT u.* EXCLUDE (__kx, __ky), k.__h
-            FROM '{unsorted_path}' u LEFT JOIN keys k USING (__id)
-            ORDER BY k.__h NULLS LAST
-        ) TO '{sorted_path}' (FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE {row_group_rows})
-    """
-    )
-    unsorted_path.unlink()
-    del keys, cells_table
+    key_ids = cells_table['__id'].astype(np.int64)
+    keys = hilbert_key(cells_table['__kx'], cells_table['__ky'], KEY_DEPTH)
+    del cells_table
+    _sort_by_key(unsorted_path, sorted_path, key_ids, keys, row_group_rows)
+    del key_ids, keys
+    # a fresh connection returns the memory DuckDB held for the copy
+    con.close()
+    con = connect(memory_limit, temp_dir)
+    pa.default_memory_pool().release_unused()
     n_rows = con.execute(f"SELECT count(*) FROM '{sorted_path}'").fetchone()[0]
     log(f'  {n_rows:,} rows sorted, {time.time() - t0:.0f}s')
     degrees = is_crs84(geo.get('columns', {}).get(geometry, {}))
@@ -591,6 +710,9 @@ def _write_unindexed(
         )
     overrides: dict[int, pa.Table] = {}
     counts = {}
+    # position in `rows` by id, to compare a thinning's attribute values with the source's
+    row_of = np.full(n_rows, -1, np.int64)
+    row_of[rows.column('id').to_numpy() - 1] = np.arange(rows.num_rows)
     for i in range(len(zooms) - 1, -1, -1):
         # the finest zoom shows every row, whatever the thinning says, as does every zoom
         # from an explicit complete_from
@@ -601,9 +723,20 @@ def _write_unindexed(
         ids = kept.column('id').to_numpy()
         levels[ids - 1] |= 1 << i
         counts[i] = len(ids)
-        carried = [a.name for a in attributes if a.name in kept.column_names]
-        if carried:
-            overrides[i] = kept.select(['id', *carried])
+        if complete:
+            continue
+        # keep only the attributes a thinning changed, such as a cluster's count
+        source_rows = pa.array(row_of[ids - 1])
+        changed = [
+            a.name
+            for a in attributes
+            if a.name in kept.column_names
+            and not kept.column(a.name).equals(rows.column(a.name).take(source_rows))
+        ]
+        if changed:
+            overrides[i] = kept.select(['id', *changed])
+    del row_of
+    pa.default_memory_pool().release_unused()
     log(
         '  rows shown at each zoom: '
         + ', '.join(f'z{zooms[i]}={counts[i]:,}' for i in range(len(zooms)))
@@ -627,10 +760,6 @@ def _write_unindexed(
         if single:
             log('  full-detail shapes are small; one shape LOD serves every zoom')
     lod_plan = lods(zooms, complete_from, family, single_shape_lod=single)
-    con.register(
-        'levels', pa.table({'id': np.arange(1, n_rows + 1, dtype=np.int64), 'levels': levels})
-    )
-    con.execute('CREATE TEMP TABLE rows AS SELECT * FROM levels')
 
     # 3. schema and metadata, known before writing
     origin = (float(xmin), float(ymin))
@@ -645,12 +774,14 @@ def _write_unindexed(
         f'SELECT __id, __bbox.xmin AS xmin, __bbox.ymin AS ymin, __bbox.xmax AS xmax, '
         f"__bbox.ymax AS ymax, __h FROM '{sorted_path}' WHERE __cx IS NOT NULL ORDER BY __id"
     ).fetchnumpy()
-    valid_ids = extent['__id'].astype(np.int64) - 1
-    bounds = {k: np.full(n_rows, np.nan) for k in ('xmin', 'ymin', 'xmax', 'ymax')}
-    for k in bounds:
-        bounds[k][valid_ids] = extent[k]
+    valid_ids = extent.pop('__id').astype(np.int64) - 1
+    # each column moves out of `extent` as it is placed, so the two never both hold it
+    bounds = {}
+    for k in ('xmin', 'ymin', 'xmax', 'ymax'):
+        bounds[k] = np.full(n_rows, np.nan)
+        bounds[k][valid_ids] = extent.pop(k)
     keys = np.full(n_rows, -1, np.int64)
-    keys[valid_ids] = extent['__h']
+    keys[valid_ids] = extent.pop('__h')
     del extent
     by_key = valid_ids[np.argsort(keys[valid_ids], kind='stable')]
     file_pos = np.full(n_rows, -1, np.int64)
@@ -741,9 +872,8 @@ def _write_unindexed(
 
     # 4. page sizing: write batches small enough that dense coordinate pages land near page_bytes
     if batch_rows is None:
-        sample = con.execute(
-            f"SELECT {geometry} FROM '{sorted_path}' WHERE __cx IS NOT NULL LIMIT 2000"
-        ).to_arrow_table()
+        # the first rows in file order, so the sample does not depend on scan threads
+        sample = _first_rows(sorted_path, [geometry], '__cx', 2000)
         if family != 'point' and sample.num_rows:
             wkb = sample.column(geometry).to_numpy(zero_copy_only=False)
             finest = lod_plan[-1]
@@ -860,15 +990,18 @@ def _write_unindexed(
             else:
                 spill_store[name] = ((ids_l[perm_l], perm_l), _concat_parts(rendered_parts[name]))
         del rendered_parts, point_parts_of, attr_chunks, store_ids, attr_ids
+        pa.default_memory_pool().release_unused()
         log(f'  straddler copies rendered, {time.time() - t0:.0f}s')
     row_groups = 0
 
-    def flush(table: pa.Table, fut):
+    def flush(table: pa.Table, futs):
         nonlocal row_groups
         levels = table.column('__levels').to_numpy(zero_copy_only=False).astype(np.int64)
         cx = table.column('__cx').to_numpy(zero_copy_only=False)
         cy = table.column('__cy').to_numpy(zero_copy_only=False)
-        rendered = fut.result() if fut is not None else []
+        # a row group's render jobs cover consecutive rows; their parts join per LOD
+        results = [f.result() for f in futs]
+        rendered = [_concat_parts([r[k] for r in results]) for k in range(len(shape_lods))]
         ids = table.column('__id').to_numpy()
         arrays = []
         k = 0
@@ -917,38 +1050,48 @@ def _write_unindexed(
         if row_groups % 10 == 0:
             log(f'  {row_groups} row groups, {time.time() - t0:.0f}s')
 
-    def write_rows(where: str):
-        # Match file_pos: equal Hilbert keys retain source-id order. Without
-        # this tie-break, a boundary copy can point at a different source row.
-        reader = con.execute(f"""
-            SELECT s.*, r.levels AS __levels FROM '{sorted_path}' s JOIN rows r ON r.id = s.__id
-            WHERE {where} ORDER BY s.__h NULLS LAST, s.__id
-        """).to_arrow_reader(row_group_rows)
+    def write_rows():
+        # the sorted copy is already in output order: Hilbert key, then source id, rows
+        # without geometry last. Equal keys keep source-id order, matching file_pos, so
+        # a boundary copy points at its own source row.
+        batches = pq.ParquetFile(sorted_path).iter_batches(batch_size=row_group_rows)
+        # enough render jobs in flight to keep the pool busy, and no more row groups held
+        # than those jobs need
+        max_jobs = 2 * (workers or os.cpu_count() or 8)
         pending = []
-        for batch in reader:
-            table = pa.Table.from_batches([batch])
-            fut = None
+        for table in _rebatch(batches, row_group_rows):
+            row_levels = levels[table.column('__id').to_numpy() - 1]
+            table = table.append_column('__levels', pa.array(row_levels))
+            futs = []
             if shape_lods:
-                levels = table.column('__levels').to_numpy(zero_copy_only=False).astype(np.int64)
-                job = (
-                    table.column(geometry).to_numpy(zero_copy_only=False),
-                    table.column('__cx').to_numpy(zero_copy_only=False),
-                    table.column('__cy').to_numpy(zero_copy_only=False),
-                    [
-                        (*grids[b['name']], np.flatnonzero((levels >> lod_bit[b['name']]) & 1))
-                        for b in shape_lods
-                    ],
-                    family,
-                    dot_cells,
-                )
-                fut = pool.submit(_render, job)
-            pending.append((table, fut))
-            if len(pending) >= (workers or 8) * 2:
+                wkb = table.column(geometry).to_numpy(zero_copy_only=False)
+                cx = table.column('__cx').to_numpy(zero_copy_only=False)
+                cy = table.column('__cy').to_numpy(zero_copy_only=False)
+                for start in range(0, table.num_rows, RENDER_ROWS):
+                    part = slice(start, start + RENDER_ROWS)
+                    part_levels = row_levels[part]
+                    job = (
+                        wkb[part],
+                        cx[part],
+                        cy[part],
+                        [
+                            (
+                                *grids[b['name']],
+                                np.flatnonzero((part_levels >> lod_bit[b['name']]) & 1),
+                            )
+                            for b in shape_lods
+                        ],
+                        family,
+                        dot_cells,
+                    )
+                    futs.append(pool.submit(_render, job))
+            pending.append((table, futs))
+            while len(pending) > 1 and sum(len(f) for _, f in pending) > max_jobs:
                 flush(*pending.pop(0))
         for t, f in pending:
             flush(t, f)
 
-    write_rows('TRUE')
+    write_rows()
     writer.close()
     pool.shutdown()
     sorted_path.unlink()
