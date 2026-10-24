@@ -80,6 +80,17 @@ BBOX_FIELD = pa.field(
 )
 
 
+# The finest zoom a guess picks; maps overzoom the finest LOD past it.
+AUTO_FINEST_ZOOM = 15
+# A zoom whose thinning keeps this share of rows is made complete: the few
+# rows dropped cost a whole copy of every feature in an LOD of its own.
+NEAR_COMPLETE = 0.9999
+# Render workers when not given; each holds about the largest job it rendered.
+DEFAULT_WORKERS = 8
+# DuckDB's share of physical memory when no limit is given; its own default
+# is 80%, which leaves too little for the writer's arrays on large builds.
+DEFAULT_DUCKDB_MEMORY = 0.25
+
 SORT_BUCKET_ROWS = 2_000_000
 SORT_FLUSH_ROWS = 65_536
 # rows per render job; a worker's memory follows the largest job it has rendered
@@ -209,9 +220,18 @@ def _first_rows(path: Path, columns: list[str], valid: str, rows: int) -> pa.Tab
     return pa.Table.from_batches(parts).slice(0, rows) if parts else pa.table({})
 
 
+def _default_memory_limit() -> str | None:
+    try:
+        total = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES')
+    except (AttributeError, ValueError, OSError):
+        return None
+    return f'{max(1, int(total * DEFAULT_DUCKDB_MEMORY / 2**30))}GB'
+
+
 def connect(memory_limit: str | None = None, temp_dir: str | None = None):
     con = duckdb.connect()
     con.execute('INSTALL spatial; LOAD spatial;')
+    memory_limit = memory_limit or _default_memory_limit()
     if memory_limit:
         con.execute(f"SET memory_limit = '{memory_limit}'")
     if temp_dir:
@@ -284,7 +304,9 @@ def guess_zooms(con, sorted_path, geometry, family, zooms, complete_from, extent
     the whole extent spans about a pixel, every feature is present from the zoom
     where the median feature spans a pixel, and the finest zoom is where the
     median vertex spacing spans four pixels, so the finest grid does not
-    visibly bend shapes when the map overzooms it.
+    visibly bend shapes when the map overzooms it, up to AUTO_FINEST_ZOOM:
+    every complete LOD stores every feature again, and a map overzooms the
+    finest LOD past it.
     Explicit values are kept; `'auto'` is replaced and logged."""
     import math
 
@@ -310,7 +332,9 @@ def guess_zooms(con, sorted_path, geometry, family, zooms, complete_from, extent
         spacing = float(np.median(steps[same])) if same.any() else 0.0
         extent_size = max(extent[2] - extent[0], extent[3] - extent[1])
         coarsest = max(0, zoom_where(extent_size) - 1)
-        finest = min(18, max(coarsest + 1, zoom_where(spacing / 4) if spacing else 16))
+        finest = min(
+            AUTO_FINEST_ZOOM, max(coarsest + 1, zoom_where(spacing / 4) if spacing else 16)
+        )
         first_complete = zoom_where(diag) if family != 'point' and diag else None
         if auto_from:
             complete_from = None if family == 'point' else min(first_complete, finest)
@@ -579,6 +603,7 @@ def _write_unindexed(
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
+    workers = workers or min(os.cpu_count() or 1, DEFAULT_WORKERS)
     con = connect(memory_limit, temp_dir)
     source_schema = _read_schema(src)
     attributes = infer_attributes(source_schema, carry)
@@ -734,6 +759,8 @@ def _write_unindexed(
             forced_complete is not None and zooms[i] >= forced_complete
         )
         kept = rows if complete else thinning(rows, zooms[i], ctx)
+        if not complete and kept.num_rows >= NEAR_COMPLETE * rows.num_rows:
+            kept, complete = rows, True
         ids = kept.column('id').to_numpy()
         levels[ids - 1] |= 1 << i
         counts[i] = len(ids)
@@ -1090,7 +1117,7 @@ def _write_unindexed(
         batches = pq.ParquetFile(sorted_path).iter_batches(batch_size=row_group_rows)
         # enough render jobs in flight to keep the pool busy, and no more row groups held
         # than those jobs need
-        max_jobs = 2 * (workers or os.cpu_count() or 8)
+        max_jobs = 2 * workers
         pending = []
         for table in _rebatch(batches, row_group_rows):
             row_levels = levels[table.column('__id').to_numpy() - 1]

@@ -83,7 +83,9 @@
           type: 'vector',
           tiles: [tileUrl({ url: fileUrl, layer: 'shapes', pointLayer: 'points' })],
           minzoom: 0,
-          maxzoom: 22,
+          // past the finest LOD MapLibre overzooms, rather than asking for
+          // tiles drawn from the primary geometry
+          maxzoom: Math.max(...meta.zooms),
         })
         if (geometries.has('MultiPolygon')) {
           map.addLayer({

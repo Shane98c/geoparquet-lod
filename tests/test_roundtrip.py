@@ -47,6 +47,21 @@ def buildings(tmp_path):
     return geoparquet(tmp_path / 'buildings.parquet', table, ['Polygon'])
 
 
+def copied_straddlers(bounds, zoom):
+    """The straddlers that get copies: shapes a pixel or larger at `zoom`."""
+    from geoparquet_lod.quantize import resolution
+    from geoparquet_lod.spill import straddlers
+
+    xmin, ymin, xmax, ymax = bounds.T
+    res = resolution(zoom)
+    lat = np.radians((ymin + ymax) / 2)
+    large = np.flatnonzero(
+        np.maximum((xmax - xmin) / res, (ymax - ymin) / (res * np.cos(lat))) >= 1
+    )
+    rows, tiles = straddlers(xmin[large], ymin[large], xmax[large], ymax[large], zoom)
+    return large[rows], tiles
+
+
 @pytest.fixture
 def points(tmp_path):
     rng = np.random.default_rng(2)
@@ -291,7 +306,6 @@ def test_cli_auto_thinning():
 
 
 def test_straddlers_are_copied_into_the_tiles_they_reach(buildings, tmp_path):
-    from geoparquet_lod.spill import straddlers
     from geoparquet_lod.writer import hilbert_key
 
     out = write(buildings, tmp_path / 'spill.parquet', workers=1, log=lambda *_: None)
@@ -301,13 +315,12 @@ def test_straddlers_are_copied_into_the_tiles_they_reach(buildings, tmp_path):
     t = pq.read_table(out, columns=['geometry', 'hilbert', 'lod'])
     # exact bounds, as the writer saw them; the stored covering is float32 and rounded outward
     bounds = shapely.bounds(shapely.from_wkb(t.column('geometry').to_numpy(zero_copy_only=False)))
-    b = dict(zip(('xmin', 'ymin', 'xmax', 'ymax'), bounds.T, strict=True))
     keys = t.column('hilbert').to_numpy()
     lod = t.column('lod').combine_chunks()
     finest = max(meta['zooms'])
     name = next(n for n, c in meta['lods'].items() if finest in c['zooms'])
     column = lod.field(name)
-    src, tiles = straddlers(b['xmin'], b['ymin'], b['xmax'], b['ymax'], finest)
+    src, tiles = copied_straddlers(bounds, finest)
     assert len(src) > 0, 'the fixture has buildings crossing tile edges at the finest zoom'
     n = 2**finest
     span = 4 ** (depth - finest)
@@ -334,8 +347,6 @@ def test_reader_finds_straddler_copies(buildings, tmp_path):
     """The JS reader, reading a tile as its key interval, returns the copies."""
     import subprocess
 
-    from geoparquet_lod.spill import straddlers
-
     out = write(
         buildings,
         tmp_path / 'spill.parquet',
@@ -351,7 +362,7 @@ def test_reader_finds_straddler_copies(buildings, tmp_path):
     )
     t = pq.read_table(out, columns=['geometry'])
     bounds = shapely.bounds(shapely.from_wkb(t.column('geometry').to_numpy(zero_copy_only=False)))
-    rows, tiles = straddlers(bounds[:, 0], bounds[:, 1], bounds[:, 2], bounds[:, 3], finest)
+    rows, tiles = copied_straddlers(bounds, finest)
     n = 2**finest
     cases = [
         {'z': finest, 'x': int(tl // n), 'y': int(tl % n), 'id': int(r), 'attribute': 'zone'}

@@ -265,8 +265,10 @@ The extension does not fix zooms. The reference writer derives them from the
 data when not given: the coarsest zoom is one coarser than the zoom at which
 the dataset extent spans about one pixel; every feature is shown from the
 zoom where the median feature spans one pixel; the finest zoom is where the
-median vertex spacing spans four pixels, capped at 18. Writers SHOULD record
-the zooms in `zooms` and MAY use any rule.
+median vertex spacing spans four pixels, capped at 15, past which a map
+overzooms the finest LOD. A zoom whose thinning keeps 99.99% of rows or more
+keeps them all. Writers SHOULD record the zooms in `zooms` and MAY use any
+rule.
 
 ## Analysis readers
 
