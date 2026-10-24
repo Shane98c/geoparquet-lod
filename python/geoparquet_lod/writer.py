@@ -887,12 +887,28 @@ def _write_unindexed(
         else:
             avg = 8.0
         batch_rows = int(min(1024, max(32, page_bytes // avg * 2)))
+    # Source scalars keep their statistics, so analytical filters such as a GEOID
+    # prefix or a state skip row groups; in Hilbert order a row group is one region.
+    source_stats = [
+        f.name
+        for f in rest
+        if not pa.types.is_nested(f.type)
+        and not pa.types.is_binary(f.type)
+        and not pa.types.is_large_binary(f.type)
+    ]
     options = dict(
         compression='zstd',
         compression_level=compression_level,
         use_dictionary=False,
         column_encoding={KEY_COLUMN: 'DELTA_BINARY_PACKED'},
-        write_statistics=['bbox.xmin', 'bbox.ymin', 'bbox.xmax', 'bbox.ymax', KEY_COLUMN],
+        write_statistics=[
+            'bbox.xmin',
+            'bbox.ymin',
+            'bbox.xmax',
+            'bbox.ymax',
+            KEY_COLUMN,
+            *source_stats,
+        ],
         write_page_index=True,
         write_batch_size=batch_rows,
         data_page_size=page_bytes,
