@@ -78,12 +78,13 @@ source columns project them by row id on demand.
 
 ## Shared detail levels
 
-Serving z14 through z16 from one z16-grid payload shrinks the Japan file by
-10.7% (817 MB) but grows cold city reads at z14 and z15 by 26 to 33% in bytes,
-because the finer geometry and the copies for other zooms ride along. Zooming
-into an already loaded place becomes free at z16. The writer supports this when
-the full-detail payload is small (`single_lod_bytes`); the evaluated Japan file
-keeps separate detail levels because cold transfer matters more than storage.
+Every complete LOD stores every feature again, so the writer pairs complete
+zooms: one LOD on the finer zoom's grid serves both. The Japan file serves z14
+and z15 from one z15-grid LOD and stops there; a map overzooms z15 past it.
+That grid has four cells per z15 pixel, so two per pixel at z16 and one at
+z17. A z16 LOD would add 1.11 GB, every feature again, for those views. Serving all complete zooms from one payload suits small files, and
+the writer does so below `single_lod_bytes`; larger files pair zooms because a
+cold read at the coarser zoom would carry the finest grid's geometry.
 
 ## Standard geometry encodings
 
