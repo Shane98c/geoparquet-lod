@@ -88,7 +88,11 @@ spec. When the full-detail shapes of the whole dataset are small (16 MB by
 default) a single LOD serves every zoom from the complete zoom up instead of
 copies, which is what happens for things like counties. Finer than the finest
 zoom the reader draws the exact primary geometry, so full detail is always
-reachable and costs nothing to store.
+reachable and costs nothing to store, but those tiles read the WKB and bbox
+pages rather than one LOD range: for OCR buildings in Delaware, four z16 tiles
+past a z15 finest LOD read about 1 MB in 40 requests, where four z15 tiles read
+about 60 KB in 5. To overzoom instead, as PMTiles does, set the MapLibre
+source's `maxzoom` to the finest zoom in the file's `lod_columns` metadata.
 
 ## Install
 
