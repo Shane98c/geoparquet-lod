@@ -723,18 +723,20 @@ def _write_unindexed(
         ids = kept.column('id').to_numpy()
         levels[ids - 1] |= 1 << i
         counts[i] = len(ids)
-        if complete:
-            continue
-        # keep only the attributes a thinning changed, such as a cluster's count
-        source_rows = pa.array(row_of[ids - 1])
-        changed = [
-            a.name
-            for a in attributes
-            if a.name in kept.column_names
-            and not kept.column(a.name).equals(rows.column(a.name).take(source_rows))
-        ]
-        if changed:
-            overrides[i] = kept.select(['id', *changed])
+        if not complete:
+            # keep only the attributes a thinning changed, such as a cluster's count
+            source_rows = pa.array(row_of[ids - 1])
+            changed = [
+                a.name
+                for a in attributes
+                if a.name in kept.column_names
+                and not kept.column(a.name).equals(rows.column(a.name).take(source_rows))
+            ]
+            if changed:
+                overrides[i] = kept.select(['id', *changed])
+            del source_rows
+        # free this zoom's rows before the next zoom thins
+        del kept, ids
     del row_of
     pa.default_memory_pool().release_unused()
     log(
@@ -742,7 +744,7 @@ def _write_unindexed(
         + ', '.join(f'z{zooms[i]}={counts[i]:,}' for i in range(len(zooms)))
     )
     n_valid = rows.num_rows
-    del rows, kept
+    del rows
     # the zooms are complete from the first of the run of finest zooms that keep every row
     complete_from = None
     for i in range(len(zooms) - 1, -1, -1):

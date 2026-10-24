@@ -221,21 +221,26 @@ def drop_smallest(
         tiles = ctx.tile_of(rows, zoom)
         cost = tile_cost(rows, zoom, ctx, tiny)
         share = np.minimum(1.0, px / tiny**2)  # features a row becomes once folded
+        # tiles are grouped once; each pass weighs only the rows it keeps, and a
+        # tile with none kept weighs 0, which never outranks a loaded tile
+        ids, inverse = np.unique(tiles, return_inverse=True)
+        inverse = inverse.astype(np.int32 if len(ids) < 2**31 else np.int64)
         threshold = -np.inf
         for _ in range(64):
             keep = px > threshold
-            ids, inverse = np.unique(tiles[keep], return_inverse=True)
-            if not len(ids):
+            if not keep.any():
                 break
             load = np.maximum(
-                np.bincount(inverse, weights=cost[keep]) / budget,
-                np.bincount(inverse, weights=share[keep]) / features,
+                np.bincount(inverse, weights=np.where(keep, cost, 0.0), minlength=len(ids))
+                / budget,
+                np.bincount(inverse, weights=np.where(keep, share, 0.0), minlength=len(ids))
+                / features,
             )
             busiest = np.argmax(load)
             if load[busiest] <= 1.0:
                 break
             # keep the busiest tile's largest rows until it fills; the first to overflow sets the bar
-            idx = np.flatnonzero(keep & (tiles == ids[busiest]))
+            idx = np.flatnonzero(keep & (inverse == busiest))
             idx = idx[np.argsort(-px[idx], kind='stable')]
             over = np.maximum(np.cumsum(cost[idx]) / budget, np.cumsum(share[idx]) / features) > 1.0
             bar = px[idx[np.argmax(over)]]
