@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { gzipSync } from 'node:zlib'
 import { httpSource, openReader } from '../dist/index.js'
 
 const realFetch = globalThis.fetch
@@ -40,7 +41,19 @@ try {
   calls.length = 0
   exposeRange = false
   await httpSource(['https://example.test/data.parquet'])
-  assert.equal(calls.length, 2, 'HEAD fallback when Content-Range is hidden by CORS')
+  assert.equal(
+    calls.length,
+    2,
+    'HEAD fallback when Content-Range is hidden and no root sizes the file',
+  )
+  const root = gzipSync(JSON.stringify({ version: 1, file_bytes: file.length }))
+  new DataView(file.buffer).setUint32(12, root.length, true)
+  file.set(root, 16)
+  calls.length = 0
+  const sized = await httpSource(['https://example.test/data.parquet'])
+  assert.equal(calls.length, 1, 'the root sizes the file when Content-Range is hidden')
+  assert.equal(sized.byteLength, file.length)
+  file.fill(0, 12, 16 + root.length)
   exposeRange = true
   calls.length = 0
   file.fill(0, 4, 12)

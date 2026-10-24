@@ -1,4 +1,5 @@
 import type { RangeSource } from './reader.js'
+import { rootFileBytes } from './spatial.js'
 
 /**
  * Range requests round-robin over `urls`, alternate hostnames for one file.
@@ -30,6 +31,8 @@ export const httpSource = async (
   const prefix = await first.arrayBuffer()
   const total = first.headers.get('Content-Range')?.match(/\/(\d+)$/)?.[1]
   let byteLength = total ? Number(total) : NaN
+  // when CORS hides Content-Range, an indexed file's root records its length
+  if (!Number.isSafeInteger(byteLength)) byteLength = (await rootFileBytes(prefix)) ?? NaN
   if (!Number.isSafeInteger(byteLength)) {
     const head = await fetch(urls[0], { method: 'HEAD', signal })
     byteLength = Number(head.headers.get('Content-Length'))

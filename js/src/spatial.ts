@@ -45,6 +45,20 @@ async function gunzipJson<T>(bytes: ArrayBuffer): Promise<T> {
   return JSON.parse(await new Response(stream).text()) as T
 }
 
+/** The file length an indexed file's root records, from its leading bytes, or
+ * null when `prefix` holds no readable root. */
+export async function rootFileBytes(prefix: ArrayBuffer): Promise<number | null> {
+  if (!hasSpatialIndex(prefix)) return null
+  const length = new DataView(prefix).getUint32(12, true)
+  if (!length || length > prefix.byteLength - 16) return null
+  try {
+    const root = await gunzipJson<Partial<SpatialRoot>>(prefix.slice(16, 16 + length))
+    return Number.isSafeInteger(root.file_bytes) ? root.file_bytes! : null
+  } catch {
+    return null
+  }
+}
+
 /** Common rendering/inspection API. Full Parquet metadata is loaded only when
  * an analytical row or the exact-geometry fallback is actually requested. */
 export type TileReader = Pick<
