@@ -9,13 +9,15 @@ file.set(new TextEncoder().encode('LODIDX01'), 4)
 const calls = []
 let exposeRange = true,
   truncate = false,
-  status = 206
+  status = 206,
+  served = file.length
 globalThis.fetch = async (_url, options = {}) => {
   calls.push(options)
   if (options.method === 'HEAD')
     return new Response(null, { headers: { 'Content-Length': String(file.length) } })
   const [, a, b] = options.headers.Range.match(/bytes=(\d+)-(\d+)/)
-  const end = Math.min(Number(b) + 1, file.length)
+  if (Number(a) >= served) return new Response(null, { status: 416 })
+  const end = Math.min(Number(b) + 1, served)
   return new Response(file.slice(Number(a), truncate ? end - 1 : end), {
     status,
     headers: exposeRange ? { 'Content-Range': `bytes ${a}-${end - 1}/${file.length}` } : {},
@@ -50,9 +52,20 @@ try {
   new DataView(file.buffer).setUint32(12, root.length, true)
   file.set(root, 16)
   calls.length = 0
+  file.set(new TextEncoder().encode('PAR1'), file.length - 4)
   const sized = await httpSource(['https://example.test/data.parquet'])
   assert.equal(calls.length, 1, 'the root sizes the file when Content-Range is hidden')
   assert.equal(sized.byteLength, file.length)
+  assert.equal((await sized.slice(20000, 20010)).byteLength, 10)
+  assert.equal(calls.length, 3, 'the first read past the bootstrap checks the footer magic')
+  await sized.slice(30000, 30010)
+  assert.equal(calls.length, 4, 'the footer magic is checked once')
+  // an object shorter than its root claims fails on its first data read
+  served = file.length / 2
+  const truncated = await httpSource(['https://example.test/data.parquet'])
+  await assert.rejects(truncated.slice(20000, 20010), /range request failed|does not end/)
+  served = file.length
+  file.fill(0, file.length - 4)
   file.fill(0, 12, 16 + root.length)
   exposeRange = true
   calls.length = 0

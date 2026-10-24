@@ -141,12 +141,13 @@ def _sort_by_key(
             table = pa.Table.from_batches([batch]).drop_columns(drop)
             bucket = rank[table.column('__id').to_numpy() - 1] // bucket_rows
             by_bucket = np.argsort(bucket, kind='stable')
-            table = table.take(pa.array(by_bucket))
             bucket = bucket[by_bucket]
             edges = np.flatnonzero(np.diff(bucket)) + 1
             for start, end in zip(np.r_[0, edges], np.r_[edges, len(bucket)], strict=True):
                 b = int(bucket[start])
-                pending[b].append(table.slice(start, end - start))
+                # take copies the rows out, so a bucket's few rows do not keep
+                # the whole batch alive the way a slice of it would
+                pending[b].append(table.take(pa.array(by_bucket[start:end])))
                 pending_rows[b] += end - start
                 if pending_rows[b] >= SORT_FLUSH_ROWS:
                     flush_bucket(b)
@@ -1112,7 +1113,10 @@ def _write_unindexed(
                     )
                     futs.append(pool.submit(_render, job))
             pending.append((table, futs))
-            while len(pending) > 1 and sum(len(f) for _, f in pending) > max_jobs:
+            # with no shapes to render (points) nothing is in flight, so write now
+            while len(pending) > 1 and (
+                not shape_lods or sum(len(f) for _, f in pending) > max_jobs
+            ):
                 flush(*pending.pop(0))
         for t, f in pending:
             flush(t, f)

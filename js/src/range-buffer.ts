@@ -31,8 +31,16 @@ export const httpSource = async (
   const prefix = await first.arrayBuffer()
   const total = first.headers.get('Content-Range')?.match(/\/(\d+)$/)?.[1]
   let byteLength = total ? Number(total) : NaN
-  // when CORS hides Content-Range, an indexed file's root records its length
-  if (!Number.isSafeInteger(byteLength)) byteLength = (await rootFileBytes(prefix)) ?? NaN
+  // when CORS hides Content-Range, an indexed file's root records its length;
+  // that is the file's own claim, so it is checked before any data is used
+  let sizedByRoot = false
+  if (!Number.isSafeInteger(byteLength)) {
+    const fromRoot = await rootFileBytes(prefix)
+    if (fromRoot !== null) {
+      byteLength = fromRoot
+      sizedByRoot = true
+    }
+  }
   if (!Number.isSafeInteger(byteLength)) {
     const head = await fetch(urls[0], { method: 'HEAD', signal })
     byteLength = Number(head.headers.get('Content-Length'))
@@ -81,6 +89,22 @@ export const httpSource = async (
       tailStart = start
     }
   }
+  // A root-sized file must end in the Parquet magic exactly at that length. The
+  // check runs beside the first read past the bootstrap, not before it, and
+  // without the opening signal, so one cancelled read cannot fail it for all.
+  let verified: Promise<void> | null = sizedByRoot ? null : Promise.resolve()
+  const verify = () =>
+    (verified ??= fetch(urls[0], {
+      headers: { Range: `bytes=${byteLength - 8}-${byteLength - 1}` },
+    }).then(async (response) => {
+      const bytes = response.status === 206 ? new Uint8Array(await response.arrayBuffer()) : null
+      if (
+        !bytes ||
+        bytes.byteLength !== 8 ||
+        new TextDecoder().decode(bytes.subarray(4)) !== 'PAR1'
+      )
+        throw new Error(`${urls[0]} does not end where its spatial index says`)
+    }))
   let next = 0
   return {
     byteLength,
@@ -99,16 +123,20 @@ export const httpSource = async (
       if (start >= tailStart && end <= byteLength)
         return tailBuffer.slice(start - tailStart, end - tailStart)
       const url = urls[next++ % urls.length]
-      const response = await fetch(url, {
-        headers: { Range: `bytes=${start}-${end - 1}` },
-        signal,
-      })
-      if (response.status !== 206) {
-        await response.body?.cancel()
-        throw new Error(`range request failed: ${response.status}`)
+      const read = async () => {
+        const response = await fetch(url, {
+          headers: { Range: `bytes=${start}-${end - 1}` },
+          signal,
+        })
+        if (response.status !== 206) {
+          await response.body?.cancel()
+          throw new Error(`range request failed: ${response.status}`)
+        }
+        const buffer = await response.arrayBuffer()
+        if (buffer.byteLength !== end - start) throw new Error(`truncated range from ${url}`)
+        return buffer
       }
-      const buffer = await response.arrayBuffer()
-      if (buffer.byteLength !== end - start) throw new Error(`truncated range from ${url}`)
+      const [buffer] = await Promise.all([read(), verify()])
       return buffer
     },
   }
