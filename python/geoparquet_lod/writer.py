@@ -122,12 +122,18 @@ def _sort_by_key(
     schema = source.schema_arrow
     for name in drop:
         schema = schema.remove(schema.get_field_index(name))
+    # A bucket holds millions of rows, more WKB than Arrow's 32-bit offsets
+    # address, so its strings and binaries use 64-bit offsets while sorting.
+    for i, field in enumerate(schema):
+        if pa.types.is_binary(field.type):
+            schema = schema.set(i, field.with_type(pa.large_binary()))
+        elif pa.types.is_string(field.type):
+            schema = schema.set(i, field.with_type(pa.large_string()))
+    bucket_schema = schema
     schema = schema.append(pa.field('__h', pa.int64()))
     bucket_count = max(1, -(-n_rows // bucket_rows))
     buckets = [sorted_path.with_suffix(f'.bucket{b:05d}.parquet') for b in range(bucket_count)]
-    writers = [
-        pq.ParquetWriter(p, schema.remove(len(schema) - 1), compression='zstd') for p in buckets
-    ]
+    writers = [pq.ParquetWriter(p, bucket_schema, compression='zstd') for p in buckets]
     pending: list[list[pa.Table]] = [[] for _ in buckets]
     pending_rows = [0] * bucket_count
 
@@ -138,7 +144,7 @@ def _sort_by_key(
 
     try:
         for batch in source.iter_batches(batch_size=262_144):
-            table = pa.Table.from_batches([batch]).drop_columns(drop)
+            table = pa.Table.from_batches([batch]).drop_columns(drop).cast(bucket_schema)
             bucket = rank[table.column('__id').to_numpy() - 1] // bucket_rows
             by_bucket = np.argsort(bucket, kind='stable')
             bucket = bucket[by_bucket]

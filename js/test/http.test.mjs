@@ -10,13 +10,18 @@ const calls = []
 let exposeRange = true,
   truncate = false,
   status = 206,
-  served = file.length
+  served = file.length,
+  failTail = 0
 globalThis.fetch = async (_url, options = {}) => {
   calls.push(options)
   if (options.method === 'HEAD')
     return new Response(null, { headers: { 'Content-Length': String(file.length) } })
   const [, a, b] = options.headers.Range.match(/bytes=(\d+)-(\d+)/)
   if (Number(a) >= served) return new Response(null, { status: 416 })
+  if (failTail && Number(b) === file.length - 1 && Number(a) === file.length - 8) {
+    failTail--
+    return new Response(null, { status: 503 })
+  }
   const end = Math.min(Number(b) + 1, served)
   return new Response(file.slice(Number(a), truncate ? end - 1 : end), {
     status,
@@ -60,6 +65,11 @@ try {
   assert.equal(calls.length, 3, 'the first read past the bootstrap checks the footer magic')
   await sized.slice(30000, 30010)
   assert.equal(calls.length, 4, 'the footer magic is checked once')
+  // a server error on the check is retried by the next read
+  failTail = 1
+  const retried = await httpSource(['https://example.test/data.parquet'])
+  await assert.rejects(retried.slice(20000, 20010), /range request failed: 503/)
+  assert.equal((await retried.slice(20000, 20010)).byteLength, 10)
   // an object shorter than its root claims fails on its first data read
   served = file.length / 2
   const truncated = await httpSource(['https://example.test/data.parquet'])

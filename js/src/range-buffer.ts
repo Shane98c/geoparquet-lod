@@ -92,11 +92,26 @@ export const httpSource = async (
   // A root-sized file must end in the Parquet magic exactly at that length. The
   // check runs beside the first read past the bootstrap, not before it, and
   // without the opening signal, so one cancelled read cannot fail it for all.
+  // A short object (416) or a wrong ending fails for good; a network or server
+  // error lets the next read check again.
   let verified: Promise<void> | null = sizedByRoot ? null : Promise.resolve()
-  const verify = () =>
-    (verified ??= fetch(urls[0], {
-      headers: { Range: `bytes=${byteLength - 8}-${byteLength - 1}` },
-    }).then(async (response) => {
+  const verify = () => {
+    if (verified) return verified
+    const attempt = (async () => {
+      let response: Response
+      try {
+        response = await fetch(urls[0], {
+          headers: { Range: `bytes=${byteLength - 8}-${byteLength - 1}` },
+        })
+      } catch (error) {
+        verified = null
+        throw error
+      }
+      if (response.status !== 206 && response.status !== 416) {
+        await response.body?.cancel()
+        verified = null
+        throw new Error(`range request failed: ${response.status}`)
+      }
       const bytes = response.status === 206 ? new Uint8Array(await response.arrayBuffer()) : null
       if (
         !bytes ||
@@ -104,7 +119,10 @@ export const httpSource = async (
         new TextDecoder().decode(bytes.subarray(4)) !== 'PAR1'
       )
         throw new Error(`${urls[0]} does not end where its spatial index says`)
-    }))
+    })()
+    verified = attempt
+    return attempt
+  }
   let next = 0
   return {
     byteLength,

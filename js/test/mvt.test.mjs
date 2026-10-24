@@ -132,7 +132,20 @@ console.log(
     return out
   }
   const builder = new GeometryBuilder()
-  const values = [Math.fround(0.2863907), 0.1, 3, -3, 12n, true, 'x', Math.fround(0.2863907), null]
+  const values = [
+    Math.fround(0.2863907),
+    0.1,
+    3,
+    -3,
+    12n,
+    true,
+    'x',
+    Math.fround(0.2863907),
+    null,
+    2n ** 52n + 1n,
+    2 ** 52 + 1,
+    2n ** 60n,
+  ]
   for (let i = 0; i < values.length; i++) builder.add('Point', [i, i])
   const tile = new Uint8Array(
     toMvt(
@@ -157,8 +170,21 @@ console.log(
             : v,
     )
   const types = layer.filter(([f]) => f === 4).map(([, b]) => fields(b)[0][0])
-  assert.deepEqual(types, [2, 3, 6, 6, 6, 7, 1, 1])
-  assert.deepEqual(decoded, [Math.fround(0.2863907), 0.1, 3, -3, 12, true, 'x', ''])
+  // 2^52 + 1 as a bigint and as a number share one double value; past safe
+  // integers a bigint stays its exact string
+  assert.deepEqual(types, [2, 3, 6, 6, 6, 7, 1, 1, 3, 1])
+  assert.deepEqual(decoded, [
+    Math.fround(0.2863907),
+    0.1,
+    3,
+    -3,
+    12,
+    true,
+    'x',
+    '',
+    2 ** 52 + 1,
+    String(2n ** 60n),
+  ])
 }
 console.log('MVT properties keep number and boolean types')
 

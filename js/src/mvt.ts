@@ -620,9 +620,14 @@ function propertyValue(value: unknown): PropertyValue {
     // a float32 attribute arrives as a number that float storage keeps exactly
     return { field: Math.fround(value) === value ? 2 : 3, value }
   }
-  if (typeof value === 'bigint' && value > -MAX_SINT && value < MAX_SINT) {
-    return { field: 6, value: Number(value) }
-  }
+  // a bigint a number holds exactly is encoded as that number, so a value has
+  // one type whether it comes from a carried attribute or a source column
+  if (
+    typeof value === 'bigint' &&
+    value >= BigInt(Number.MIN_SAFE_INTEGER) &&
+    value <= BigInt(Number.MAX_SAFE_INTEGER)
+  )
+    return propertyValue(Number(value))
   if (typeof value === 'boolean') return { field: 7, value }
   return { field: 1, value: formatPropertyValue(value) }
 }
