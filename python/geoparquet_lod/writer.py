@@ -687,10 +687,17 @@ def _write_unindexed(
             + list(columns)
         )
     )
-    rows = con.execute(
-        f'SELECT {slim}, (hash({geometry}) % 1000000007) / 1000000007.0 AS u '
-        f"FROM '{sorted_path}' WHERE __cx IS NOT NULL ORDER BY __h, __id"
-    ).to_arrow_table()
+    # The sorted copy is already in (key, id) order; reading it in file order,
+    # streamed, gives the thinnings Hilbert order without DuckDB sorting and
+    # holding the table beside its Arrow copy.
+    con.execute('SET preserve_insertion_order = true')
+    rows = pa.Table.from_batches(
+        con.execute(
+            f'SELECT {slim}, (hash({geometry}) % 1000000007) / 1000000007.0 AS u '
+            f"FROM '{sorted_path}' WHERE __cx IS NOT NULL"
+        ).to_arrow_reader(1_000_000)
+    ).combine_chunks()
+    con.execute('SET preserve_insertion_order = false')
     # a string attribute with few distinct values is packed as an index into a value table
     dictionaries: dict[str, list] = {}
     for a in attributes:
@@ -774,7 +781,7 @@ def _write_unindexed(
     lod_bit = {b['name']: zooms.index(b['zooms'][0]) for b in lod_plan}
     extent = con.execute(
         f'SELECT __id, __bbox.xmin AS xmin, __bbox.ymin AS ymin, __bbox.xmax AS xmax, '
-        f"__bbox.ymax AS ymax, __h FROM '{sorted_path}' WHERE __cx IS NOT NULL ORDER BY __id"
+        f"__bbox.ymax AS ymax, __h FROM '{sorted_path}' WHERE __cx IS NOT NULL"
     ).fetchnumpy()
     valid_ids = extent.pop('__id').astype(np.int64) - 1
     # each column moves out of `extent` as it is placed, so the two never both hold it
@@ -785,7 +792,8 @@ def _write_unindexed(
     keys = np.full(n_rows, -1, np.int64)
     keys[valid_ids] = extent.pop('__h')
     del extent
-    by_key = valid_ids[np.argsort(keys[valid_ids], kind='stable')]
+    # file order: key, then id, whatever order the query returned rows in
+    by_key = valid_ids[np.lexsort((valid_ids, keys[valid_ids]))]
     file_pos = np.full(n_rows, -1, np.int64)
     file_pos[by_key] = np.arange(len(valid_ids))
     spill_entries: dict[str, tuple] = {}  # LOD name -> (host, zoom, tile, src), sorted by host
