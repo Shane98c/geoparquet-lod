@@ -39,19 +39,19 @@ and ready status are shown explicitly; initial timing waits for data rendering.
 
 Objects live under `geoparquet-lod/releases/<tag>/` in the
 `live-classify-data` bucket. The tag is the commit whose recipe produced the
-object: `0fcab25` built the GeoParquet file with
+object: `68e03b2` built the GeoParquet file with
 `benchmarks/write-japan-tippecanoe.py`; the PMTiles and COGP archives were
 converted at `6c3a4f9`, and the Esri SOP file, uploaded at that release, is
-Esri's original. None has changed.
+Esri's original.
 
 | Dataset    | Release   |         Bytes | MD5                                |
 | ---------- | --------- | ------------: | ---------------------------------- |
-| GeoParquet | `0fcab25` | 7,666,520,593 | `a0a5663f5f68ea9ddc2271371e9017be` |
+| GeoParquet | `68e03b2` | 6,547,540,844 | `ca185fecbc305a930eec0d2d46c89b45` |
 | PMTiles    | `6c3a4f9` | 1,297,122,745 | `0b733b7511dda51102c1b58a4983706b` |
 | COGP 2.2.2 | `6c3a4f9` | 9,081,139,765 | `f9a986b09224256534b530ed80dd245a` |
 | Esri SOP   | `6c3a4f9` | 6,177,950,661 | `6224bdf08e1915e367baa61ee566f650` |
 
-- [GeoParquet](https://pub-a9c45d804ff74bd19e8f9b7a52d9a90b.r2.dev/geoparquet-lod/releases/0fcab25/japan_buildings.parquet)
+- [GeoParquet](https://pub-a9c45d804ff74bd19e8f9b7a52d9a90b.r2.dev/geoparquet-lod/releases/68e03b2/japan_buildings.parquet)
 - [PMTiles](https://pub-a9c45d804ff74bd19e8f9b7a52d9a90b.r2.dev/geoparquet-lod/releases/6c3a4f9/japan_buildings.pmtiles)
 - [Released COGP](https://pub-a9c45d804ff74bd19e8f9b7a52d9a90b.r2.dev/geoparquet-lod/releases/6c3a4f9/japan_buildings.cogp-2.2.2.parquet)
 - [Esri SOP](https://pub-a9c45d804ff74bd19e8f9b7a52d9a90b.r2.dev/geoparquet-lod/releases/6c3a4f9/japan_buildings.sop.parquet)
@@ -78,11 +78,11 @@ From the repository root, bundle the reader and build a separate static folder:
 npm --prefix js run demo:bundle
 node demo/build-share.mjs \
   --out /private/tmp/geoparquet-lod-share \
-  --url https://pub-a9c45d804ff74bd19e8f9b7a52d9a90b.r2.dev/geoparquet-lod/releases/0fcab25/japan_buildings.parquet \
+  --url https://pub-a9c45d804ff74bd19e8f9b7a52d9a90b.r2.dev/geoparquet-lod/releases/68e03b2/japan_buildings.parquet \
   --pmtiles https://pub-a9c45d804ff74bd19e8f9b7a52d9a90b.r2.dev/geoparquet-lod/releases/6c3a4f9/japan_buildings.pmtiles \
   --cogp https://pub-a9c45d804ff74bd19e8f9b7a52d9a90b.r2.dev/geoparquet-lod/releases/6c3a4f9/japan_buildings.cogp-2.2.2.parquet \
   --esri https://pub-a9c45d804ff74bd19e8f9b7a52d9a90b.r2.dev/geoparquet-lod/releases/6c3a4f9/japan_buildings.sop.parquet \
-  --release 0fcab25
+  --release 68e03b2
 wrangler pages deploy /private/tmp/geoparquet-lod-share \
   --project-name geoparquet-lod-compare --branch main
 ```

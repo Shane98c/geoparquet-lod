@@ -275,7 +275,10 @@ rule.
 Nothing here changes the primary geometry or attribute columns. `SELECT
 count(*)`, spatial joins and attribute queries are correct with no filter.
 The `bbox` column is the standard 1.1 covering. The LOD column is a
-struct of binary columns a reader can drop.
+struct of binary columns a reader can drop. The reference writer keeps
+statistics and page indexes on the source's scalar columns, so a filter on
+one, such as an ID or a region code, skips row groups and pages that cannot
+match.
 
 ## Relation to other proposals
 

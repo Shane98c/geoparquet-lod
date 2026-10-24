@@ -20,24 +20,24 @@
     "roof_orientation",
     "roof_color",
     "roof_height",
-    "geometry",
     "has_parts",
-    "version"
+    "version",
+    "geometry"
   ],
   "results": [
     {
-      "path": "japan_buildings.parquet",
+      "path": "source.parquet",
       "rows": 53742978,
-      "xor": 8283320748669911015,
-      "sum": 495692940698573223043586965,
-      "seconds": 4.747461291030049
+      "xor": 11677322322326638041,
+      "sum": 495681620337297099301903237,
+      "seconds": 4.674747375072911
     },
     {
-      "path": "japan.tippecanoe-density.parquet",
+      "path": "japan_buildings.parquet",
       "rows": 53742978,
-      "xor": 8283320748669911015,
-      "sum": 495692940698573223043586965,
-      "seconds": 7.4033511250745505
+      "xor": 11677322322326638041,
+      "sum": 495681620337297099301903237,
+      "seconds": 7.1636782909045
     }
   ]
 }

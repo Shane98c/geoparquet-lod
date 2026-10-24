@@ -141,7 +141,7 @@ geometry only, served from the same public bucket. Bytes are decimal.
 | Tile                  | GeoParquet LOD               | COGP 2.2.2                  | Esri SOP                    | PMTiles                      |
 | --------------------- | ---------------------------- | --------------------------- | --------------------------- | ---------------------------- |
 | open                  | 16 KB, 1 req                 | 1.50 MB, 3 req              | 2.62 MB, 3 req              | 16 KB, 1 req                 |
-| z8 metro, Tokyo       | 0.62 MB, 2 req, 93,775 feat. | 0.12 MB, 8 req, 1,152 feat. | 26.65 MB, 1,048 req, 28,000 | 0.50 MB, 2 req, 95,774 feat. |
+| z8 metro, Tokyo       | 0.62 MB, 2 req, 93,774 feat. | 0.12 MB, 8 req, 1,152 feat. | 26.65 MB, 1,048 req, 28,000 | 0.50 MB, 2 req, 95,774 feat. |
 | z11 city, Tokyo       | 0.32 MB, 2 req, 24,068       | 0.25 MB, 17 req, 860        | 5.39 MB, 143 req, 177,679   | 0.31 MB, 2 req, 24,373       |
 | z13 downtown, Shibuya | 0.36 MB, 2 req, 29,834       | 0.68 MB, 42 req, 2,739      | 2.61 MB, 92 req, 51,996     | 0.35 MB, 2 req, 28,908       |
 | z13 suburbs, Chiba    | 0.08 MB, 2 req, 4,955        | 0.44 MB, 34 req, 454        | 1.30 MB, 55 req, 6,841      | 0.06 MB, 2 req, 4,929        |
@@ -162,10 +162,12 @@ competitive request counts and transfer sizes, not a general speed ranking.
 
 ## Main tradeoffs
 
-- **Storage and construction.** The evaluated Japan file is 7.67 GB, versus the
+- **Storage and construction.** The evaluated Japan file is 6.55 GB, versus the
   4.84 GB analytical source and 1.30 GB PMTiles archive. Those files provide
   different capabilities. Building overviews and indexing is an offline step;
-  updates require rebuilding.
+  updates require rebuilding. On a 64 GB laptop the Japan build takes 15
+  minutes, and 155.6 million US buildings take 51 minutes and 34 GB of memory,
+  with free disk of about twice the output.
 - **A custom display encoding and index.** Ordinary tools read original
   geometries and attributes, but cannot interpret the overview payloads. There
   is one implementation, a draft spec, and no independent conformance suite.
