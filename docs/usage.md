@@ -140,8 +140,13 @@ write(
 The input is any GeoParquet with a WKB geometry column in OGC:CRS84 or
 EPSG:4326. `write()` builds the overviews, then the tile-aligned pages and
 spatial directory, in one call; `lod_page_bytes` (`--lod-page-bytes`) sets the
-overview page target, 64 KiB by default. Writing the 155.6 million building
-national file takes about 25 minutes on a laptop with 12 workers.
+overview page target, 64 KiB by default. Writing a 155.6 million building
+national file (OCR's buildings, two carried attributes) took 78 minutes on a
+64 GB laptop with `workers=6` and `memory_limit='16GB'`; the main process
+peaked at 44 GB while the thinnings ran, and the build needs free disk of
+about twice the output for its intermediate files. Render workers each grow to
+about 1 GB, so `workers` bounds that part of the memory; `memory_limit` caps
+DuckDB, which otherwise takes up to 80% of RAM.
 
 ### In a MapLibre app
 
