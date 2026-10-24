@@ -7,7 +7,9 @@ let seed = 71
 const random = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32
 // Include paths crossing tile boundaries, holes, disjoint parts, collapsed
 // rings, duplicate vertices, poles and antimeridian wrapping. Compare the
-// complete protobuf, including ids, stringified attributes and empty tiles.
+// complete protobuf, including ids, string attributes and empty tiles, with
+// COGP's encoder, which writes every value as a string; typed values are
+// checked separately below.
 for (const type of ['Point', 'MultiLineString', 'MultiPolygon']) {
   for (const scale of [
     [1, 1],
@@ -75,7 +77,10 @@ for (const type of ['Point', 'MultiLineString', 'MultiPolygon']) {
       [4, -1, 8],
       [13, 4096, 4096],
     ]) {
-      for (const columns of [{}, { value: values }]) {
+      const strings = values.map((v) =>
+        ['number', 'boolean', 'bigint'].includes(typeof v) ? String(v) : v,
+      )
+      for (const columns of [{}, { value: strings }]) {
         const source = { geometry, rowIndex: rows, columns }
         const options = { z, x, y, layer: 'test' }
         assert.deepEqual(
@@ -92,6 +97,70 @@ for (const type of ['Point', 'MultiLineString', 'MultiPolygon']) {
 console.log(
   'streaming MVT matches reference bytes for clipping, wrapping, winding, properties and cancellation',
 )
+
+// Numbers, booleans and safe bigints are typed MVT values, deduplicated by type
+// and value; float32-exact numbers are floats, other numbers doubles.
+{
+  const fields = (bytes) => {
+    const out = []
+    let i = 0
+    const varint = () => {
+      let value = 0,
+        scale = 1,
+        byte
+      do {
+        byte = bytes[i++]
+        value += (byte & 0x7f) * scale
+        scale *= 128
+      } while (byte & 0x80)
+      return value
+    }
+    while (i < bytes.length) {
+      const tag = varint()
+      const field = Math.floor(tag / 8),
+        wire = tag % 8
+      const view = new DataView(bytes.buffer, bytes.byteOffset + i)
+      if (wire === 0) out.push([field, varint()])
+      else if (wire === 1) (out.push([field, view.getFloat64(0, true)]), (i += 8))
+      else if (wire === 5) (out.push([field, view.getFloat32(0, true)]), (i += 4))
+      else {
+        const length = varint()
+        out.push([field, bytes.subarray(i, i + length)])
+        i += length
+      }
+    }
+    return out
+  }
+  const builder = new GeometryBuilder()
+  const values = [Math.fround(0.2863907), 0.1, 3, -3, 12n, true, 'x', Math.fround(0.2863907), null]
+  for (let i = 0; i < values.length; i++) builder.add('Point', [i, i])
+  const tile = new Uint8Array(
+    toMvt(
+      { geometry: builder.finish([1, 1], [0, 0]), columns: { value: values } },
+      { z: 0, x: 0, y: 0, layer: 'typed' },
+    ),
+  )
+  const [[, layerBytes]] = fields(tile)
+  const layer = fields(layerBytes)
+  const decoded = layer
+    .filter(([f]) => f === 4)
+    .map(([, b]) => fields(b)[0])
+    .map(([f, v]) =>
+      f === 1
+        ? new TextDecoder().decode(v)
+        : f === 6
+          ? v % 2
+            ? -(v + 1) / 2
+            : v / 2
+          : f === 7
+            ? v === 1
+            : v,
+    )
+  const types = layer.filter(([f]) => f === 4).map(([, b]) => fields(b)[0][0])
+  assert.deepEqual(types, [2, 3, 6, 6, 6, 7, 1, 1])
+  assert.deepEqual(decoded, [Math.fround(0.2863907), 0.1, 3, -3, 12, true, 'x', ''])
+}
+console.log('MVT properties keep number and boolean types')
 
 // Exact-geometry fallback uses the same encoder as packed overviews. Exercise
 // float64 WKB, single/multi families, holes, empty/null geometry and boundaries.

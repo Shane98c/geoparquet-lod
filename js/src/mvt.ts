@@ -55,7 +55,8 @@ export interface MvtTileOptions {
 /**
  * Encode lon/lat rows as one Web Mercator MVT tile. Geometry is projected,
  * clipped to the buffered extent and dropped when null or off-tile. IDs must be
- * non-negative safe integers; properties are written as display strings.
+ * non-negative safe integers. Numbers, booleans and safe bigints are typed MVT
+ * values; other properties are written as display strings.
  * Columns are read in place: no GeoJSON or per-row feature object is built.
  */
 export function toMvt(source: FeatureSource, options: MvtTileOptions): ArrayBuffer {
@@ -67,6 +68,7 @@ export function toMvt(source: FeatureSource, options: MvtTileOptions): ArrayBuff
   const tags = new ByteWriter(64)
   const keys = new Map<string, number>()
   const values = new Map<string, number>()
+  const valueList: PropertyValue[] = []
   layer.writeVarintField(15, 2)
   layer.writeStringField(1, options.layer ?? DEFAULT_LAYER_NAME)
   for (let row = 0; row < geometry.length; row++) {
@@ -76,19 +78,23 @@ export function toMvt(source: FeatureSource, options: MvtTileOptions): ArrayBuff
     if (!feature) continue
     tags.reset()
     for (const [key, column] of columns) {
-      const value = formatPropertyValue(column[row])
+      const value = propertyValue(column[row])
+      const id = `${value.field}:${value.value}`
       if (!keys.has(key)) keys.set(key, keys.size)
-      if (!values.has(value)) values.set(value, values.size)
+      if (!values.has(id)) {
+        values.set(id, values.size)
+        valueList.push(value)
+      }
       tags.writeVarint(keys.get(key)!)
-      tags.writeVarint(values.get(value)!)
+      tags.writeVarint(values.get(id)!)
     }
     writeFeature(layer, feature, tags.view())
   }
   options.signal?.throwIfAborted()
   for (const key of keys.keys()) layer.writeStringField(3, key)
-  for (const text of values.keys()) {
+  for (const value of valueList) {
     tags.reset()
-    tags.writeStringField(1, text)
+    writePropertyValue(tags, value)
     layer.writeBytesField(4, tags.view())
   }
   layer.writeVarintField(5, MVT_EXTENT)
@@ -499,6 +505,20 @@ class ByteWriter {
     this.offset += value.byteLength
   }
 
+  writeFloatField(field: number, value: number): void {
+    this.writeVarint(field * 8 + 5)
+    this.reserve(4)
+    new DataView(this.bytes.buffer, this.bytes.byteOffset).setFloat32(this.offset, value, true)
+    this.offset += 4
+  }
+
+  writeDoubleField(field: number, value: number): void {
+    this.writeVarint(field * 8 + 1)
+    this.reserve(8)
+    new DataView(this.bytes.buffer, this.bytes.byteOffset).setFloat64(this.offset, value, true)
+    this.offset += 8
+  }
+
   writeVarint(value: number): void {
     if (!Number.isSafeInteger(value) || value < 0) throw new Error('invalid protobuf varint')
     this.reserve(10)
@@ -585,6 +605,35 @@ function signedAreaTwice(coordinates: Position[]): number {
     previous = coordinate
   }
   return area
+}
+
+// MVT Value fields: 1 string, 2 float, 3 double, 6 sint64, 7 bool.
+type PropertyValue =
+  { field: 1; value: string } | { field: 2 | 3 | 6; value: number } | { field: 7; value: boolean }
+
+// Integers whose zigzag encoding stays a safe integer.
+const MAX_SINT = 2 ** 52
+
+function propertyValue(value: unknown): PropertyValue {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    if (Number.isInteger(value) && Math.abs(value) < MAX_SINT) return { field: 6, value }
+    // a float32 attribute arrives as a number that float storage keeps exactly
+    return { field: Math.fround(value) === value ? 2 : 3, value }
+  }
+  if (typeof value === 'bigint' && value > -MAX_SINT && value < MAX_SINT) {
+    return { field: 6, value: Number(value) }
+  }
+  if (typeof value === 'boolean') return { field: 7, value }
+  return { field: 1, value: formatPropertyValue(value) }
+}
+
+function writePropertyValue(writer: ByteWriter, value: PropertyValue): void {
+  if (value.field === 1) writer.writeStringField(1, value.value)
+  else if (value.field === 2) writer.writeFloatField(2, value.value)
+  else if (value.field === 3) writer.writeDoubleField(3, value.value)
+  else if (value.field === 6)
+    writer.writeVarintField(6, value.value >= 0 ? value.value * 2 : -value.value * 2 - 1)
+  else writer.writeVarintField(7, value.value ? 1 : 0)
 }
 
 function formatPropertyValue(value: unknown): string {
