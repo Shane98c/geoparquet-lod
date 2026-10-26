@@ -391,3 +391,22 @@ def test_placeholder_pixels_sets_the_square_size(buildings, tmp_path):
     )
     lods = json.loads(pq.read_schema(out).metadata[b'geo'])['lod_columns']['lods']
     assert {c['placeholder'] for c in lods.values()} == {1.0 * SUBPIXELS}
+
+
+def test_write_reads_a_glob_and_adds_metadata(buildings, tmp_path):
+    parts = tmp_path / 'parts'
+    parts.mkdir()
+    table = pq.read_table(buildings)
+    half = table.num_rows // 2
+    for i, part in enumerate((table.slice(0, half), table.slice(half))):
+        pq.write_table(part, parts / f'part-{i}.parquet')
+    out = write(
+        str(parts / '*.parquet'),
+        tmp_path / 'glob.parquet',
+        metadata={'license_name': 'ODBL'},
+        workers=1,
+        log=lambda *_: None,
+    )
+    validate(out)
+    assert pq.read_metadata(out).num_rows == table.num_rows
+    assert pq.read_schema(out).metadata[b'license_name'] == b'ODBL'

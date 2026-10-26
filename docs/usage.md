@@ -144,7 +144,9 @@ write(
 ```
 
 The input is any GeoParquet with a WKB geometry column in OGC:CRS84 or
-EPSG:4326. `write()` builds the overviews, then the tile-aligned pages and
+EPSG:4326, as a path or a `*` glob, local or on S3 (`s3://`, with credentials
+from the usual AWS chain); the output is a local path. `metadata=` adds
+key-value metadata to the file. `write()` builds the overviews, then the tile-aligned pages and
 spatial directory, in one call; `lod_page_bytes` (`--lod-page-bytes`) sets the
 overview page target, 64 KiB by default. Writing a 155.6 million building
 national file (OCR's buildings, two carried attributes) took 51 minutes on a

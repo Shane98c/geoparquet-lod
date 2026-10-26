@@ -12,6 +12,7 @@ import json
 import os
 import tempfile
 import time
+from collections.abc import Mapping
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -367,16 +368,47 @@ def _full_detail_bytes(
     return 8.0 * len(parts[3]) / len(wkb) * n_rows
 
 
-def _read_schema(src: str) -> pa.Schema:
-    """Arrow schema with geo metadata; a glob reads its first match."""
-    if any(ch in src for ch in '*?['):
-        import glob
+GLOB_CHARS = '*?['
 
-        matches = sorted(glob.glob(src))
+
+def _read_schema(src: str) -> pa.Schema:
+    """Arrow schema with geo metadata of a local path or a URI Arrow's
+    filesystems open, such as s3://; a glob reads its first match."""
+    import fnmatch
+
+    from pyarrow import fs
+
+    if '://' in src:
+        # the glob is matched below, so only the directory before it is a URI
+        at = min((src.find(ch) for ch in GLOB_CHARS if ch in src), default=len(src))
+        cut = src.rfind('/', 0, at) if at < len(src) else len(src)
+        filesystem, path = fs.FileSystem.from_uri(src[:cut])
+        path += src[cut:]
+    else:
+        filesystem, path = fs.LocalFileSystem(), os.path.abspath(src)
+    if any(ch in path for ch in GLOB_CHARS):
+        parts = path.split('/')
+        fixed = next(i for i, part in enumerate(parts) if any(ch in part for ch in GLOB_CHARS))
+        base = '/'.join(parts[:fixed]) or '/'
+        infos = filesystem.get_file_info(fs.FileSelector(base, recursive=True))
+        matches = sorted(
+            i.path for i in infos if i.type == fs.FileType.File and fnmatch.fnmatch(i.path, path)
+        )
         if not matches:
             raise FileNotFoundError(src)
-        return pq.read_schema(matches[0])
-    return pq.read_schema(src)
+        path = matches[0]
+    return pq.read_schema(path, filesystem=filesystem)
+
+
+def _attach_source(con, src: str) -> None:
+    """Let `con` read `src` when it is remote: httpfs, and for s3:// the
+    credentials from the environment, config files or instance role."""
+    if '://' not in src:
+        return
+    con.execute('INSTALL httpfs; LOAD httpfs;')
+    if src.startswith('s3://'):
+        con.execute('INSTALL aws; LOAD aws;')
+        con.execute('CREATE OR REPLACE SECRET (TYPE S3, PROVIDER credential_chain)')
 
 
 def _leaf_paths(schema: pa.Schema) -> list[list[str]]:
@@ -518,6 +550,7 @@ def write(
     compression_level: int = 9,
     batch_rows: int | None = None,
     placeholder_pixels: float | None = None,
+    metadata: Mapping[str, str] | None = None,
     workers: int | None = None,
     memory_limit: str | None = None,
     temp_dir: str | None = None,
@@ -532,6 +565,10 @@ def write(
     ``compression_level`` applies to source and overview Zstd pages.
     ``placeholder_pixels`` is the width of the square a shape under a pixel
     draws as; when unset, the thinning's own ``placeholder_pixels`` decides.
+    ``metadata`` is added to the file's key-value metadata.
+
+    ``src`` is a GeoParquet path or glob, local or a URI such as s3:// that
+    DuckDB and Arrow open; S3 credentials come from the usual AWS chain.
 
     All overview generation options are passed to the writer. ``page_bytes``
     controls analytical/staging pages; ``lod_page_bytes`` controls the final
@@ -563,6 +600,7 @@ def write(
             compression_level=compression_level,
             batch_rows=batch_rows,
             placeholder_pixels=placeholder_pixels,
+            metadata=metadata,
             workers=workers,
             memory_limit=memory_limit,
             temp_dir=temp_dir,
@@ -592,6 +630,7 @@ def _write_unindexed(
     compression_level: int = 9,
     batch_rows: int | None = None,
     placeholder_pixels: float | None = None,
+    metadata: Mapping[str, str] | None = None,
     workers: int | None = None,
     memory_limit: str | None = None,
     temp_dir: str | None = None,
@@ -610,6 +649,7 @@ def _write_unindexed(
     t0 = time.time()
     workers = workers or min(os.cpu_count() or 1, DEFAULT_WORKERS)
     con = connect(memory_limit, temp_dir)
+    _attach_source(con, src)
     source_schema = _read_schema(src)
     attributes = infer_attributes(source_schema, carry)
     geo = json.loads(dict(source_schema.metadata or {}).get(b'geo', b'{}') or b'{}')
@@ -918,7 +958,11 @@ def _write_unindexed(
         },
     }
     schema = schema.with_metadata(
-        {**(source_schema.metadata or {}), b'geo': json.dumps(geo).encode()}
+        {
+            **(source_schema.metadata or {}),
+            **{k.encode(): v.encode() for k, v in (metadata or {}).items()},
+            b'geo': json.dumps(geo).encode(),
+        }
     )
 
     # 4. page sizing: write batches small enough that dense coordinate pages land near page_bytes
