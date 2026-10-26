@@ -161,23 +161,25 @@ def tiny_polygons(pixels: float = TINY_PIXELS) -> Thin:
     return thin
 
 
-def density_budget(budget: int = 60_000) -> Thin:
-    """Keep a uniform fraction so the busiest tile at this zoom holds at most
-    `budget` rows. Flattens the densest places; use when bytes per tile matter
-    more than density character."""
+def density_budget(budget: int | Callable[[int], int] = 60_000) -> Thin:
+    """Tippecanoe's `--drop-fraction-as-needed`: keep one uniform fraction of
+    rows everywhere, sized so the busiest tile at the zoom holds at most
+    `budget` rows (an int, or a function of the zoom). Relative density reads
+    the same at every zoom, so sparse places keep their few rows in proportion."""
 
     def thin(rows, zoom, ctx):
+        limit = budget(zoom) if callable(budget) else budget
         tiles = ctx.tile_of(rows, zoom)
         _, counts = np.unique(tiles, return_counts=True)
         busiest = int(counts.max()) if len(counts) else 1
-        fraction = min(1.0, budget / max(busiest, 1))
+        fraction = min(1.0, limit / max(busiest, 1))
         # rows may arrive filtered, as under `chain` or `only`, so the fraction is
         # taken of their u distribution, not of [0, 1)
         u = rows.column('u').to_numpy()
         keep = u < np.quantile(u, fraction) if len(u) and fraction < 1.0 else np.ones(len(u), bool)
         return _mask(rows, keep)
 
-    thin.__name__ = f'density_budget({budget})'
+    thin.__name__ = f'density_budget({getattr(budget, "__name__", budget)})'
     return thin
 
 

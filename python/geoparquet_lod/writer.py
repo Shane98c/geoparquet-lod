@@ -517,6 +517,7 @@ def write(
     lod_page_bytes: int = 65536,
     compression_level: int = 9,
     batch_rows: int | None = None,
+    placeholder_pixels: float | None = None,
     workers: int | None = None,
     memory_limit: str | None = None,
     temp_dir: str | None = None,
@@ -529,6 +530,8 @@ def write(
     the zoom where every feature is shown; 'auto' derives it from the data.
     ``carry`` embeds selected attributes in the overviews for fast styling.
     ``compression_level`` applies to source and overview Zstd pages.
+    ``placeholder_pixels`` is the width of the square a shape under a pixel
+    draws as; when unset, the thinning's own ``placeholder_pixels`` decides.
 
     All overview generation options are passed to the writer. ``page_bytes``
     controls analytical/staging pages; ``lod_page_bytes`` controls the final
@@ -559,6 +562,7 @@ def write(
             page_rows=page_rows,
             compression_level=compression_level,
             batch_rows=batch_rows,
+            placeholder_pixels=placeholder_pixels,
             workers=workers,
             memory_limit=memory_limit,
             temp_dir=temp_dir,
@@ -587,6 +591,7 @@ def _write_unindexed(
     page_rows: int = 2048,
     compression_level: int = 9,
     batch_rows: int | None = None,
+    placeholder_pixels: float | None = None,
     workers: int | None = None,
     memory_limit: str | None = None,
     temp_dir: str | None = None,
@@ -807,7 +812,9 @@ def _write_unindexed(
     # 3. schema and metadata, known before writing
     origin = (float(xmin), float(ymin))
     # placeholder squares are given in pixels; the grid is finer than a pixel
-    dot_cells = float(getattr(thinning, 'placeholder_pixels', DOT_CELLS / SUBPIXELS)) * SUBPIXELS
+    if placeholder_pixels is None:
+        placeholder_pixels = getattr(thinning, 'placeholder_pixels', DOT_CELLS / SUBPIXELS)
+    dot_cells = float(placeholder_pixels) * SUBPIXELS
     grids = {b['name']: (grid(b['grid_zoom'], degrees=degrees), origin) for b in lod_plan}
     shape_lods = [b for b in lod_plan if b['geometry_type'] != 'Point']
     # 3b. straddlers: a feature reaching into a tile beyond its own gets a copy of its LOD

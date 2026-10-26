@@ -377,3 +377,17 @@ def test_reader_finds_straddler_copies(buildings, tmp_path):
         check=True,
     )
     assert 'spill tests passed' in result.stdout
+
+
+def test_placeholder_pixels_sets_the_square_size(buildings, tmp_path):
+    from geoparquet_lod.quantize import SUBPIXELS
+
+    out = write(
+        buildings,
+        tmp_path / 'squares.parquet',
+        placeholder_pixels=1.0,
+        workers=1,
+        log=lambda *_: None,
+    )
+    lods = json.loads(pq.read_schema(out).metadata[b'geo'])['lod_columns']['lods']
+    assert {c['placeholder'] for c in lods.values()} == {1.0 * SUBPIXELS}

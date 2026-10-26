@@ -32,6 +32,27 @@ def test_density_budget_holds_across_zooms():
     assert kept.num_rows > 1_000, 'the coarsest zoom still shows the countryside'
 
 
+def test_density_budget_takes_a_budget_per_zoom():
+    rng = np.random.default_rng(2)
+    n = 50_000
+    rows = pa.table(
+        {
+            'id': np.arange(1, n + 1),
+            'cx': rng.random(n) * 0.2,
+            'cy': rng.random(n) * 0.2,
+            'diag': np.full(n, 1e-4),
+            'area': np.full(n, 1e-8),
+            'u': rng.random(n),
+        }
+    )
+    ctx = Context((0, 1, 2, 3, 4), 4, 512, True)
+    thin = density_budget(lambda zoom: 1_000 * (zoom + 1))
+    for zoom in range(5):
+        kept = thin(rows, zoom, ctx)
+        # everything sits in one tile at these zooms, so the budget is the row count
+        assert abs(kept.num_rows - 1_000 * (zoom + 1)) <= 50, (zoom, kept.num_rows)
+
+
 def test_drop_smallest_sets_one_bar_per_zoom():
     from geoparquet_lod.thinning import chain, drop_smallest, tile_cost, tiny_polygons
 

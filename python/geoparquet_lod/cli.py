@@ -105,6 +105,12 @@ def cli():
     type=int,
     help='rows per write batch; default sizes pages to --page-bytes',
 )
+@click.option(
+    '--placeholder-pixels',
+    default=None,
+    type=click.FloatRange(min=0, min_open=True),
+    help='width in pixels of the square a shape under a pixel draws as',
+)
 @click.option('--workers', default=None, type=int)
 @click.option('--memory-limit', default=None)
 @click.option('--temp-dir', default=None)
@@ -123,6 +129,7 @@ def write_cmd(
     lod_page_bytes,
     compression_level,
     batch_rows,
+    placeholder_pixels,
     workers,
     memory_limit,
     temp_dir,
@@ -148,6 +155,7 @@ def write_cmd(
         lod_page_bytes=lod_page_bytes,
         compression_level=compression_level,
         batch_rows=batch_rows,
+        placeholder_pixels=placeholder_pixels,
         workers=workers,
         memory_limit=memory_limit,
         temp_dir=temp_dir,
