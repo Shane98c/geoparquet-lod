@@ -739,7 +739,8 @@ def _write_unindexed(
     centroid = f'ST_Centroid({geometry})'
     width = f'({mx(f"ST_XMax({geometry})")} - {mx(f"ST_XMin({geometry})")})'
     height = f'({my(f"ST_YMax({geometry})")} - {my(f"ST_YMin({geometry})")})'
-    area = f"ST_Area(ST_Transform({geometry}, 'OGC:CRS84', 'EPSG:3857'))"
+    # the source is lon/lat; DuckDB 2 requires the axis order to be stated
+    area = f"ST_Area(ST_Transform({geometry}, 'OGC:CRS84', 'EPSG:3857', true))"
     sorted_path = out.with_suffix('.sorted.parquet')
     unsorted_path = out.with_suffix('.unsorted.parquet')
     log(f'sorting {src}')
