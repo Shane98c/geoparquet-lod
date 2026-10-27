@@ -86,8 +86,11 @@ export interface PrimaryRows {
   columns: Record<string, unknown[]>
 }
 
-/** Compressed bytes of decoded bbox pages kept for later tiles; the oldest go first. */
-const PAGE_CACHE_BYTES = 4 * 1024 * 1024
+/** Compressed bytes of decoded pages kept for later tiles, by kind; the least
+ * recently used go first. Exact geometry pages are kept so tiles past the
+ * finest LOD, at any zoom, reuse geometry an earlier tile fetched. */
+const PAGE_CACHE_BYTES = { bbox: 4 * 1024 * 1024, geometry: 16 * 1024 * 1024 }
+type PageKind = keyof typeof PAGE_CACHE_BYTES
 /** LOD bytes a tile may read past its exact rows rather than fetch key pages to trim them. */
 const LOOSE_BYTES = 32 * 1024
 const BBOX_LEAVES = ['bbox.xmin', 'bbox.ymin', 'bbox.xmax', 'bbox.ymax'] as const
@@ -110,9 +113,9 @@ export class LodReader {
   private readonly cache = new Map<string, Promise<unknown>>()
   private readonly pages = new Map<
     string,
-    { bytes: number; values: SharedLoad<Map<number, unknown>> }
+    { bytes: number; kind: PageKind; values: SharedLoad<Map<number, unknown>> }
   >()
-  private pageBytes = 0
+  private readonly pageBytes: Record<PageKind, number> = { bbox: 0, geometry: 0 }
   // Cache requested scalar values, not whole decoded source pages. Sparse LOD
   // joins may scan millions of unselected rows. Account conservatively for keys
   // and Map entries; this is an estimated 32 MiB budget, not a heap guarantee.
@@ -732,20 +735,23 @@ export class LodReader {
   ): Promise<Map<number, unknown>[]> {
     signal?.throwIfAborted()
     const key = (page: PageLocation) => `p:${g}:${leaf}:${page.byteStart}`
-    const keep = (BBOX_LEAVES as readonly string[]).includes(leaf)
+    const kind: PageKind | null = (BBOX_LEAVES as readonly string[]).includes(leaf)
+      ? 'bbox'
+      : leaf === this.primary
+        ? 'geometry'
+        : null
     const ordered = [...pages].sort((a, b) => a.byteStart - b.byteStart)
     const wanted = new Map<string, Promise<Map<number, unknown>>>()
     const runs: PageLocation[][] = []
     for (const page of ordered) {
       const cached = this.pages.get(key(page))
+      if (cached) this.pages.delete(key(page))
       if (cached && !cached.values.abandoned) {
+        this.pages.set(key(page), cached)
         wanted.set(key(page), cached.values.get(signal))
         continue
       }
-      if (cached) {
-        this.pages.delete(key(page))
-        this.pageBytes -= cached.bytes
-      }
+      if (cached) this.pageBytes[cached.kind] -= cached.bytes
       const last = runs[runs.length - 1]
       if (last && last[last.length - 1].byteEnd === page.byteStart) last.push(page)
       else runs.push([page])
@@ -754,7 +760,10 @@ export class LodReader {
       const entry = this.pages.get(k)
       if (!entry) return
       this.pages.delete(k)
-      this.pageBytes -= entry.bytes
+      this.pageBytes[entry.kind] -= entry.bytes
+    }
+    const oldest = (kind: PageKind) => {
+      for (const [k, entry] of this.pages) if (entry.kind === kind) return k
     }
     for (const run of runs) {
       const dictionary = this.dictionaryPage(g, leaf)
@@ -778,12 +787,13 @@ export class LodReader {
           }),
         )
         wanted.set(key(page), decoded.get(signal))
-        if (!keep) continue
+        if (!kind) continue
         const bytes = page.byteEnd - page.byteStart
-        while (this.pages.size && this.pageBytes + bytes > PAGE_CACHE_BYTES)
-          forget(this.pages.keys().next().value!)
-        this.pages.set(key(page), { bytes, values: decoded })
-        this.pageBytes += bytes
+        if (bytes > PAGE_CACHE_BYTES[kind]) continue
+        for (let k; this.pageBytes[kind] + bytes > PAGE_CACHE_BYTES[kind] && (k = oldest(kind));)
+          forget(k)
+        this.pages.set(key(page), { bytes, kind, values: decoded })
+        this.pageBytes[kind] += bytes
         decoded.promise.catch(() => {
           if (this.pages.get(key(page))?.values === decoded) forget(key(page))
         })

@@ -211,3 +211,33 @@ def test_spatial_roundtrip(tmp_path, monkeypatch, family, tile_pages, leaf_pages
 def test_layout_requires_separate_output(tmp_path):
     with pytest.raises(ValueError, match='separate output'):
         finalize_layout(tmp_path / 'same', tmp_path / 'same')
+
+
+def test_zooming_past_the_finest_lod_reuses_exact_geometry(tmp_path):
+    """Tiles past the finest LOD read each exact geometry once, however many
+    tiles and zooms it spans."""
+    import subprocess
+
+    import shapely
+
+    # one polygon of thousands of vertices, spanning many tiles past the finest zoom
+    polygon = shapely.Point(-105.0, 40.0).buffer(0.5, quad_segs=1000)
+    table = pa.table(
+        {'name': ['one'], 'geometry': pa.array([shapely.to_wkb(polygon)], pa.binary())}
+    )
+    src = tmp_path / 'one.parquet'
+    geo = {
+        'version': '1.1.0',
+        'primary_column': 'geometry',
+        'columns': {'geometry': {'encoding': 'WKB', 'geometry_types': ['Polygon']}},
+    }
+    pq.write_table(table.replace_schema_metadata({'geo': json.dumps(geo)}), src)
+    out = build(
+        src, tmp_path / 'one.lod.parquet', zooms=list(range(9)), workers=1, log=lambda *_: None
+    )
+    result = subprocess.run(
+        ['node', str(ROOT / 'js/test/primary-cache.test.mjs'), str(out)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
