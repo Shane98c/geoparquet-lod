@@ -12,7 +12,7 @@ The overview policy applies `drop_smallest` followed by `tiny_polygons`, with
 height and class carried for styling. It uses one Hilbert order, full detail
 from z14 in one LOD serving z14 and z15, which a map overzooms past, 16 KiB
 staging pages and 64 KiB final overview pages. The indexed file is
-**6.55 GB**, compared with **4.84 GB** for the analytical source and
+**6.59 GB**, compared with **4.84 GB** for the analytical source and
 **1.30 GB** for PMTiles. These totals represent different capabilities.
 
 Estimated-byte thinning budgets were calibrated against PMTiles feature counts:
@@ -31,12 +31,12 @@ calibration are excluded, leaving four validation tiles at z8.
 
 | Sample      | Zoom | GeoParquet features | PMTiles features | Difference |
 | ----------- | ---: | ------------------: | ---------------: | ---------: |
-| Calibration |    8 |             242,432 |          249,738 |     -2.93% |
-| Calibration |   11 |              87,959 |           89,253 |     -1.45% |
-| Calibration |   12 |             138,778 |          138,574 |     +0.15% |
-| Validation  |    8 |              37,878 |           39,060 |     -3.03% |
-| Validation  |   11 |              44,148 |           44,244 |     -0.22% |
-| Validation  |   12 |              67,581 |           67,332 |     +0.37% |
+| Calibration |    8 |             242,531 |          249,738 |     -2.89% |
+| Calibration |   11 |              88,212 |           89,253 |     -1.17% |
+| Calibration |   12 |             139,020 |          138,574 |     +0.32% |
+| Validation  |    8 |              37,895 |           39,060 |     -2.98% |
+| Validation  |   11 |              44,301 |           44,244 |     +0.13% |
+| Validation  |   12 |              67,757 |           67,332 |     +0.63% |
 
 These aggregate counts do not guarantee identical feature selection or visual
 coverage. At z8, Chiba and Sapporo have about 12% fewer features than PMTiles.
@@ -51,9 +51,9 @@ simulated latency; elapsed times are not a CDN performance benchmark.
 
 | Tokyo tile | GeoParquet bytes | PMTiles bytes | Requests, each |
 | ---------- | ---------------: | ------------: | -------------: |
-| z8         |          622,851 |       499,425 |              2 |
-| z11        |          322,532 |       306,211 |              2 |
-| z12        |          411,588 |       363,153 |              2 |
+| z8         |          648,373 |       499,425 |              2 |
+| z11        |          335,494 |       306,211 |              2 |
+| z12        |          396,826 |       363,153 |              2 |
 
 This demonstrates matching request counts and nearby transfer sizes for these
 tiles, with remaining byte overhead. The z12 result illustrates that matching
