@@ -6,9 +6,10 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+import pyarrow as pa
 
-from ._compact import get, loads
-from ._layout import BOOTSTRAP_BYTES, MAGIC
+from ._compact import dumps, get, loads
+from ._layout import BOOTSTRAP_BYTES, MAGIC, row_metadata
 
 
 def check_index(path, parquet, lod):
@@ -80,6 +81,13 @@ def check_index(path, parquet, lod):
         geo = json.loads(parquet.schema_arrow.metadata[b'geo'])
         if root.get('primary') != geo.get('primary_column', 'geometry'):
             raise ValueError('spatial root primary disagrees with footer')
+        if root.get('footer_bytes', footer_size) != footer_size:
+            raise ValueError('spatial root footer_bytes disagrees with footer')
+        if 'row_metadata' in root:
+            offset, length = root['row_metadata']
+            flat = [f.name for f in parquet.schema_arrow if not pa.types.is_nested(f.type)]
+            if gzip.decompress(read(offset, length)) != dumps(row_metadata(metadata, flat)):
+                raise ValueError('row metadata disagrees with footer')
         if set(root.get('streams', {})) != set(lod['lods']):
             raise ValueError('spatial streams disagree with declared LODs')
         key = lod['key']

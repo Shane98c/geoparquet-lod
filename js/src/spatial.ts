@@ -3,6 +3,7 @@ import type { ProjectionExecutor } from './projection.js'
 import { readColumn } from 'hyparquet/src/column.js'
 import { DEFAULT_PARSERS } from 'hyparquet/src/convert.js'
 import { getSchemaPath } from 'hyparquet/src/schema.js'
+import { parquetMetadata } from 'hyparquet'
 import { compressors } from 'hyparquet-compressors'
 import { attributeKind, decodeRow, decodeSelectedRow, type AttributeField } from './decode.js'
 import { visitPlainPage } from './pages.js'
@@ -30,6 +31,8 @@ interface SpatialRoot {
   version: number
   file_bytes: number
   footer_bytes?: number
+  /** gzip Thrift metadata of the flat top-level columns, for row reads */
+  row_metadata?: [number, number]
   lod: LodMetadata
   primary: string
   codecs: Record<string, string>
@@ -41,9 +44,20 @@ export function hasSpatialIndex(bytes: ArrayBuffer): boolean {
   return bytes.byteLength >= 16 && new TextDecoder().decode(new Uint8Array(bytes, 4, 8)) === MAGIC
 }
 
+const gunzip = (bytes: ArrayBuffer): Response =>
+  new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip')))
+
 async function gunzipJson<T>(bytes: ArrayBuffer): Promise<T> {
-  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))
-  return JSON.parse(await new Response(stream).text()) as T
+  return JSON.parse(await gunzip(bytes).text()) as T
+}
+
+/** Parquet metadata from its Thrift bytes, framed as a footer for hyparquet. */
+function metadataFrom(thrift: ArrayBuffer) {
+  const footer = new Uint8Array(thrift.byteLength + 8)
+  footer.set(new Uint8Array(thrift))
+  new DataView(footer.buffer).setUint32(thrift.byteLength, thrift.byteLength, true)
+  footer.set(new TextEncoder().encode('PAR1'), thrift.byteLength + 4)
+  return parquetMetadata(footer.buffer)
 }
 
 /** The file length an indexed file's root records, from its leading bytes, or
@@ -137,6 +151,7 @@ export class SpatialReader implements TileReader {
   private readonly pages = new Map<number, { size: number; data: SharedLoad<ArrayBuffer> }>()
   private pageBytes = 0
   private fallback?: SharedLoad<LodReader>
+  private rowFallback?: SharedLoad<LodReader>
 
   constructor(
     private readonly file: RangeSource,
@@ -178,8 +193,29 @@ export class SpatialReader implements TileReader {
     return this.fallback.get(signal)
   }
 
+  /** A reader for `columns` of single rows: from the root's row metadata when
+   * it covers them all, so the full footer is never fetched, else the footer. */
+  private rowReader(columns: string[], signal?: AbortSignal): Promise<LodReader> {
+    const covered = (c: string) => c === this.primary || this.root.columns?.includes(c)
+    if (!this.root.row_metadata || !columns.every(covered)) return this.analytical(signal)
+    if (!this.rowFallback || this.rowFallback.abandoned) {
+      const [offset, length] = this.root.row_metadata
+      const current = new SharedLoad(async (signal) => {
+        const bytes = await this.file.slice(offset, offset + length, signal)
+        const metadata = metadataFrom(await gunzip(bytes).arrayBuffer())
+        signal?.throwIfAborted()
+        return LodReader.fromMetadata(this.file, metadata)
+      })
+      this.rowFallback = current
+      current.promise.catch(() => {
+        if (this.rowFallback === current) this.rowFallback = undefined
+      })
+    }
+    return this.rowFallback.get(signal)
+  }
+
   async readRow(row: number, columns: string[], signal?: AbortSignal) {
-    return (await this.analytical(signal)).readRow(row, columns, signal)
+    return (await this.rowReader(columns, signal)).readRow(row, columns, signal)
   }
 
   async readColumns(
@@ -188,7 +224,7 @@ export class SpatialReader implements TileReader {
     signal?: AbortSignal,
     execute?: ProjectionExecutor,
   ) {
-    return (await this.analytical(signal)).readColumns(rows, columns, signal, execute)
+    return (await this.rowReader(columns, signal)).readColumns(rows, columns, signal, execute)
   }
 
   async readPrimary(bbox: Bbox, attributes: string[] = [], signal?: AbortSignal) {

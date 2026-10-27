@@ -12,6 +12,7 @@ import pytest
 import shapely
 from click.testing import CliRunner
 from geoparquet_lod import validate, write
+from geoparquet_lod._compact import dumps, get, loads, set_value
 from geoparquet_lod.cli import cli
 from geoparquet_lod.validate import ValidationError
 
@@ -158,16 +159,38 @@ def _write_root(path, raw, root):
 
 
 @pytest.mark.parametrize(
-    'mutation', ['root_bounds', 'leaf_rows', 'leaf_fences', 'leaf_offset', 'codec', 'primary']
+    'mutation',
+    [
+        'root_bounds',
+        'leaf_rows',
+        'leaf_fences',
+        'leaf_offset',
+        'codec',
+        'primary',
+        'footer_bytes',
+        'row_metadata',
+    ],
 )
 def test_spatial_index_corruption(indexed, tmp_path, mutation):
     raw, root = _root(indexed)
     bad = tmp_path / 'bad.parquet'
-    if mutation in ('codec', 'primary'):
+    if mutation in ('codec', 'primary', 'footer_bytes'):
         if mutation == 'codec':
             root['codecs'][next(iter(root['codecs']))] = 'SNAPPY'
-        else:
+        elif mutation == 'primary':
             root['primary'] = 'wrong_geometry'
+        else:
+            root['footer_bytes'] += 1
+    elif mutation == 'row_metadata':
+        # a stale copy: the row metadata of a file with one more row
+        offset, length = root['row_metadata']
+        rows = loads(gzip.decompress(raw[offset : offset + length]))
+        set_value(rows, 3, get(rows, 3) + 1)
+        encoded = gzip.compress(dumps(rows), mtime=0)
+        footer = len(raw) - 8 - int.from_bytes(raw[-8:-4], 'little')
+        raw = raw[:footer] + encoded + raw[footer:]
+        root['row_metadata'] = [footer, len(encoded)]
+        root['file_bytes'] = len(raw)
     elif mutation == 'root_bounds':
         stream = next(s for sections in root['streams'].values() for s in sections if s[2])
         stream[2][0] += 1000000

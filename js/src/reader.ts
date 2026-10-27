@@ -200,6 +200,12 @@ export class LodReader {
     return bounds[0] <= bounds[2] ? bounds : [-180, -85.051129, 180, 85.051129]
   }
 
+  /** A reader over metadata found elsewhere than the footer, such as an
+   * index's copy of some columns' metadata; it reads only those columns. */
+  static fromMetadata(file: RangeSource, metadata: FileMetaData): LodReader {
+    return new LodReader(file, metadata)
+  }
+
   /** `footerBytes`, the footer's length when already known, reads the footer
    * and its trailer in one request. */
   static async open(

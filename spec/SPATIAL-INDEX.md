@@ -16,6 +16,7 @@ LODIDX01 | root_length:u32le | gzip(root JSON) | padding to byte 16384
 column chunks, physically grouped by column, then logical row group
 standard Parquet offset indexes, then column indexes, each by row group
 gzip spatial directory leaves and optional branches
+gzip row metadata
 standard Parquet footer | footer_length:u32le | PAR1
 ```
 
@@ -45,6 +46,8 @@ The compressed root is bounded by the first 16 KiB and contains:
 - `version: 1`, `file_bytes`: format and full file length checks.
 - `footer_bytes`: the length of the standard footer's metadata, so a reader
   fetches the footer and its trailer in one request.
+- `row_metadata`: `[byte_offset, compressed_length]` of the row metadata, see
+  below.
 - `lod`, `primary`: copies of the logical LOD metadata and primary column name.
 - `bounds`, `columns`: map extent and the scalar (non-nested) columns other
   than the primary geometry, including the key column, so a map can
@@ -100,7 +103,21 @@ MVT archive.
 Exact source-row reads and tiles beyond the finest LOD open the normal Parquet
 footer lazily; the standard page indexes describe every page, so ordinary
 Parquet readers see an ordinary file. A row group's offset indexes are
-adjacent, so a row read across columns fetches them in one request. Publish files immutably: the profile is
+adjacent, so a row read across columns fetches them in one request.
+
+The row metadata is the footer's Thrift `FileMetaData`, gzip-compressed and
+cut down to the flat (non-nested, non-repeated) top-level columns, the primary
+geometry included: the schema root and those columns' elements; every row
+group with only those columns' chunks, each keeping its file offset,
+required column metadata, data and dictionary page offsets, and offset index
+location, without statistics, encoding statistics, size statistics or column
+index; and only the `geo` key/value. Row-group totals cover the kept chunks,
+and `sorting_columns`, `column_orders` and `created_by` are omitted. A reader
+reads rows of those columns from it without fetching the footer, and opens the
+footer for any other column. It is derived from the final footer, which stays
+authoritative; a validator checks the two agree.
+
+Publish files immutably: the profile is
 specific to one file write, and ordinary Parquet writers need not preserve it.
 The reference `write()` builds the layout as its final step, writes to
 temporary files, and publishes only after the completed footer is readable.

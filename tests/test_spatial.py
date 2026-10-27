@@ -213,7 +213,7 @@ def test_layout_requires_separate_output(tmp_path):
         finalize_layout(tmp_path / 'same', tmp_path / 'same')
 
 
-def test_row_reads_fetch_footer_and_offset_indexes_once(tmp_path):
+def test_row_reads_skip_the_footer_and_fetch_offset_indexes_once(tmp_path):
     rng = np.random.default_rng(5)
     n = 6000
     x, y = -105 + rng.random(n) * 0.2, 39.6 + rng.random(n) * 0.2
@@ -245,6 +245,7 @@ def test_row_reads_fetch_footer_and_offset_indexes_once(tmp_path):
     meta = pq.ParquetFile(out).metadata
     assert meta.num_row_groups == 3
     expected = pq.read_table(out, columns=columns).slice(row, 1).to_pylist()[0]
+    xmin = pq.read_table(out, columns=['bbox']).slice(row, 1)['bbox'][0]['xmin'].as_py()
     starts = np.cumsum([0] + [meta.row_group(g).num_rows for g in range(meta.num_row_groups)])
     g = int(np.searchsorted(starts, row, side='right') - 1)
     data = out.read_bytes()
@@ -252,6 +253,12 @@ def test_row_reads_fetch_footer_and_offset_indexes_once(tmp_path):
     footer = loads(data[-8 - length : -8])
     root = json.loads(gzip.decompress(data[16 : 16 + int.from_bytes(data[12:16], 'little')]))
     assert root['footer_bytes'] == length
+    offset, size = root['row_metadata']
+    rows = loads(gzip.decompress(data[offset : offset + size]))
+    names = [get(e, 4).decode() for e in get(rows, 2)[1][1:]]
+    schema = pq.ParquetFile(out).schema_arrow
+    assert names == [f.name for f in schema if not pa.types.is_nested(f.type)]
+    assert size < length
     chunks = [
         chunk
         for chunk in get(get(footer, 4)[1][g], 1)[1]
@@ -267,7 +274,15 @@ def test_row_reads_fetch_footer_and_offset_indexes_once(tmp_path):
     assert indexes[1] - indexes[0] <= whole
     cases = tmp_path / 'cases.json'
     cases.write_text(
-        json.dumps({'row': row, 'columns': columns, 'expected': expected, 'indexes': indexes})
+        json.dumps(
+            {
+                'row': row,
+                'columns': columns,
+                'expected': expected,
+                'indexes': indexes,
+                'xmin': xmin,
+            }
+        )
     )
     result = subprocess.run(
         ['node', str(ROOT / 'js/test/row-read.test.mjs'), str(out), str(cases)],

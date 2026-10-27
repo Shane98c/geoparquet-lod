@@ -22,9 +22,8 @@ import pyarrow.parquet as pq
 from ._compact import dumps, get, loads, set_value
 
 BOOTSTRAP_BYTES = 16384
-_ROOT_TARGET_BYTES = (
-    BOOTSTRAP_BYTES - 96
-)  # reserve room for file_bytes, footer_bytes and the header
+# reserve room for file_bytes, footer_bytes, row_metadata and the header
+_ROOT_TARGET_BYTES = BOOTSTRAP_BYTES - 128
 MAGIC = b'LODIDX01'
 CODECS = ['UNCOMPRESSED', 'SNAPPY', 'GZIP', 'LZO', 'BROTLI', 'LZ4', 'ZSTD', 'LZ4_RAW']
 
@@ -65,6 +64,59 @@ def _copy(src, dst, start, size):
             raise ValueError('truncated column chunk')
         dst.write(data)
         size -= len(data)
+
+
+def _subtree(elements, i):
+    """Schema elements and leaves in the subtree at flat schema index `i`."""
+    size, leaves = 1, 0 if 5 in elements[i] else 1
+    for _ in range(get(elements[i], 5, 0)):
+        child_size, child_leaves = _subtree(elements, i + size)
+        size, leaves = size + child_size, leaves + child_leaves
+    return size, leaves
+
+
+def row_metadata(metadata, columns):
+    """The footer `metadata` cut down to the flat top-level `columns`: their
+    schema, their chunks in every row group without statistics or column
+    indexes, and the `geo` key/value, so a reader can read rows of those
+    columns without the full footer."""
+    elements = get(metadata, 2)[1]
+    kept, leaves, i, leaf = [], [], 1, 0
+    while i < len(elements):
+        size, count = _subtree(elements, i)
+        element = elements[i]
+        if 5 not in element and get(element, 3) != 2 and get(element, 4).decode() in columns:
+            kept.append(element)
+            leaves.append(leaf)
+        i, leaf = i + size, leaf + count
+    if len(kept) != len(columns):
+        raise ValueError('row metadata takes only flat top-level columns')
+    root = dict(elements[0])
+    set_value(root, 5, len(kept))
+    groups = []
+    for group in get(metadata, 4)[1]:
+        chunks = []
+        for leaf in leaves:
+            chunk = get(group, 1)[1][leaf]
+            cm = {
+                k: v for k, v in sorted(get(chunk, 3).items()) if k in (1, 2, 3, 4, 5, 6, 7, 9, 11)
+            }
+            trimmed = {k: v for k, v in sorted(chunk.items()) if k in (2, 4, 5)}
+            trimmed[3] = (chunk[3][0], cm)
+            chunks.append(dict(sorted(trimmed.items())))
+        total = sum(get(get(c, 3), 6) for c in chunks)
+        trimmed = {1: (9, (12, chunks)), 2: (group[2][0], total), 3: group[3]}
+        if 7 in group:
+            trimmed[7] = group[7]
+        groups.append(trimmed)
+    kv = [v for v in get(metadata, 5, (12, []))[1] if get(v, 1) == b'geo']
+    return {
+        1: metadata[1],
+        2: (9, (12, [root, *kept])),
+        3: metadata[3],
+        4: (9, (12, groups)),
+        5: (9, (12, kv)),
+    }
 
 
 def _tile_pages(
@@ -184,11 +236,8 @@ def finalize_layout(
     if not 0 <= lod['key']['depth'] <= 26:
         raise ValueError('Hilbert depth must fit exact JavaScript integers (0..26)')
     root = {'version': 1, 'lod': lod, 'primary': geo['primary_column'], 'streams': {}, 'codecs': {}}
-    root['columns'] = [
-        f.name
-        for f in parquet.schema_arrow
-        if f.name != geo['primary_column'] and not pa.types.is_nested(f.type)
-    ]
+    flat = [f.name for f in parquet.schema_arrow if not pa.types.is_nested(f.type)]
+    root['columns'] = [name for name in flat if name != geo['primary_column']]
     bounds = [180.0, 90.0, -180.0, -90.0]
     for g in range(parquet.metadata.num_row_groups):
         group = parquet.metadata.row_group(g)
@@ -416,6 +465,9 @@ def finalize_layout(
                     }
                 )
                 metadata[5] = (9, (12, kv))
+                rows = gzip.compress(dumps(row_metadata(metadata, flat)), mtime=0)
+                root['row_metadata'] = [target.tell(), len(rows)]
+                target.write(rows)
                 footer = dumps(metadata)
                 target.write(footer)
                 target.write(struct.pack('<I', len(footer)) + b'PAR1')
