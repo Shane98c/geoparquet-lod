@@ -26,10 +26,10 @@ finest zoom always shows every row. Membership need not nest across zooms.
 Shapes stay shapes at every zoom on a quarter-pixel grid; one too small for
 it is stored as a square on its centroid's cell, so zoomed out a thinned
 building set reads as a faint density texture in the same fill layer, as
-tippecanoe draws it. `rows` carries `id`, centroid, bbox diagonal, area,
-vertex count, a per-row uniform `u` hashed from the geometry, and the
-carried attributes; `Context` converts area and size to screen pixels at
-the row's latitude. Returning a carried column overrides its value in that
+tippecanoe draws it. `rows` carries `id`, centroid, bbox diagonal and area in
+Web Mercator metres, vertex count, a per-row uniform `u` hashed from the
+geometry, and the carried attributes; `Context` converts area and size to
+screen pixels at a zoom. Returning a carried column overrides its value in that
 zoom's LOD, which is how a cluster passes its count along. Built-ins are a
 few lines each and meant to be copied:
 
@@ -147,7 +147,7 @@ write(
 ```
 
 The input is any GeoParquet with a WKB geometry column in OGC:CRS84 or
-EPSG:4326, as a path or a `*` glob, local or on S3 (`s3://`, with credentials
+EPSG:4326 with planar edges, as a path or a `*` glob, local or on S3 (`s3://`, with credentials
 from the usual AWS chain); the output is a local path. `metadata=` adds
 key-value metadata to the file. `write()` builds the overviews, then the tile-aligned pages and
 spatial directory, in one call; `lod_page_bytes` (`--lod-page-bytes`) sets the
@@ -281,7 +281,7 @@ const features = await readFeatures(reader, {
   columns: ['height', 'version'],
   geometry: 'overview',
 })
-// features.coords are whole quantized geometries; apply features.lod.scale/offset.
+// features.coords are whole quantized geometries; offset + scale * [x, y] is EPSG:3857 metres.
 // geometry: 'primary' instead returns original WKB and original source values.
 ```
 
@@ -346,17 +346,18 @@ const mvt = batchToMvt(batch, { z: 12, x: 852, y: 1555 })
 `readFeatures` result without another read. The batch exposes `geometry`,
 `rowIndex`, `columns` and `source`. Geometry uses typed x/y buffers and
 feature→polygon→ring/line→vertex offsets, with coordinates
-`offset + scale * [x, y]` in longitude/latitude. Overview coordinates remain
-quantized `Int32Array`; primary WKB becomes `Float64Array` and retains supported
-Z coordinates. Overview batches may be thinned and simplified. Sparse zoom
+`offset + scale * [x, y]`. Overview coordinates remain quantized `Int32Array`
+in EPSG:3857 metres, marked by `geometry.crs`; primary WKB becomes
+`Float64Array` in longitude/latitude and retains supported Z coordinates.
+`batchInDegrees` converts an overview batch to longitude/latitude. Overview batches may be thinned and simplified. Sparse zoom
 profiles select the first declared zoom at least as detailed as the requested
 resolution, clamped at the finest profile; queries enumerate tiles at that same
 declared zoom so boundary copies match.
 
 GeoJSON is an optional object adapter for small results; attribute values retain
 their decoded JS types, so BigInt needs conversion before JSON serialization.
-GeoArrow produces an Arrow IPC stream through the `@cogp/reader` converter. It
-dequantizes coordinates, uses a GeoArrow multi geometry family, and preserves
+GeoArrow produces an Arrow IPC stream through the `@cogp/reader` converter. Both
+adapters return longitude/latitude; GeoArrow dequantizes coordinates, uses a GeoArrow multi geometry family, and preserves
 scalar attribute types where supported; nested and mixed attributes become
 display strings. Mixed geometry families cannot be written in one GeoArrow
 geometry column. `batchToMvt` clips the same buffers to one tile, defaults to

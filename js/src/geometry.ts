@@ -3,10 +3,13 @@
  * Copyright (c) 2026 Kanahiro Iguchi, MIT License; see COGP-LICENSE.txt.
  */
 
+import { LOD_CRS } from './web-mercator.js'
+
 /**
  * Assembles decoded LOD rows (nested arrays of grid coordinates in the
- * family's shape) into the columnar GeometryColumn our MVT encoder consumes. Coordinates stay in grid units; `finish` records the
- * LOD's scale and offset so `offset + scale * value` is a CRS coordinate.
+ * family's shape) into the columnar GeometryColumn our MVT encoder consumes.
+ * Coordinates stay in grid units; `finish` records the LOD's scale and offset
+ * so `offset + scale * value` is an EPSG:3857 coordinate in metres.
  */
 
 export type GeometryType = 'Point' | 'MultiLineString' | 'MultiPolygon'
@@ -107,6 +110,7 @@ export class GeometryBuilder {
       ringOffsets: this.ringOffsets.subarray(0, this.rings + 1),
       scale,
       offset,
+      crs: LOD_CRS,
     }
   }
 }

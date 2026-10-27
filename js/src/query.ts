@@ -1,5 +1,6 @@
 import type { Bbox, Lod, LodRows, PrimaryRows } from './reader.js'
 import type { TileReader } from './spatial.js'
+import { HALF_WORLD, mercatorX, mercatorY } from './web-mercator.js'
 
 export interface FeatureQuery {
   /** WGS84 bounds; west > east wraps across the antimeridian. */
@@ -77,28 +78,21 @@ export async function readFeatures(
   const z = declared.find((zoom) => zoom >= targetZoom) ?? declared[declared.length - 1]
   const lod = reader.lodForZoom(z)
   const n = 2 ** z
-  const tileX = (lon: number) => Math.max(0, Math.min(n - 1, Math.floor(((lon + 180) / 360) * n)))
-  const tileY = (lat: number) =>
-    Math.max(
-      0,
-      Math.min(
-        n - 1,
-        Math.floor(
-          ((1 -
-            Math.asinh(
-              Math.tan((Math.max(-85.05112878, Math.min(85.05112878, lat)) * Math.PI) / 180),
-            ) /
-              Math.PI) /
-            2) *
-            n,
-        ),
-      ),
-    )
+  const tile = (fraction: number) => Math.max(0, Math.min(n - 1, Math.floor(fraction * n)))
+  const tileX = (x: number) => tile((x + HALF_WORLD) / (2 * HALF_WORLD))
+  const tileY = (y: number) => tile((HALF_WORLD - y) / (2 * HALF_WORLD))
+  // LOD coordinates are EPSG:3857 metres, so the query boxes are compared in metres
+  const projected: Bbox[] = boxes.map(([west, south, east, north]) => [
+    mercatorX(west),
+    mercatorY(south),
+    mercatorX(east),
+    mercatorY(north),
+  ])
   const cells = new Map<string, [number, number]>()
   const limit = query.maxTiles ?? 256
   if (!Number.isSafeInteger(limit) || limit < 1)
     throw new Error('maxTiles must be a positive integer')
-  for (const [west, south, east, north] of boxes) {
+  for (const [west, south, east, north] of projected) {
     // A point can round across its source tile boundary. Include the adjacent
     // source cell within one quantization step, then filter actual LOD bounds.
     const x0 = tileX(west - lod.scale[0]),
@@ -134,7 +128,7 @@ export async function readFeatures(
         if (seen.has(id)) continue
         const bounds = coordinateBounds(part.coords[i], lod)
         if (
-          !boxes.some(
+          !projected.some(
             (b) => bounds[0] <= b[2] && bounds[2] >= b[0] && bounds[1] <= b[3] && bounds[3] >= b[1],
           )
         )

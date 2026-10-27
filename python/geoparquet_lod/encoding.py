@@ -45,10 +45,17 @@ def infer_attributes(schema: pa.Schema, carry) -> list[pa.Field]:
     return out
 
 
+INT32 = np.iinfo(np.int32)
+
+
 def round_away(v: np.ndarray) -> np.ndarray:
-    """Round half away from zero, as the encoding requires."""
+    """Round half away from zero, as the encoding requires. Grid coordinates
+    are int32, so a value outside it is an error rather than a wrapped one."""
     v = np.nan_to_num(np.asarray(v, dtype=np.float64))
-    return (np.sign(v) * np.floor(np.abs(v) + 0.5)).astype(np.int32)
+    r = np.sign(v) * np.floor(np.abs(v) + 0.5)
+    if r.size and (r.min() < INT32.min or r.max() > INT32.max):
+        raise OverflowError('grid coordinate outside int32: the extent is too wide for the zoom')
+    return r.astype(np.int32)
 
 
 def point_parts(cx: np.ndarray, cy: np.ndarray, scale: float, offset) -> tuple:

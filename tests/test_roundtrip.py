@@ -49,15 +49,13 @@ def buildings(tmp_path):
 
 def copied_straddlers(bounds, zoom):
     """The straddlers that get copies: shapes a pixel or larger at `zoom`."""
-    from geoparquet_lod.quantize import resolution
+    from geoparquet_lod.quantize import mercator, resolution
     from geoparquet_lod.spill import straddlers
 
     xmin, ymin, xmax, ymax = bounds.T
-    res = resolution(zoom)
-    lat = np.radians((ymin + ymax) / 2)
-    large = np.flatnonzero(
-        np.maximum((xmax - xmin) / res, (ymax - ymin) / (res * np.cos(lat))) >= 1
-    )
+    x0, y0 = mercator(xmin, ymin)
+    x1, y1 = mercator(xmax, ymax)
+    large = np.flatnonzero(np.maximum(x1 - x0, y1 - y0) / resolution(zoom) >= 1)
     rows, tiles = straddlers(xmin[large], ymin[large], xmax[large], ymax[large], zoom)
     return large[rows], tiles
 
@@ -122,7 +120,8 @@ def test_polygons_roundtrip(buildings, tmp_path):
     # a shape LOD decodes back near the source
     lod = meta['lods'][shape]
     x, y = polygons[0][0][0][0]
-    assert abs(lod['offset'][0] + lod['scale'][0] * x + 105) < 0.6
+    lon = np.degrees((lod['offset'][0] + lod['scale'][0] * x) / 6378137)
+    assert abs(lon + 105) < 0.6
     # coarser LODs hold subsets, as polygons, with placeholder squares for collapsed ones
     thinned = [n for n, lod in meta['lods'].items() if lod['zooms'][0] < 12]
     assert all(meta['lods'][n]['geometry_type'] == 'MultiPolygon' for n in thinned)
@@ -279,12 +278,10 @@ def test_null_override_and_combined_tiny(points, tmp_path):
             'u': pa.array(np.linspace(0, 1, n, endpoint=False)),
         }
     )
-    ctx = Context((0, 1, 2), 2, 512, True)
+    ctx = Context((0, 1, 2), 2, 512)
     solo = tiny_polygons(2.0)
     both = combine(tiny_polygons(2.0), size_threshold(1e12))
-    square = (
-        4.0 * ctx.pixel_unit(rows, 1)[0]
-    )  # a two-pixel square in degrees squared at this latitude
+    square = 4.0 * ctx.pixel_unit(rows, 1)[0]  # a two-pixel square in metres squared
     # four rows make a hair over one square at zoom 1, so sixteen rows keep four representatives
     rows = rows.set_column(
         rows.schema.get_field_index('area'), 'area', pa.array(np.full(n, square / 4 * 1.001))
@@ -377,6 +374,76 @@ def test_reader_finds_straddler_copies(buildings, tmp_path):
         check=True,
     )
     assert 'spill tests passed' in result.stdout
+
+
+def test_other_crs_and_spherical_edges_are_refused(buildings, tmp_path):
+    """The writer refuses them before sorting, and the JS reader refuses a file declaring them."""
+    import subprocess
+
+    out = write(buildings, tmp_path / 'ok.parquet', workers=1, log=lambda *_: None)
+    built = pq.read_table(out)
+    variants = {
+        'utm': {'crs': {'id': {'authority': 'EPSG', 'code': 32613}}},
+        'unknown': {'crs': None},
+        'spherical': {'edges': 'spherical'},
+    }
+    refused = []
+    for name, change in variants.items():
+        for table, path in (
+            (pq.read_table(buildings), tmp_path / f'{name}-source.parquet'),
+            (built, tmp_path / f'{name}.lod.parquet'),
+        ):
+            geo = json.loads(table.schema.metadata[b'geo'])
+            geo['columns']['geometry'].update(change)
+            metadata = {**table.schema.metadata, b'geo': json.dumps(geo).encode()}
+            pq.write_table(table.replace_schema_metadata(metadata), path)
+        with pytest.raises(NotImplementedError):
+            write(tmp_path / f'{name}-source.parquet', tmp_path / f'{name}.parquet', log=print)
+        refused.append(str(tmp_path / f'{name}.lod.parquet'))
+    script = Path(__file__).resolve().parents[1] / 'js' / 'test' / 'crs.test.mjs'
+    result = subprocess.run(
+        ['node', str(script), str(out), *refused], capture_output=True, text=True, check=True
+    )
+    assert f'crs tests passed, {len(refused)} files refused' in result.stdout
+
+
+def test_thinnings_see_projected_area(tmp_path):
+    """Area is the projected geometry's, exact for tall and multipart polygons too."""
+    from geoparquet_lod.quantize import mercator
+
+    polys = [
+        shapely.box(10, 0, 11, 80),
+        shapely.MultiPolygon([shapely.box(0, 0, 1, 1), shapely.box(0, 70, 1, 71)]),
+        shapely.box(-105, 39.6, -104.999, 39.601),
+    ]
+    source = geoparquet(
+        tmp_path / 'tall.parquet',
+        pa.table({'geometry': pa.array([shapely.to_wkb(p) for p in polys], pa.binary())}),
+        ['Polygon', 'MultiPolygon'],
+    )
+    seen = {}
+
+    def capture(rows, zoom, ctx):
+        seen.update(
+            zip(rows.column('id').to_pylist(), rows.column('area').to_pylist(), strict=True)
+        )
+        return rows
+
+    write(source, tmp_path / 'tall.lod.parquet', thinning=capture, zooms=[0, 1, 2], log=print)
+    projected = shapely.transform(polys, lambda c: np.stack(mercator(c[:, 0], c[:, 1]), 1))
+    assert [seen[i + 1] for i in range(3)] == pytest.approx(shapely.area(projected), rel=1e-6)
+
+
+def test_an_extent_too_wide_for_the_grid_is_refused_before_sorting(tmp_path):
+    pts = [shapely.Point(-170, 0), shapely.Point(170, 0)]
+    source = geoparquet(
+        tmp_path / 'wide.parquet',
+        pa.table({'geometry': pa.array([shapely.to_wkb(p) for p in pts], pa.binary())}),
+        ['Point'],
+    )
+    with pytest.raises(ValueError, match='int32'):
+        write(source, tmp_path / 'wide.lod.parquet', zooms=[21, 22], log=print)
+    assert not list(tmp_path.glob('**/*.sorted.parquet'))
 
 
 def test_placeholder_pixels_sets_the_square_size(buildings, tmp_path):

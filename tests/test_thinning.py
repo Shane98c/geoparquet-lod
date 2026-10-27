@@ -3,7 +3,16 @@
 import numpy as np
 import pyarrow as pa
 import pytest
+from geoparquet_lod.quantize import mercator
 from geoparquet_lod.thinning import Context, density_budget
+
+METRES_PER_DEGREE = 111_320
+
+
+def rows_at(lon, lat, **columns):
+    """Thinning rows with centroids given in degrees, as the writer hands them over in metres."""
+    cx, cy = mercator(lon, lat)
+    return pa.table({'id': np.arange(1, len(cx) + 1), 'cx': cx, 'cy': cy, **columns})
 
 
 def test_density_budget_holds_across_zooms():
@@ -12,17 +21,14 @@ def test_density_budget_holds_across_zooms():
     # a dense city and sparse countryside, all in one hemisphere
     city = rng.random(n // 2) * 0.2
     country = rng.random(n // 2) * 40
-    rows = pa.table(
-        {
-            'id': np.arange(1, n + 1),
-            'cx': np.concatenate([city, country]),
-            'cy': np.concatenate([city, country]),
-            'diag': np.full(n, 1e-4),
-            'area': np.full(n, 1e-8),
-            'u': rng.random(n),
-        }
+    rows = rows_at(
+        np.concatenate([city, country]),
+        np.concatenate([city, country]),
+        diag=np.full(n, 10.0),
+        area=np.full(n, 100.0),
+        u=rng.random(n),
     )
-    ctx = Context((0, 1, 2, 3, 4, 5, 6, 7, 8), 8, 512, True)
+    ctx = Context((0, 1, 2, 3, 4, 5, 6, 7, 8), 8, 512)
     thin = density_budget(5_000)
     kept = rows
     for zoom in range(7, -1, -1):
@@ -35,17 +41,14 @@ def test_density_budget_holds_across_zooms():
 def test_density_budget_takes_a_budget_per_zoom():
     rng = np.random.default_rng(2)
     n = 50_000
-    rows = pa.table(
-        {
-            'id': np.arange(1, n + 1),
-            'cx': rng.random(n) * 0.2,
-            'cy': rng.random(n) * 0.2,
-            'diag': np.full(n, 1e-4),
-            'area': np.full(n, 1e-8),
-            'u': rng.random(n),
-        }
+    rows = rows_at(
+        rng.random(n) * 0.2,
+        rng.random(n) * 0.2,
+        diag=np.full(n, 10.0),
+        area=np.full(n, 100.0),
+        u=rng.random(n),
     )
-    ctx = Context((0, 1, 2, 3, 4), 4, 512, True)
+    ctx = Context((0, 1, 2, 3, 4), 4, 512)
     thin = density_budget(lambda zoom: 1_000 * (zoom + 1))
     for zoom in range(5):
         kept = thin(rows, zoom, ctx)
@@ -59,18 +62,15 @@ def test_drop_smallest_sets_one_bar_per_zoom():
     rng = np.random.default_rng(1)
     city, town = 20_000, 200
     n = city + town
-    rows = pa.table(
-        {
-            'id': np.arange(1, n + 1),
-            'cx': np.concatenate([rng.random(city) * 0.05, 1 + rng.random(town) * 0.05]),
-            'cy': rng.random(n) * 0.05,
-            'diag': np.full(n, 1e-4),
-            'area': rng.random(n) * 1e-8,
-            'nv': np.full(n, 5),
-            'u': rng.random(n),
-        }
+    rows = rows_at(
+        np.concatenate([rng.random(city) * 0.05, 1 + rng.random(town) * 0.05]),
+        rng.random(n) * 0.05,
+        diag=np.full(n, 1e-4 * METRES_PER_DEGREE),
+        area=rng.random(n) * 1e-8 * METRES_PER_DEGREE**2,
+        nv=np.full(n, 5),
+        u=rng.random(n),
     )
-    ctx = Context(tuple(range(13)), 12, 512, True)
+    ctx = Context(tuple(range(13)), 12, 512)
     budget = 20_000
     kept = drop_smallest(budget)(rows, 12, ctx)
     cost = tile_cost(kept, 12, ctx)
@@ -87,21 +87,17 @@ def test_drop_smallest_sets_one_bar_per_zoom():
     assert folded.num_rows <= kept.num_rows
 
 
-def test_pixel_area_grows_toward_the_poles():
-    rows = pa.table(
-        {
-            'id': np.array([1, 2]),
-            'cx': np.array([0.0, 0.0]),
-            'cy': np.array([0.0, 60.0]),
-            'diag': np.full(2, 1e-4),
-            'area': np.full(2, 1e-8),
-            'nv': np.full(2, 5),
-            'u': np.zeros(2),
-        }
-    )
-    ctx = Context((0, 1, 2, 3, 4, 5, 6, 7, 8), 8, 512, True)
-    px = ctx.pixel_area(rows, 8)
-    assert px[1] == pytest.approx(px[0] * 2, rel=1e-6), 'a degree is twice as tall on screen at 60N'
+def test_a_degree_draws_twice_as_tall_at_60n():
+    _, y = mercator(np.zeros(4), np.array([0.0, 1e-4, 60.0, 60.0 + 1e-4]))
+    assert y[3] - y[2] == pytest.approx(2 * (y[1] - y[0]), rel=1e-4)
+
+
+def test_grid_coordinates_outside_int32_raise():
+    from geoparquet_lod.encoding import round_away
+
+    assert round_away(np.array([2**31 - 1.4, -(2**31) + 0.4])).tolist() == [2**31 - 1, -(2**31)]
+    with pytest.raises(OverflowError):
+        round_away(np.array([2.0**31]))
 
 
 def test_hilbert_key_is_the_standard_curve():

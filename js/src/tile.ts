@@ -3,6 +3,7 @@ import { geometryColumnFromWkb } from '@cogp/reader'
 import { GeometryBuilder } from './geometry.js'
 import type { Bbox, Lod } from './reader.js'
 import { decodeTile, type PreparedTile, type TileReader } from './spatial.js'
+import { HALF_WORLD } from './web-mercator.js'
 
 const VECTOR_TILE_SIZE = 512
 
@@ -27,6 +28,18 @@ export const tileBounds = (z: number, x: number, y: number): Bbox => {
     tileYToLatitude(y + 1 + padding, tiles),
     ((x + 1 + padding) / tiles) * 360 - 180,
     tileYToLatitude(y - padding, tiles),
+  ]
+}
+
+/** The buffered tile in EPSG:3857 metres, the CRS LOD coordinates are stored in. */
+const mercatorTileBounds = (z: number, x: number, y: number): Bbox => {
+  const cell = (2 * HALF_WORLD) / 2 ** z
+  const padding = (MVT_BUFFER / MVT_EXTENT) * cell
+  return [
+    -HALF_WORLD + x * cell - padding,
+    HALF_WORLD - (y + 1) * cell - padding,
+    -HALF_WORLD + (x + 1) * cell + padding,
+    HALF_WORLD - y * cell + padding,
   ]
 }
 
@@ -58,43 +71,10 @@ export const renderTile = async (
     return renderGeometryTile(lod, data, z, x, y, options)
   }
   const { rows, coords, columns } = await reader.readLodByTile(lod, z, x, y, names, signal)
-  if (pointFamily) {
-    const px: number[] = []
-    const py: number[] = []
-    const keptRows: number[] = []
-    const kept: Record<string, unknown[]> = Object.fromEntries(names.map((n) => [n, []]))
-    for (let i = 0; i < rows.length; i++) {
-      const [qx, qy] = coords[i] as [number, number]
-      const lon = lod.offset[0] + lod.scale[0] * qx
-      const lat = lod.offset[1] + lod.scale[1] * qy
-      if (lon < bbox[0] || lon > bbox[2] || lat < bbox[1] || lat > bbox[3]) continue
-      px.push(lon)
-      py.push(lat)
-      keptRows.push(rows[i])
-      for (const n of names) kept[n].push(columns[n][i])
-    }
-    const n = px.length
-    const offsets = Uint32Array.from({ length: n + 1 }, (_, i) => i)
-    const geometry = {
-      length: n,
-      types: new Uint8Array(n).fill(1),
-      x: Float64Array.from(px),
-      y: Float64Array.from(py),
-      geometryOffsets: offsets,
-      polygonOffsets: offsets,
-      ringOffsets: offsets,
-      scale: [1, 1] as const,
-      offset: [0, 0] as const,
-    }
-    return toMvt(
-      { geometry: geometry as never, rowIndex: keptRows, columns: kept },
-      { z, x, y, layer, signal },
-    )
-  }
   const builder = new GeometryBuilder()
   for (let i = 0; i < rows.length; i++) builder.add(lod.geometry_type, coords[i])
   const geometry = builder.finish(lod.scale, lod.offset)
-  return toMvt({ geometry: geometry as never, rowIndex: rows, columns }, { z, x, y, layer, signal })
+  return renderGeometryTile(lod, { rows, columns, geometry }, z, x, y, options)
 }
 
 export const tileResolution = (z: number, y: number) => {
@@ -169,19 +149,19 @@ function normalizeTile(
   x: number,
   y: number,
 ): DecodedTile {
-  const bbox = tileBounds(z, x, y)
+  const bbox = mercatorTileBounds(z, x, y)
   const names = Object.keys(data.columns)
   const pointFamily = lod.geometry_type === 'Point'
   const { rows, columns } = data
   let { geometry } = data
   if (pointFamily) {
-    // Apply the lon/lat bbox rule before projection. Point offsets
-    // are the identity sequence; compact coordinates and attributes in place.
+    // Keep points inside the buffered tile. Point offsets are the identity
+    // sequence; compact coordinates and attributes in place.
     let count = 0
     for (let i = 0; i < rows.length; i++) {
-      const lon = lod.offset[0] + lod.scale[0] * geometry.x[i]
-      const lat = lod.offset[1] + lod.scale[1] * geometry.y[i]
-      if (lon < bbox[0] || lon > bbox[2] || lat < bbox[1] || lat > bbox[3]) continue
+      const mx = lod.offset[0] + lod.scale[0] * geometry.x[i]
+      const my = lod.offset[1] + lod.scale[1] * geometry.y[i]
+      if (mx < bbox[0] || mx > bbox[2] || my < bbox[1] || my > bbox[3]) continue
       geometry.x[count] = geometry.x[i]
       geometry.y[count] = geometry.y[i]
       rows[count] = rows[i]

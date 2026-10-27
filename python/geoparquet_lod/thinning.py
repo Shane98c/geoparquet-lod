@@ -8,9 +8,10 @@ the rows to show there. The finest zoom shows every row regardless.
 Membership need not nest across zooms, so a rule answers only "which rows
 belong at this zoom?".
 
-`rows` always has: `id`, `cx`, `cy` (centroid), `diag` (bbox diagonal in CRS
-units), `area` (in CRS units squared), `nv` (vertex count), `u` (a uniform in
-[0, 1) hashed from the geometry, so stable across rebuilds),
+`rows` always has: `id`, `cx`, `cy` (centroid), `diag` (bbox diagonal),
+`area`, all in Web Mercator metres, so a size reads the same on screen at any
+latitude, `nv` (vertex count), `u` (a uniform in [0, 1) hashed from the
+geometry, so stable across rebuilds),
 and every carried attribute and extra column the writer was told to load.
 A returned table must keep `id`; any carried attribute column it includes
 overrides that attribute in this zoom's LOD, which is how accumulated
@@ -29,67 +30,57 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 
-from .quantize import resolution
+from .quantize import HALF_WORLD, resolution
 
 Thin = Callable[[pa.Table, int, 'Context'], pa.Table]
 RESERVED = ('id', 'cx', 'cy', 'diag', 'nv', 'u')
 # `area` is also provided but a thinning may update it, as `tiny_polygons` does
 TINY_PIXELS = 0.25  # tippecanoe's tiny-polygon square, two units of a 4096-unit 512 px tile
-MAX_LATITUDE = 85.0511287798066
 
 
 @dataclass(frozen=True)
 class Context:
     """What a thinning may need beyond the rows: the zoom list, the base zoom
-    where every feature is expected to show (`finest_zoom`), the tile size,
-    and whether CRS units are degrees."""
+    where every feature is expected to show (`finest_zoom`), and the tile size."""
 
     zooms: tuple[int, ...]
     finest_zoom: int
     tile_size: int = 512
-    degrees: bool = True
 
     def resolution(self, zoom: int) -> float:
-        """CRS units per pixel at `zoom`."""
-        return resolution(zoom, self.tile_size, self.degrees)
+        """Metres per pixel at `zoom`."""
+        return resolution(zoom, self.tile_size)
 
     def tile_of(self, rows: pa.Table, zoom: int) -> np.ndarray:
         """Web Mercator tile id (x * 2^zoom + y) of each row's centroid."""
         n = 2**zoom
         cx = rows.column('cx').to_numpy()
-        cy = np.clip(rows.column('cy').to_numpy(), -MAX_LATITUDE, MAX_LATITUDE)
-        tx = np.floor((cx + 180) / 360 * n)
-        lat = np.radians(cy)
-        ty = np.floor((1 - np.log(np.tan(lat) + 1 / np.cos(lat)) / np.pi) / 2 * n)
+        cy = rows.column('cy').to_numpy()
+        tx = np.clip(np.floor((cx + HALF_WORLD) / (2 * HALF_WORLD) * n), 0, n - 1)
+        ty = np.clip(np.floor((HALF_WORLD - cy) / (2 * HALF_WORLD) * n), 0, n - 1)
         return (tx * n + ty).astype(np.int64)
 
     def pixel_unit(self, rows: pa.Table, zoom: int) -> np.ndarray:
-        """CRS area of one screen pixel at `zoom` at each row's latitude. In
-        degrees a pixel is `resolution` wide and `resolution * cos(lat)` tall,
-        so the same ground area draws larger toward the poles."""
-        unit = np.full(rows.num_rows, self.resolution(zoom) ** 2)
-        if self.degrees:
-            lat = np.radians(np.clip(rows.column('cy').to_numpy(), -MAX_LATITUDE, MAX_LATITUDE))
-            unit *= np.cos(lat)
-        return unit
+        """Area of one screen pixel at `zoom`, per row."""
+        return np.full(rows.num_rows, self.resolution(zoom) ** 2)
 
     def pixel_area(self, rows: pa.Table, zoom: int) -> np.ndarray:
         """Screen area in pixels squared at `zoom` of each row's `area`."""
         area = rows.column('area').to_numpy(zero_copy_only=False).astype(np.float64)
-        return np.where(np.isnan(area), 0.0, area) / self.pixel_unit(rows, zoom)
+        return np.where(np.isnan(area), 0.0, area) / self.resolution(zoom) ** 2
 
     def pixel_diag(self, rows: pa.Table, zoom: int) -> np.ndarray:
-        """Bbox diagonal in pixels at `zoom`, taking the pixel as square."""
+        """Bbox diagonal in pixels at `zoom`."""
         diag = rows.column('diag').to_numpy(zero_copy_only=False).astype(np.float64)
-        return np.where(np.isnan(diag), 0.0, diag) / np.sqrt(self.pixel_unit(rows, zoom))
+        return np.where(np.isnan(diag), 0.0, diag) / self.resolution(zoom)
 
     def cell_of(self, rows: pa.Table, zoom: int, pixels: float) -> np.ndarray:
         """Id of a `pixels`-wide grid cell at `zoom` containing each centroid."""
         size = pixels * self.resolution(zoom)
         cx = rows.column('cx').to_numpy()
         cy = rows.column('cy').to_numpy()
-        ix = np.floor((cx + 180) / size).astype(np.int64)
-        iy = np.floor((cy + 90) / size).astype(np.int64)
+        ix = np.floor((cx + HALF_WORLD) / size).astype(np.int64)
+        iy = np.floor((HALF_WORLD - cy) / size).astype(np.int64)
         return ix * 4_000_000_000 + iy
 
 

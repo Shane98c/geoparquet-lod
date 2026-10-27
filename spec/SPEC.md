@@ -20,11 +20,12 @@ column alongside the source columns.
 
 - **Zoom**: Web Mercator zoom for 512 px tiles. `tile_size` in metadata
   records the assumption.
-- **CRS**: zooms, grids and tiles are Web Mercator over longitude and
-  latitude, so the layout requires the primary geometry in OGC:CRS84:
-  `crs` omitted (GeoParquet's default), or an explicit OGC:CRS84 or
-  EPSG:4326 in x/y order. An explicit null `crs` means unknown and does not
-  qualify. LOD `scale` and `offset` are in degrees.
+- **CRS**: zooms, grids and tiles are Web Mercator. The primary geometry
+  MUST be OGC:CRS84: `crs` omitted (GeoParquet's default), or an explicit
+  OGC:CRS84 or EPSG:4326 in x/y order, with planar edges. An explicit null
+  `crs` means unknown and does not qualify. LOD geometry is stored in
+  EPSG:3857 metres, so a grid cell is the same size on screen at every
+  latitude; the bbox covering stays in the primary geometry's degrees.
 - **LOD**: one stored display representation (row selection, carried
   attributes and geometry) serving a contiguous range of zooms. Zooms may
   share an LOD only when row selection and carried attributes agree, and an
@@ -108,19 +109,19 @@ The following SHOULD hold and are what the reference writer does:
 
 Under the `geo` key, a `lod_columns` object:
 
-| field          | type     | meaning                                                                                                                                                                                                            |
-| -------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `version`      | string   | `0.1.0`; readers reject a different major version, and while the major is 0 a different minor as well, since minors may change the layout                                                                          |
-| `column`       | string   | name of the LOD struct column                                                                                                                                                                                      |
-| `order`        | string   | `hilbert_webmercator`, see Layout 1                                                                                                                                                                                |
-| `key`          | object   | `{column, depth}`: the nullable int64 column holding each row's Hilbert index at `depth` of its Web Mercator cell, with statistics and a page index, see Layout 1                                                  |
-| `zooms`        | int[]    | every zoom the file serves, ascending                                                                                                                                                                              |
-| `tile_size`    | int      | pixels per tile the zooms assume (512)                                                                                                                                                                             |
-| `encoding`     | string   | `packed`, see Geometry                                                                                                                                                                                             |
-| `pack_version` | int      | `1`, the packed row format version                                                                                                                                                                                 |
-| `attributes`   | object[] | `{name, type, values?}` of carried attributes; `type` is the Arrow type name used to decode packed values; optional `values` is a string dictionary                                                                |
-| `thinning`     | object   | description of the rule used; informational                                                                                                                                                                        |
-| `lods`         | object   | LOD name to `{zooms, geometry_type, scale, offset, placeholder}`; `scale` and `offset` are `[x, y]` pairs in degrees, `placeholder` the width in grid cells of the square drawn for a shape too small for the grid |
+| field          | type     | meaning                                                                                                                                                                                                                     |
+| -------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `version`      | string   | `0.1.0`; readers reject a different major version, and while the major is 0 a different minor as well, since minors may change the layout                                                                                   |
+| `column`       | string   | name of the LOD struct column                                                                                                                                                                                               |
+| `order`        | string   | `hilbert_webmercator`, see Layout 1                                                                                                                                                                                         |
+| `key`          | object   | `{column, depth}`: the nullable int64 column holding each row's Hilbert index at `depth` of its Web Mercator cell, with statistics and a page index, see Layout 1                                                           |
+| `zooms`        | int[]    | every zoom the file serves, ascending                                                                                                                                                                                       |
+| `tile_size`    | int      | pixels per tile the zooms assume (512)                                                                                                                                                                                      |
+| `encoding`     | string   | `packed`, see Geometry                                                                                                                                                                                                      |
+| `pack_version` | int      | `1`, the packed row format version                                                                                                                                                                                          |
+| `attributes`   | object[] | `{name, type, values?}` of carried attributes; `type` is the Arrow type name used to decode packed values; optional `values` is a string dictionary                                                                         |
+| `thinning`     | object   | description of the rule used; informational                                                                                                                                                                                 |
+| `lods`         | object   | LOD name to `{zooms, geometry_type, scale, offset, placeholder}`; `scale` and `offset` are `[x, y]` pairs in EPSG:3857 metres, `placeholder` the width in grid cells of the square drawn for a shape too small for the grid |
 
 All fields are required; readers MUST ignore fields they do not know. Every
 zoom in `zooms` MUST appear in exactly one LOD, `zooms` MUST be contiguous,
@@ -152,8 +153,8 @@ the `geo` key beside the usual GeoParquet fields (only two LOD entries shown):
   "attributes": [{ "name": "height", "type": "float" }, { "name": "class", "type": "string" }],
   "thinning": { "name": "combine(size_threshold(4), drop_rate(2.5))" },
   "lods": {
-    "f8": { "zooms": [8], "geometry_type": "MultiPolygon", "scale": [6.8665e-4, 6.8665e-4], "offset": [-105.1, 39.6], "placeholder": 2 },
-    "f13": { "zooms": [13, 14], "geometry_type": "MultiPolygon", "scale": [1.0729e-5, 1.0729e-5], "offset": [-105.1, 39.6], "placeholder": 2 }
+    "f8": { "zooms": [8], "geometry_type": "MultiPolygon", "scale": [76.437, 76.437], "offset": [-11699678.5, 4807984.5], "placeholder": 2 },
+    "f13": { "zooms": [13, 14], "geometry_type": "MultiPolygon", "scale": [1.1943, 1.1943], "offset": [-11699678.5, 4807984.5], "placeholder": 2 }
   }
 }
 ```
@@ -200,29 +201,31 @@ spill  := count, per copy: tile (zoom << 48 | x * 2^zoom + y), file row
 ```
 
 `zigzag(v)` is `(v << 1) ^ (v >> 63)`. A decoded grid coordinate is
-`offset + scale * integer` in degrees, with `scale` and `offset` per LOD:
-the transform and grid of COGP's `quantized_geoarrow`, in one private byte
-format a COGP reader cannot decode. Every ring is closed, every part has
+`offset + scale * integer` in EPSG:3857 metres, with `scale` and `offset` per
+LOD: the transform of COGP's `quantized_geoarrow`, applied in Web Mercator
+rather than the primary geometry's CRS, in one private byte format a COGP
+reader cannot decode. Grid coordinates MUST fit in a signed 32-bit integer. Every ring is closed, every part has
 at least two vertices, and a row shown only to host copies has zero
 polygons; empty geometry is otherwise never written. Ring steps make a
 building a handful of one-byte varints: a placeholder square packs to 15 to
 20 bytes before compression, a footprint to about two bytes per vertex.
-The reference writer uses a quarter of the LOD's finest zoom pixel as
-`scale` and the dataset's minimum corner as the origin. Quantization rounds
-half away from zero.
+The reference writer projects the primary geometry to Web Mercator, with
+latitude clamped to the Mercator limit, and uses a quarter of the LOD's
+finest zoom pixel as `scale` and the dataset's minimum corner as the origin.
+Quantization rounds half away from zero. It refuses an extent too wide for
+the finest zoom's grid to fit in 32 bits.
 
 A family keeps its geometry type at every zoom. A polygon narrower in both
 directions than its placeholder square, or empty or invalid after snapping
-to the LOD's grid, becomes that square: on the grid cell holding its
-centroid, `placeholder` cells wide and as many cells tall as draw square on
-a Mercator screen at its latitude, half a pixel unless the thinning asks
-for another size, so a thinned set of buildings zoomed out reads as a faint
+to the LOD's grid, becomes that square: `placeholder` cells on a side, on the
+grid cell holding its centroid, half a pixel unless the thinning asks for
+another size, so a thinned set of buildings zoomed out reads as a faint
 texture of its density, as tippecanoe's tiny-polygon squares do. A line
 shorter than a cell in both directions becomes a segment `placeholder`
 cells long from its centroid's cell. The grid
-is a quarter pixel at the LOD's finest zoom, in nominal Web Mercator pixels
-at the equator, close to tippecanoe's eighth-pixel tolerance; features a
-pixel or two across keep their own shape.
+is a quarter of a Web Mercator pixel at the LOD's finest zoom, close to
+tippecanoe's eighth-pixel tolerance; features a pixel or two across keep
+their own shape.
 
 Carried attributes keep their declared Arrow types and nulls. A thinning
 that overrides an attribute writes the overridden value, cast to the
@@ -294,8 +297,8 @@ this layout is in which rows a coarse view reads and how it finds them.
   directly from the primary geometry rather than from the previous level.
   Reading a fine level reads every coarser level's row groups that touch the
   view, so requests grow with the level count, and a feature's level is fixed
-  by its row group. This layout keeps COGP's quantization transform and grid,
-  with `Point` added, but moves zoom selection into nullable per-LOD columns
+  by its row group. This layout keeps COGP's quantization transform, applied in
+  Web Mercator, with `Point` added, but moves zoom selection into nullable per-LOD columns
   so membership is decided per zoom and read at page granularity, and packs
   each row into one binary value a COGP reader cannot decode. A review comment
   on PR 305 suggested storing the level in a column with statistics for exactly
@@ -342,7 +345,10 @@ this layout is in which rows a coarse view reads and how it finds them.
   55% more bytes at city zooms, 57% more overview storage, and an estimated
   twice the decode CPU, in exchange for overviews any Parquet reader can open.
 - Whether `quantized_geoarrow` should admit a `Point` type, or point LODs
-  should use a GeoArrow point struct in degrees at float64.
+  should use a GeoArrow point struct in metres at float64.
+- Poles and the antimeridian. Overview geometry is clamped at the Mercator
+  limit vertex by vertex rather than clipped, and a feature crossing ±180°
+  is neither split nor indexed on both sides.
 - Partitioned datasets: one manifest listing files and their extents.
 - Whether to order the table coarse-first for readers that do not know the
   format, as COGP does, so QGIS draws the coarse selection before the rest.

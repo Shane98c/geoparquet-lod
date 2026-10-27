@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { toMvt as reference } from '@cogp/reader'
 import { toMvt } from '../dist/mvt.js'
 import { GeometryBuilder } from '../dist/geometry.js'
+import { mercatorX, mercatorY } from '../dist/web-mercator.js'
 
 let seed = 71
 const random = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32
@@ -66,7 +67,8 @@ for (const type of ['Point', 'MultiLineString', 'MultiPolygon']) {
         ][i % 9],
       )
     }
-    const geometry = builder.finish(scale, [0, 0])
+    // COGP's encoder reads lon/lat, so these coordinates are degrees
+    const { crs: _, ...geometry } = builder.finish(scale, [0, 0])
     for (const [z, x, y] of [
       [0, 0, 0],
       [1, 0, 0],
@@ -97,6 +99,67 @@ for (const type of ['Point', 'MultiLineString', 'MultiPolygon']) {
 console.log(
   'streaming MVT matches reference bytes for clipping, wrapping, winding, properties and cancellation',
 )
+
+// LOD geometry is EPSG:3857 on a grid: the same rings in metres encode to the
+// same tile as the reference encoder makes of them in degrees
+{
+  const n = 2000
+  const lon = new Float64Array(n * 5),
+    lat = new Float64Array(n * 5)
+  for (let i = 0; i < n; i++) {
+    const x = random() * 40 - 20,
+      y = random() * 160 - 80,
+      d = random() * 3
+    const ring = [
+      [x, y],
+      [x + d, y],
+      [x + d, y + d],
+      [x, y + d],
+      [x, y],
+    ]
+    ring.forEach(([a, b], j) => {
+      lon[i * 5 + j] = a
+      lat[i * 5 + j] = b
+    })
+  }
+  const offsets = (step) => Uint32Array.from({ length: n + 1 }, (_, i) => i * step)
+  const column = (x, y, scale, offset, crs) => ({
+    length: n,
+    types: new Uint8Array(n).fill(6),
+    x,
+    y,
+    geometryOffsets: offsets(1),
+    polygonOffsets: offsets(1),
+    ringOffsets: offsets(5),
+    scale,
+    offset,
+    ...(crs && { crs }),
+  })
+  const origin = [-1e6, 2e6]
+  const metres = column(
+    lon.map((v) => (mercatorX(v) - origin[0]) / 0.5),
+    lat.map((v) => (mercatorY(v) - origin[1]) / 0.5),
+    [0.5, 0.5],
+    origin,
+    'EPSG:3857',
+  )
+  const degrees = column(lon, lat, [1, 1], [0, 0])
+  for (const [z, x, y] of [
+    [0, 0, 0],
+    [3, 4, 2],
+    [3, 4, 3],
+    [6, 32, 20],
+    [2, -1, 1],
+  ]) {
+    const options = { z, x, y, layer: 'test' }
+    assert.deepEqual(
+      new Uint8Array(toMvt({ geometry: metres }, options)),
+      new Uint8Array(reference({ geometry: degrees }, options)),
+      `EPSG:3857 ${z}/${x}/${y}`,
+    )
+  }
+}
+console.log('EPSG:3857 LOD coordinates encode as their lon/lat equivalents do')
 
 // Numbers, booleans and safe bigints are typed MVT values, deduplicated by type
 // and value; float32-exact numbers are floats, other numbers doubles.

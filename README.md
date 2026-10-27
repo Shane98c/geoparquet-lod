@@ -48,7 +48,8 @@ measure and where the files come from.
 ## Build your own file
 
 Input is GeoParquet with WKB geometry in longitude/latitude (OGC:CRS84 or
-EPSG:4326 in x/y order), one geometry family per file. Thinning budgets should
+EPSG:4326 in x/y order), one geometry family per file. The overviews are
+stored in Web Mercator metres. Thinning budgets should
 be tuned to your data.
 
 With Python 3.12+ and uv installed, run `uv sync --locked` from a clone.

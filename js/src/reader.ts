@@ -161,6 +161,11 @@ export class LodReader {
       Object.entries(lod.lods).map(([name, child]) => [name, { ...child, name }]),
     )
     this.primary = geo.primary_column ?? 'geometry'
+    const column = geo.columns?.[this.primary]
+    if (!isCrs84(column))
+      throw new Error(`primary geometry ${this.primary} is not in OGC:CRS84 or EPSG:4326`)
+    if ((column?.edges ?? 'planar') !== 'planar')
+      throw new Error(`primary geometry ${this.primary} has ${column.edges} edges, not planar`)
     this.finestZoom = Math.max(...lod.zooms)
     let acc = 0
     this.rowGroupStarts = metadata.row_groups.map((rg) => {
@@ -1051,6 +1056,15 @@ const unwrap = (v: unknown): unknown => {
 const unsigned = (v: unknown): number => {
   const n = typeof v === 'bigint' ? Number(v) : (v as number)
   return n < 0 ? n + 2 ** 32 : n
+}
+
+/** GeoParquet: an omitted `crs` is OGC:CRS84; an explicit null is unknown. */
+function isCrs84(column: { crs?: unknown } | undefined): boolean {
+  if (!column || !('crs' in column)) return true
+  const id = (column.crs as { id?: { authority?: unknown; code?: unknown } } | null)?.id
+  const authority = String(id?.authority ?? '').toUpperCase()
+  const code = String(id?.code ?? '')
+  return (authority === 'OGC' && code === 'CRS84') || (authority === 'EPSG' && code === '4326')
 }
 
 const intersects = (a: Bbox, b: Bbox) => !(a[0] > b[2] || a[2] < b[0] || a[1] > b[3] || a[3] < b[1])

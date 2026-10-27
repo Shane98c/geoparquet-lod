@@ -25,6 +25,7 @@ import pyarrow.parquet as pq
 from .encoding import (
     ENCODING,
     GEOMETRY_TYPES,
+    INT32,
     PACK_VERSION,
     infer_attributes,
     lod_type,
@@ -33,9 +34,12 @@ from .encoding import (
 from .pack import pack
 from .quantize import (
     DOT_CELLS,
+    EARTH_RADIUS,
     MAX_LATITUDE,
     SUBPIXELS,
     grid,
+    mercator,
+    mercator_y,
     render_lines,
     render_polygons,
     resolution,
@@ -300,7 +304,7 @@ def _bbox_float32(column: pa.ChunkedArray) -> pa.Array:
     return pa.StructArray.from_arrays(parts, fields=list(BBOX_FIELD.type))
 
 
-def guess_zooms(con, sorted_path, geometry, family, zooms, complete_from, extent, degrees, log):
+def guess_zooms(con, sorted_path, geometry, family, zooms, complete_from, extent, log):
     """Tippecanoe's `-zg` in spirit: the coarsest zoom is one coarser than where
     the whole extent spans about a pixel, every feature is present from the zoom
     where the median feature spans a pixel, and the finest zoom is where the
@@ -317,7 +321,7 @@ def guess_zooms(con, sorted_path, geometry, family, zooms, complete_from, extent
 
     def zoom_where(size: float) -> int:
         # first zoom whose pixel is no larger than `size`
-        return max(0, min(22, math.ceil(math.log2(res(0, degrees=degrees) / max(size, 1e-12)))))
+        return max(0, min(22, math.ceil(math.log2(res(0) / max(size, 1e-12)))))
 
     auto_zooms = zooms == 'auto'
     auto_from = complete_from == 'auto'
@@ -328,7 +332,7 @@ def guess_zooms(con, sorted_path, geometry, family, zooms, complete_from, extent
         diag = float(np.median(sample.column('diag').to_numpy())) if sample.num_rows else 0.0
         geoms = shapely.from_wkb(sample.column(geometry).to_numpy(zero_copy_only=False))
         coords, index = shapely.get_coordinates(geoms, return_index=True)
-        steps = np.hypot(*np.diff(coords, axis=0).T)
+        steps = np.hypot(*np.diff(np.stack(mercator(coords[:, 0], coords[:, 1]), 1), axis=0).T)
         same = index[1:] == index[:-1]
         spacing = float(np.median(steps[same])) if same.any() else 0.0
         extent_size = max(extent[2] - extent[0], extent[3] - extent[1])
@@ -351,9 +355,17 @@ def guess_zooms(con, sorted_path, geometry, family, zooms, complete_from, extent
     return zooms, complete_from
 
 
-def _full_detail_bytes(
-    con, sorted_path, geometry, family, finest_zoom, origin, degrees, n_rows
-) -> float:
+def _check_grid(extent, finest_zoom: int, dot_cells: float) -> None:
+    """Every grid coordinate, placeholders included, must fit int32 at the finest grid."""
+    span = max(extent[2] - extent[0], extent[3] - extent[1]) / grid(finest_zoom) + dot_cells + 2
+    if span > INT32.max:
+        raise ValueError(
+            f'the extent spans {span:.3g} grid cells at z{finest_zoom}, more than int32 holds; '
+            'lower the finest zoom or split the data'
+        )
+
+
+def _full_detail_bytes(con, sorted_path, geometry, family, finest_zoom, origin, n_rows) -> float:
     """Estimated geometry bytes of the whole dataset at the finest zoom, from a sample:
     two int32 per vertex before compression."""
     sample = con.execute(
@@ -364,7 +376,7 @@ def _full_detail_bytes(
     wkb = sample.column(geometry).to_numpy(zero_copy_only=False)
     zeros = np.zeros(len(wkb))
     render = render_lines if family == 'line' else render_polygons
-    parts = render(wkb, zeros, zeros, grid(finest_zoom, degrees=degrees), origin)
+    parts = render(wkb, zeros, zeros, grid(finest_zoom), origin)
     return 8.0 * len(parts[3]) / len(wkb) * n_rows
 
 
@@ -653,7 +665,14 @@ def _write_unindexed(
     source_schema = _read_schema(src)
     attributes = infer_attributes(source_schema, carry)
     geo = json.loads(dict(source_schema.metadata or {}).get(b'geo', b'{}') or b'{}')
-    types = [t.lower() for t in geo.get('columns', {}).get(geometry, {}).get('geometry_types', [])]
+    column = geo.get('columns', {}).get(geometry, {})
+    if not is_crs84(column):
+        raise NotImplementedError(
+            'the primary geometry must be OGC:CRS84 or EPSG:4326 (crs omitted or declared); reproject first'
+        )
+    if column.get('edges', 'planar') != 'planar':
+        raise NotImplementedError(f'the primary geometry has {column["edges"]} edges; only planar')
+    types = [t.lower() for t in column.get('geometry_types', [])]
     if not types:
         sample = con.execute(
             f"SELECT ST_GeometryType({geometry}) FROM read_parquet('{src}') LIMIT 1000"
@@ -687,6 +706,18 @@ def _write_unindexed(
     ).fetchone()
     if xmin is None:
         raise ValueError(f'{src} has no non-empty geometries')
+    (mxmin, mxmax), (mymin, mymax) = (
+        tuple(map(float, v)) for v in mercator([xmin, xmax], [ymin, ymax])
+    )
+    if thinning is None:
+        thinning = default_thinning(family)
+        log(f'  thinning: {describe(thinning)["name"]}')
+    # placeholder squares are given in pixels; the grid is finer than a pixel
+    if placeholder_pixels is None:
+        placeholder_pixels = getattr(thinning, 'placeholder_pixels', DOT_CELLS / SUBPIXELS)
+    dot_cells = float(placeholder_pixels) * SUBPIXELS
+    if zooms != 'auto':
+        _check_grid((mxmin, mymin, mxmax, mymax), max(zooms), dot_cells)
     # the Web Mercator cell at depth KEY_DEPTH holding the bbox centre, cells numbered as XYZ
     # tiles are; the Hilbert index of that cell is computed in numpy and the rows sorted by it
     cells = 1 << KEY_DEPTH
@@ -694,6 +725,21 @@ def _write_unindexed(
     lat = f'radians(greatest(-{MAX_LATITUDE}, least({MAX_LATITUDE}, (ST_YMin({geometry}) + ST_YMax({geometry})) / 2)))'
     cell_x = f'least({cells - 1}, greatest(0, floor(({lon} + 180) / 360 * {cells})))::BIGINT'
     cell_y = f'least({cells - 1}, greatest(0, floor((1 - ln(tan({lat}) + 1 / cos({lat})) / pi()) / 2 * {cells})))::BIGINT'
+
+    # thinnings and grids work in Web Mercator metres; the covering stays in degrees
+    def mx(lon: str) -> str:
+        return f'({EARTH_RADIUS} * radians({lon}))'
+
+    def phi(lat: str) -> str:
+        return f'radians(greatest(-{MAX_LATITUDE}, least({MAX_LATITUDE}, {lat})))'
+
+    def my(lat: str) -> str:
+        return f'({EARTH_RADIUS} * ln(tan(pi() / 4 + {phi(lat)} / 2)))'
+
+    centroid = f'ST_Centroid({geometry})'
+    width = f'({mx(f"ST_XMax({geometry})")} - {mx(f"ST_XMin({geometry})")})'
+    height = f'({my(f"ST_YMax({geometry})")} - {my(f"ST_YMin({geometry})")})'
+    area = f"ST_Area(ST_Transform({geometry}, 'OGC:CRS84', 'EPSG:3857'))"
     sorted_path = out.with_suffix('.sorted.parquet')
     unsorted_path = out.with_suffix('.unsorted.parquet')
     log(f'sorting {src}')
@@ -702,10 +748,10 @@ def _write_unindexed(
         f"""
         COPY (
             SELECT row_number() OVER () AS __id,
-                CASE WHEN {valid} THEN ST_X(ST_Centroid({geometry}))::DOUBLE END AS __cx,
-                CASE WHEN {valid} THEN ST_Y(ST_Centroid({geometry}))::DOUBLE END AS __cy,
-                CASE WHEN {valid} THEN sqrt((ST_XMax({geometry}) - ST_XMin({geometry})) ^ 2 + (ST_YMax({geometry}) - ST_YMin({geometry})) ^ 2) END AS __diag,
-                CASE WHEN {valid} THEN ST_Area({geometry}) END AS __area,
+                CASE WHEN {valid} THEN {mx(f'ST_X({centroid})')}::DOUBLE END AS __cx,
+                CASE WHEN {valid} THEN {my(f'ST_Y({centroid})')}::DOUBLE END AS __cy,
+                CASE WHEN {valid} THEN sqrt({width} ^ 2 + {height} ^ 2) END AS __diag,
+                CASE WHEN {valid} THEN {area} END AS __area,
                 CASE WHEN {valid} THEN ST_NPoints({geometry}) END AS __nv,
                 CASE WHEN {valid} THEN {{xmin: ST_XMin({geometry}), ymin: ST_YMin({geometry}), xmax: ST_XMax({geometry}), ymax: ST_YMax({geometry})}} END AS __bbox,
                 CASE WHEN {valid} THEN {cell_x} END AS __kx,
@@ -729,11 +775,6 @@ def _write_unindexed(
     pa.default_memory_pool().release_unused()
     n_rows = con.execute(f"SELECT count(*) FROM '{sorted_path}'").fetchone()[0]
     log(f'  {n_rows:,} rows sorted, {time.time() - t0:.0f}s')
-    degrees = is_crs84(geo.get('columns', {}).get(geometry, {}))
-    if not degrees:
-        raise NotImplementedError(
-            'the primary geometry must be OGC:CRS84 or EPSG:4326 (crs omitted or declared); reproject first'
-        )
     forced_complete = complete_from if isinstance(complete_from, int) else None
     zooms, complete_from = guess_zooms(
         con,
@@ -742,14 +783,11 @@ def _write_unindexed(
         family,
         zooms,
         complete_from,
-        (xmin, ymin, xmax, ymax),
-        degrees,
+        (mxmin, mymin, mxmax, mymax),
         log,
     )
+    _check_grid((mxmin, mymin, mxmax, mymax), zooms[-1], dot_cells)
     # 2. which rows appear at which zoom: run `thinning` at every zoom over every row
-    if thinning is None:
-        thinning = default_thinning(family)
-        log(f'  thinning: {describe(thinning)["name"]}')
     slim = ', '.join(
         dict.fromkeys(
             [
@@ -785,7 +823,7 @@ def _write_unindexed(
             ).fetchall()
             if len(distinct) <= DICTIONARY_MAX:
                 dictionaries[a.name] = [v[0] for v in distinct]
-    ctx = Context(tuple(zooms), zooms[-1] if complete_from is None else complete_from, 512, degrees)
+    ctx = Context(tuple(zooms), zooms[-1] if complete_from is None else complete_from, 512)
     # bit i of a row's levels is set when it is shown at zooms[i]; null or empty geometry is shown nowhere
     levels = np.zeros(n_rows, dtype=np.int64)
     if rows.num_rows < n_rows:
@@ -841,7 +879,7 @@ def _write_unindexed(
     if family != 'point' and complete_from is not None:
         single = (
             _full_detail_bytes(
-                con, sorted_path, geometry, family, zooms[-1], (xmin, ymin), degrees, n_rows
+                con, sorted_path, geometry, family, zooms[-1], (mxmin, mymin), n_rows
             )
             <= single_lod_bytes
         )
@@ -850,12 +888,8 @@ def _write_unindexed(
     lod_plan = lods(zooms, complete_from, family, single_shape_lod=single)
 
     # 3. schema and metadata, known before writing
-    origin = (float(xmin), float(ymin))
-    # placeholder squares are given in pixels; the grid is finer than a pixel
-    if placeholder_pixels is None:
-        placeholder_pixels = getattr(thinning, 'placeholder_pixels', DOT_CELLS / SUBPIXELS)
-    dot_cells = float(placeholder_pixels) * SUBPIXELS
-    grids = {b['name']: (grid(b['grid_zoom'], degrees=degrees), origin) for b in lod_plan}
+    origin = (mxmin, mymin)
+    grids = {b['name']: (grid(b['grid_zoom']), origin) for b in lod_plan}
     shape_lods = [b for b in lod_plan if b['geometry_type'] != 'Point']
     # 3b. straddlers: a feature reaching into a tile beyond its own gets a copy of its LOD
     # geometry on the first row of that tile's key interval, so a tile is one interval
@@ -880,22 +914,16 @@ def _write_unindexed(
     spill_entries: dict[str, tuple] = {}  # LOD name -> (host, zoom, tile, src), sorted by host
     for b in lod_plan:
         shown = np.flatnonzero((levels >> lod_bit[b['name']]) & 1)
+        size = EARTH_RADIUS * np.radians(bounds['xmax'][shown] - bounds['xmin'][shown])
+        np.maximum(
+            size,
+            mercator_y(bounds['ymax'][shown]) - mercator_y(bounds['ymin'][shown]),
+            out=size,
+        )
         parts = []
         for z in b['zooms']:
             # a shape under a pixel draws as a placeholder square its own tile shows whole
-            res = resolution(z, degrees=degrees)
-            lat = np.radians(
-                np.clip(
-                    (bounds['ymin'][shown] + bounds['ymax'][shown]) / 2, -MAX_LATITUDE, MAX_LATITUDE
-                )
-            )
-            wide = (
-                np.maximum(
-                    (bounds['xmax'][shown] - bounds['xmin'][shown]) / res,
-                    (bounds['ymax'][shown] - bounds['ymin'][shown]) / (res * np.cos(lat)),
-                )
-                >= 1
-            )
+            wide = size / resolution(z) >= 1
             large = shown[wide]
             src, tiles = straddlers(
                 bounds['xmin'][large],

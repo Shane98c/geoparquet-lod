@@ -26,6 +26,7 @@
  */
 import { clipPolygon, clipPolyline } from 'lineclip'
 import type { FeatureSource, GeometryColumn } from '@cogp/reader'
+import { HALF_WORLD, MAX_LATITUDE, isMercator } from './web-mercator.js'
 
 /** Tile coordinate extent written by `toMvt`. */
 export const MVT_EXTENT = 4096
@@ -39,7 +40,6 @@ const MVT_CLIP_BBOX: ClipBbox = [
   MVT_EXTENT + MVT_BUFFER,
 ]
 
-const MAX_MERCATOR_LATITUDE = 85.0511287798066
 const textEncoder = new TextEncoder()
 
 export interface MvtTileOptions {
@@ -53,15 +53,16 @@ export interface MvtTileOptions {
 }
 
 /**
- * Encode lon/lat rows as one Web Mercator MVT tile. Geometry is projected,
- * clipped to the buffered extent and dropped when null or off-tile. IDs must be
+ * Encode rows as one Web Mercator MVT tile. LOD geometry, in EPSG:3857, maps
+ * to tile coordinates by one affine transform; lon/lat geometry is projected.
+ * Geometry is clipped to the buffered extent and dropped when null or off-tile. IDs must be
  * non-negative safe integers. Numbers, booleans and safe bigints are typed MVT
  * values; other properties are written as display strings.
  * Columns are read in place: no GeoJSON or per-row feature object is built.
  */
 export function toMvt(source: FeatureSource, options: MvtTileOptions): ArrayBuffer {
   const geometry = source.geometry!
-  const projection = new TileProjection(options.z, options.x, options.y)
+  const projection = new TileProjection(options.z, options.x, options.y, geometry)
   const columns = Object.entries(source.columns ?? {})
   const layer = new ByteWriter(65536)
   const commands = new ByteWriter()
@@ -192,11 +193,9 @@ function partIntersectsTile(
     !Number.isFinite(maxY)
   )
     return true
-  const west = column.offset[0] + column.scale[0] * minX
-  const east = column.offset[0] + column.scale[0] * maxX
-  if (!projection.intersectsLongitudeRange(Math.min(west, east), Math.max(west, east))) return false
-  const south = projection.y(column.offset[1] + column.scale[1] * minY)
-  const north = projection.y(column.offset[1] + column.scale[1] * maxY)
+  if (!projection.intersectsXRange(minX, maxX)) return false
+  const south = projection.y(minY)
+  const north = projection.y(maxY)
   return Math.max(south, north) >= MVT_CLIP_BBOX[1] && Math.min(south, north) <= MVT_CLIP_BBOX[3]
 }
 
@@ -371,11 +370,11 @@ function projectX(
   index: number,
   reference?: number,
 ): number {
-  return projection.x(column.offset[0] + column.scale[0] * column.x[index]!, reference)
+  return projection.x(column.x[index]!, reference)
 }
 
 function projectY(column: GeometryColumn, projection: TileProjection, index: number): number {
-  return projection.y(column.offset[1] + column.scale[1] * column.y[index]!)
+  return projection.y(column.y[index]!)
 }
 
 function writeFeature(layer: ByteWriter, value: EncodedMvtFeature, tags: Uint8Array): void {
@@ -418,6 +417,8 @@ function zigZag(value: number): number {
   return value < 0 ? -value * 2 - 1 : value * 2
 }
 
+/** Stored coordinates to tile coordinates. x is affine in both CRSs; y is
+ * affine for EPSG:3857 and projected, with a cache, for latitude. */
 class TileProjection {
   pathX = new Int32Array(256)
   pathY = new Int32Array(256)
@@ -431,32 +432,46 @@ class TileProjection {
 
   private readonly projectedY = new Map<number, number>()
   private readonly tiles: number
-  private readonly tileX: number
   private readonly worldSize: number
+  private readonly mercator: boolean
+  private readonly ax: number
+  private readonly bx: number
+  private readonly ay: number
+  private readonly by: number
 
   constructor(
     z: number,
     x: number,
     private readonly tileY: number,
+    private readonly column: GeometryColumn,
   ) {
     this.tiles = 2 ** z
-    this.tileX = ((x % this.tiles) + this.tiles) % this.tiles
+    const tileX = ((x % this.tiles) + this.tiles) % this.tiles
     this.worldSize = this.tiles * MVT_EXTENT
+    this.mercator = isMercator(column)
+    const world = this.mercator ? 2 * HALF_WORLD : 360
+    this.ax = (column.scale[0] / world) * this.worldSize
+    this.bx = ((column.offset[0] + world / 2) / world) * this.worldSize - tileX * MVT_EXTENT
+    this.ay = (-column.scale[1] / (2 * HALF_WORLD)) * this.worldSize
+    this.by =
+      ((HALF_WORLD - column.offset[1]) / (2 * HALF_WORLD)) * this.worldSize - tileY * MVT_EXTENT
   }
 
-  x(longitude: number, reference = MVT_EXTENT / 2): number {
-    let local = (((longitude + 180) / 360) * this.tiles - this.tileX) * MVT_EXTENT
+  x(value: number, reference = MVT_EXTENT / 2): number {
+    let local = this.ax * value + this.bx
     local += Math.round((reference - local) / this.worldSize) * this.worldSize
     return Math.round(local)
   }
 
-  intersectsLongitudeRange(minimum: number, maximum: number): boolean {
+  intersectsXRange(minimum: number, maximum: number): boolean {
     if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) return true
+    const a = this.ax * minimum + this.bx
+    const b = this.ax * maximum + this.bx
+    const left = Math.min(a, b),
+      right = Math.max(a, b)
     // A ring crossing the antimeridian can follow the short path outside its
-    // raw longitude interval; keep such wide intervals for exact clipping.
-    if (maximum - minimum >= 180) return true
-    const left = (((minimum + 180) / 360) * this.tiles - this.tileX) * MVT_EXTENT
-    const right = (((maximum + 180) / 360) * this.tiles - this.tileX) * MVT_EXTENT
+    // raw interval; keep intervals of half a world or more for exact clipping.
+    if (right - left >= this.worldSize / 2) return true
     // TileProjection.x can shift a part by whole worlds. Check every possible
     // shifted copy, with one pixel of slack for coordinate rounding.
     const first = Math.ceil((MVT_CLIP_BBOX[0] - 1 - right) / this.worldSize)
@@ -464,14 +479,16 @@ class TileProjection {
     return first <= last
   }
 
-  y(latitude: number): number {
-    const cached = this.projectedY.get(latitude)
+  y(value: number): number {
+    if (this.mercator) return Math.round(this.ay * value + this.by)
+    const cached = this.projectedY.get(value)
     if (cached !== undefined) return cached
-    const clamped = Math.max(-MAX_MERCATOR_LATITUDE, Math.min(MAX_MERCATOR_LATITUDE, latitude))
+    const latitude = this.column.offset[1] + this.column.scale[1] * value
+    const clamped = Math.max(-MAX_LATITUDE, Math.min(MAX_LATITUDE, latitude))
     const sin = Math.sin((clamped * Math.PI) / 180)
     const worldY = 0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)
     const result = Math.round((worldY * this.tiles - this.tileY) * MVT_EXTENT)
-    if (this.projectedY.size < 65536) this.projectedY.set(latitude, result)
+    if (this.projectedY.size < 65536) this.projectedY.set(value, result)
     return result
   }
 }

@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict'
 import { toGeometryBatch, batchToGeoJSON, batchToGeoArrow, batchToMvt } from '../dist/index.js'
-const lod = { geometry_type: 'Point', scale: [0.5, 0.25], offset: [-100, 40] }
+import { latitudeOf, longitudeOf, mercatorX, mercatorY } from '../dist/web-mercator.js'
+// LOD coordinates are EPSG:3857 metres; the GeoJSON and GeoArrow adapters return degrees
+const lod = { geometry_type: 'Point', scale: [1000, 500], offset: [mercatorX(-100), mercatorY(40)] }
+const degrees = (value) =>
+  typeof value[0] === 'number'
+    ? [
+        longitudeOf(lod.offset[0] + lod.scale[0] * value[0]),
+        latitudeOf(lod.offset[1] + lod.scale[1] * value[1]),
+      ]
+    : value.map(degrees)
 const batch = toGeometryBatch({
   geometry: 'overview',
   lod,
@@ -16,11 +25,10 @@ assert.deepEqual([...batch.geometry.geometryOffsets], [0, 1, 2])
 const features = batchToGeoJSON(batch).features
 assert.deepEqual(
   features.map((f) => f.geometry.coordinates),
-  [
-    [-98, 42],
-    [-100, 40],
-  ],
+  [degrees([4, 8]), degrees([0, 0])],
 )
+const [lon, lat] = features[1].geometry.coordinates
+assert.ok(Math.abs(lon + 100) < 1e-9 && Math.abs(lat - 40) < 1e-9, 'the origin is the LOD offset')
 assert.deepEqual(
   features.map((f) => f.id),
   [7, 2],
@@ -36,19 +44,13 @@ view.setFloat64(13, 35.5, true)
 const primary = toGeometryBatch({ geometry: 'primary', rows: [9], wkb: [point], columns: {} })
 assert.ok(primary.geometry.x instanceof Float64Array)
 assert.deepEqual(batchToGeoJSON(primary).features[0].geometry.coordinates, [12.5, 35.5])
-for (const [type, coords, expected] of [
+for (const [type, coords] of [
   [
     'MultiLineString',
     [
       [
         [0, 0],
         [2, 3],
-      ],
-    ],
-    [
-      [
-        [-100, 40],
-        [-99, 40.75],
       ],
     ],
   ],
@@ -68,20 +70,6 @@ for (const [type, coords, expected] of [
         ],
       ],
     ],
-    [
-      [
-        [
-          [-100, 40],
-          [-99, 40],
-          [-100, 40],
-        ],
-        [
-          [-99.5, 40.25],
-          [-99.5, 40.5],
-          [-99.5, 40.25],
-        ],
-      ],
-    ],
   ],
 ]) {
   const b = toGeometryBatch({
@@ -91,7 +79,7 @@ for (const [type, coords, expected] of [
     coords: [coords],
     columns: {},
   })
-  assert.deepEqual(batchToGeoJSON(b).features[0].geometry.coordinates, expected)
+  assert.deepEqual(batchToGeoJSON(b).features[0].geometry.coordinates, degrees(coords))
 }
 const empty = toGeometryBatch({ geometry: 'overview', lod, rows: [], coords: [], columns: {} })
 assert.equal(batchToGeoJSON(empty).features.length, 0)
