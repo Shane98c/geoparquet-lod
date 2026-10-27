@@ -29,6 +29,7 @@ interface SpatialRoot {
   directory_encoding?: string
   version: number
   file_bytes: number
+  footer_bytes?: number
   lod: LodMetadata
   primary: string
   codecs: Record<string, string>
@@ -166,7 +167,9 @@ export class SpatialReader implements TileReader {
 
   private analytical(signal?: AbortSignal): Promise<LodReader> {
     if (!this.fallback || this.fallback.abandoned) {
-      const current = new SharedLoad((signal) => LodReader.open(this.file, signal))
+      const current = new SharedLoad((signal) =>
+        LodReader.open(this.file, signal, this.root.footer_bytes),
+      )
       this.fallback = current
       current.promise.catch(() => {
         if (this.fallback === current) this.fallback = undefined

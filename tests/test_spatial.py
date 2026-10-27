@@ -14,7 +14,7 @@ import pytest
 import shapely
 from geoparquet_lod import drop_rate, validate
 from geoparquet_lod import write as build
-from geoparquet_lod._compact import dumps, loads
+from geoparquet_lod._compact import dumps, get, loads
 from geoparquet_lod._layout import finalize_layout
 from geoparquet_lod.pack import Unpacker
 from geoparquet_lod.writer import _write_unindexed as write
@@ -211,6 +211,70 @@ def test_spatial_roundtrip(tmp_path, monkeypatch, family, tile_pages, leaf_pages
 def test_layout_requires_separate_output(tmp_path):
     with pytest.raises(ValueError, match='separate output'):
         finalize_layout(tmp_path / 'same', tmp_path / 'same')
+
+
+def test_row_reads_fetch_footer_and_offset_indexes_once(tmp_path):
+    rng = np.random.default_rng(5)
+    n = 6000
+    x, y = -105 + rng.random(n) * 0.2, 39.6 + rng.random(n) * 0.2
+    table = pa.table(
+        {
+            **{f'a{i}': pa.array(rng.random(n)) for i in range(6)},
+            'GEOID': pa.array([f'08013{i // 7:010d}' for i in range(n)]),
+            'geometry': pa.array(shapely.to_wkb(shapely.box(x, y, x + 1e-4, y + 1e-4))),
+        }
+    )
+    geo = {
+        'version': '1.1.0',
+        'primary_column': 'geometry',
+        'columns': {'geometry': {'encoding': 'WKB', 'geometry_types': ['Polygon']}},
+    }
+    src = tmp_path / 'src.parquet'
+    pq.write_table(table.replace_schema_metadata({'geo': json.dumps(geo)}), src)
+    out = build(
+        src,
+        tmp_path / 'rows.lod.parquet',
+        zooms=list(range(12)),
+        row_group_rows=2000,
+        page_rows=256,
+        workers=1,
+        log=lambda *_: None,
+    )
+    columns = ['a0', 'a3', 'a5', 'GEOID']
+    row = 3100
+    meta = pq.ParquetFile(out).metadata
+    assert meta.num_row_groups == 3
+    expected = pq.read_table(out, columns=columns).slice(row, 1).to_pylist()[0]
+    starts = np.cumsum([0] + [meta.row_group(g).num_rows for g in range(meta.num_row_groups)])
+    g = int(np.searchsorted(starts, row, side='right') - 1)
+    data = out.read_bytes()
+    length = int.from_bytes(data[-8:-4], 'little')
+    footer = loads(data[-8 - length : -8])
+    root = json.loads(gzip.decompress(data[16 : 16 + int.from_bytes(data[12:16], 'little')]))
+    assert root['footer_bytes'] == length
+    chunks = [
+        chunk
+        for chunk in get(get(footer, 4)[1][g], 1)[1]
+        if b'.'.join(get(get(chunk, 3), 3)[1]).decode() in columns
+    ]
+    indexes = [
+        min(get(c, 4) for c in chunks),
+        max(get(c, 4) + get(c, 5) for c in chunks),
+    ]
+    # the row group's offset indexes sit together, so the requested ones span
+    # no more than the row group's own indexes
+    whole = sum(get(c, 5) for c in get(get(footer, 4)[1][g], 1)[1])
+    assert indexes[1] - indexes[0] <= whole
+    cases = tmp_path / 'cases.json'
+    cases.write_text(
+        json.dumps({'row': row, 'columns': columns, 'expected': expected, 'indexes': indexes})
+    )
+    result = subprocess.run(
+        ['node', str(ROOT / 'js/test/row-read.test.mjs'), str(out), str(cases)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_zooming_past_the_finest_lod_reuses_exact_geometry(tmp_path):

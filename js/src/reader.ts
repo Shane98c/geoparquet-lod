@@ -1,5 +1,6 @@
 import { SharedLoad } from './shared-load.js'
 import {
+  parquetMetadata,
   parquetMetadataAsync,
   parquetSchema,
   readColumnIndex,
@@ -199,7 +200,22 @@ export class LodReader {
     return bounds[0] <= bounds[2] ? bounds : [-180, -85.051129, 180, 85.051129]
   }
 
-  static async open(file: RangeSource, signal?: AbortSignal): Promise<LodReader> {
+  /** `footerBytes`, the footer's length when already known, reads the footer
+   * and its trailer in one request. */
+  static async open(
+    file: RangeSource,
+    signal?: AbortSignal,
+    footerBytes?: number,
+  ): Promise<LodReader> {
+    if (footerBytes && footerBytes + 8 <= file.byteLength) {
+      const tail = await file.slice(file.byteLength - footerBytes - 8, file.byteLength, signal)
+      const view = new DataView(tail)
+      if (view.getUint32(footerBytes, true) === footerBytes) {
+        const metadata = parquetMetadata(tail)
+        signal?.throwIfAborted()
+        return new LodReader(file, metadata, tail.slice(0, footerBytes))
+      }
+    }
     let footer: ArrayBuffer | undefined
     const end = file.byteLength - 8
     const capturing: RangeSource = {

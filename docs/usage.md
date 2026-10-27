@@ -198,8 +198,9 @@ asset to deploy.
 The server must answer HTTP range requests with CORS and expose
 `Content-Range`, which a suitably configured object store can do. `tileUrl`
 also takes `pointLayer` for point datasets. Opening probes the first 16 KiB for
-the spatial index. Indexed files need only that request; files without the
-index then read a 64 KiB tail and any missing footer bytes. A HEAD is needed
+the spatial index. Indexed files need only that request, and open their footer,
+for row reads and exact geometry, in one more; files without the index then
+read a 64 KiB tail and any missing footer bytes. A HEAD is needed
 only when CORS hides `Content-Range`.
 
 ### Reader behaviour

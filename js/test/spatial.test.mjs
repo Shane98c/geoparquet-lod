@@ -136,7 +136,7 @@ for (const cancelBoth of [false, true]) {
     byteLength: data.length,
     async slice(a, b = data.length, signal) {
       signal?.throwIfAborted()
-      if (hold && a === data.length - 8) {
+      if (hold && b === data.length) {
         started()
         await new Promise((resolve, reject) => {
           const cancel = () => {

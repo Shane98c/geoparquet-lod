@@ -22,7 +22,9 @@ import pyarrow.parquet as pq
 from ._compact import dumps, get, loads, set_value
 
 BOOTSTRAP_BYTES = 16384
-_ROOT_TARGET_BYTES = BOOTSTRAP_BYTES - 64  # reserve room for file_bytes and the header
+_ROOT_TARGET_BYTES = (
+    BOOTSTRAP_BYTES - 96
+)  # reserve room for file_bytes, footer_bytes and the header
 MAGIC = b'LODIDX01'
 CODECS = ['UNCOMPRESSED', 'SNAPPY', 'GZIP', 'LZO', 'BROTLI', 'LZ4', 'ZSTD', 'LZ4_RAW']
 
@@ -297,7 +299,8 @@ def finalize_layout(
                                     set_value(page, 1, get(page, 1) + delta)
                             if 6 in chunk:
                                 original.seek(get(chunk, 6))
-                                pending_indexes.append((chunk, 6, 7, original.read(get(chunk, 7))))
+                                raw = original.read(get(chunk, 7))
+                                pending_indexes.append(((6, g, c), chunk, 6, 7, raw))
                             if name:
                                 array = (
                                     parquet.read_row_group(g, columns=[f'{lod["column"]}.{name}'])
@@ -342,7 +345,7 @@ def finalize_layout(
                                         valid_rows,
                                     ]
                                     directory[name].append(entry)
-                            pending_indexes.append((chunk, 4, 5, dumps(index)))
+                            pending_indexes.append(((4, g, c), chunk, 4, 5, dumps(index)))
                         elif name:
                             raise ValueError('LOD column has no offset index')
                         if name:
@@ -353,7 +356,10 @@ def finalize_layout(
                                 raise ValueError('LOD codec must agree across row groups')
                             root['codecs'][name] = codec
                     log(f'  clustered column {c + 1}/{columns}')
-                for chunk, offset_field, length_field, raw in pending_indexes:
+                # Offset indexes, then column indexes, each by row group, so one
+                # row's offset indexes across columns are read together.
+                pending_indexes.sort(key=lambda p: p[0])
+                for _, chunk, offset_field, length_field, raw in pending_indexes:
                     set_value(chunk, offset_field, target.tell())
                     set_value(chunk, length_field, len(raw))
                     target.write(raw)
@@ -414,6 +420,7 @@ def finalize_layout(
                 target.write(footer)
                 target.write(struct.pack('<I', len(footer)) + b'PAR1')
                 root['file_bytes'] = target.tell()
+                root['footer_bytes'] = len(footer)
                 packed = _root_json(root)
                 if len(packed) + 16 > BOOTSTRAP_BYTES:
                     raise ValueError('root exceeds 16 KiB; increase leaf_pages')

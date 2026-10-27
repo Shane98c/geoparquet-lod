@@ -14,7 +14,7 @@ hyparquet-based reader in this repository.
 PAR1
 LODIDX01 | root_length:u32le | gzip(root JSON) | padding to byte 16384
 column chunks, physically grouped by column, then logical row group
-standard Parquet offset/column indexes
+standard Parquet offset indexes, then column indexes, each by row group
 gzip spatial directory leaves and optional branches
 standard Parquet footer | footer_length:u32le | PAR1
 ```
@@ -43,6 +43,8 @@ directory boundaries can add reads.
 The compressed root is bounded by the first 16 KiB and contains:
 
 - `version: 1`, `file_bytes`: format and full file length checks.
+- `footer_bytes`: the length of the standard footer's metadata, so a reader
+  fetches the footer and its trailer in one request.
 - `lod`, `primary`: copies of the logical LOD metadata and primary column name.
 - `bounds`, `columns`: map extent and the scalar (non-nested) columns other
   than the primary geometry, including the key column, so a map can
@@ -97,7 +99,8 @@ MVT archive.
 
 Exact source-row reads and tiles beyond the finest LOD open the normal Parquet
 footer lazily; the standard page indexes describe every page, so ordinary
-Parquet readers see an ordinary file. Publish files immutably: the profile is
+Parquet readers see an ordinary file. A row group's offset indexes are
+adjacent, so a row read across columns fetches them in one request. Publish files immutably: the profile is
 specific to one file write, and ordinary Parquet writers need not preserve it.
 The reference `write()` builds the layout as its final step, writes to
 temporary files, and publishes only after the completed footer is readable.
