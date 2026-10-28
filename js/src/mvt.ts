@@ -68,7 +68,8 @@ export function toMvt(source: FeatureSource, options: MvtTileOptions): ArrayBuff
   const commands = new ByteWriter()
   const tags = new ByteWriter(64)
   const keys = new Map<string, number>()
-  const values = new Map<string, number>()
+  // value ids by MVT value field, then by the value itself
+  const values = new Map<number, Map<unknown, number>>()
   const valueList: PropertyValue[] = []
   layer.writeVarintField(15, 2)
   layer.writeStringField(1, options.layer ?? DEFAULT_LAYER_NAME)
@@ -80,14 +81,17 @@ export function toMvt(source: FeatureSource, options: MvtTileOptions): ArrayBuff
     tags.reset()
     for (const [key, column] of columns) {
       const value = propertyValue(column[row])
-      const id = `${value.field}:${value.value}`
-      if (!keys.has(key)) keys.set(key, keys.size)
-      if (!values.has(id)) {
-        values.set(id, values.size)
+      let ids = values.get(value.field)
+      if (!ids) values.set(value.field, (ids = new Map()))
+      let id = ids.get(value.value)
+      if (id === undefined) {
+        id = valueList.length
+        ids.set(value.value, id)
         valueList.push(value)
       }
+      if (!keys.has(key)) keys.set(key, keys.size)
       tags.writeVarint(keys.get(key)!)
-      tags.writeVarint(values.get(id)!)
+      tags.writeVarint(id)
     }
     writeFeature(layer, feature, tags.view())
   }
