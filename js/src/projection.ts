@@ -1,6 +1,6 @@
 import { readColumn } from 'hyparquet/src/column.js'
 import { DEFAULT_PARSERS } from 'hyparquet/src/convert.js'
-import { compressors } from 'hyparquet-compressors'
+import { compressors } from './compressors.js'
 import type { SchemaTree } from 'hyparquet'
 
 /** Serializable source-page work. Row IDs are sorted and local to a row group. */

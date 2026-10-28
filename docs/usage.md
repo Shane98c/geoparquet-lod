@@ -193,7 +193,10 @@ overrides the default before calling `prefetch`, `readMetadata`, or
 `registerProtocol`; one disables the pool. Four helps dense viewports but costs
 more memory. Exact geometry and analytical row reads stay on the coordinator.
 CPU workers reuse the same `worker.js` URL, so there is no additional worker
-asset to deploy.
+asset to deploy. zstd pages decode with WebAssembly, embedded in the bundle as a
+`data:` URL; a Content Security Policy must allow `'wasm-unsafe-eval'` in
+`script-src` and `data:` in `connect-src`, or pages decode in JavaScript, about
+three times slower.
 
 The server must answer HTTP range requests with CORS and expose
 `Content-Range`, which a suitably configured object store can do. `tileUrl`

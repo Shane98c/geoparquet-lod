@@ -19,7 +19,7 @@ That license does not replace dependency licenses or dataset terms.
   feature dropping, and tiny-polygon display. Our estimated-byte thinning is
   not an exact implementation of Tippecanoe's compressed-tile decisions.
 - The implementation also depends on DuckDB, PyArrow, NumPy, Shapely, click,
-  hyparquet, hyparquet-compressors, and lineclip. Dependency manifests and lock
+  hyparquet, hyparquet-compressors, lineclip, and zstddec. Dependency manifests and lock
   files record the actual versions. MapLibre, PMTiles, deck.gl,
   @geoarrow/deck.gl-layers, and apache-arrow power the demo.
 

@@ -1,6 +1,6 @@
 import { decompressPage } from 'hyparquet/src/datapage.js'
 import { deserializeTCompactProtocol } from 'hyparquet/src/thrift.js'
-import { compressors } from 'hyparquet-compressors'
+import { compressors } from './compressors.js'
 
 /** Visit only present values in the profile's required-struct/optional-binary
  * column. Scan definition-level runs directly, so sparse overviews don't

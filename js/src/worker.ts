@@ -1,4 +1,5 @@
 import { VisibleTileCache } from './visible-cache.js'
+import { zstdReady } from './compressors.js'
 import { decodeProjection } from './projection.js'
 /// <reference lib="webworker" />
 import type { Transfer, WorkerRequest, WorkerResponse } from './maplibre.js'
@@ -49,7 +50,7 @@ scope.addEventListener('message', (event: MessageEvent<WorkerRequest | CpuReques
   // CPU workers reuse this same URL, so the pool adds no second JS bundle.
   // They receive prepared pages or decoded geometry, never their own reader.
   if (request.type === 'cpu-init') {
-    scope.postMessage({ ready: true } satisfies TileReply)
+    zstdReady.then(() => scope.postMessage({ ready: true } satisfies TileReply))
     return
   }
   if (
