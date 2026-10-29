@@ -67,7 +67,8 @@ def check_index(path, parquet, lod):
 
         source.seek(4)
         magic = source.read(8)
-        advertised = b'lod_spatial_index' in (parquet.schema_arrow.metadata or {})
+        # The footer's key/value metadata, which Arrow's schema metadata need not include.
+        advertised = b'lod_spatial_index' in (parquet.metadata.metadata or {})
         if magic != MAGIC:
             if advertised:
                 raise ValueError('spatial index advertised but bootstrap magic missing')

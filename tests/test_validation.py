@@ -169,6 +169,7 @@ def _write_root(path, raw, root):
         'primary',
         'footer_bytes',
         'row_metadata',
+        'magic',
     ],
 )
 def test_spatial_index_corruption(indexed, tmp_path, mutation):
@@ -194,6 +195,8 @@ def test_spatial_index_corruption(indexed, tmp_path, mutation):
     elif mutation == 'root_bounds':
         stream = next(s for sections in root['streams'].values() for s in sections if s[2])
         stream[2][0] += 1000000
+    elif mutation == 'magic':
+        raw = raw[:4] + bytes(8) + raw[12:]
     else:
         name = next(iter(root['streams']))
         # Replace delta directory with equivalent explicit references, then append
