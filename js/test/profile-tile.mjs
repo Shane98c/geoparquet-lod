@@ -4,7 +4,7 @@ import { open } from 'node:fs/promises'
 import assert from 'node:assert/strict'
 import { toMvt as referenceMvt } from '@cogp/reader'
 import { toMvt as streamMvt } from '../dist/mvt.js'
-import { openReader, coalescing, GeometryBuilder } from '../dist/index.js'
+import { openReader, coalescing } from '../dist/index.js'
 
 const [path] = process.argv.slice(2)
 const file = await open(path)
@@ -18,10 +18,7 @@ const source = coalescing({
   },
 })
 const reader = await openReader(source)
-const baselineModule = process.env.BASELINE_MODULE
-const baseline = baselineModule ? await import(baselineModule) : undefined
-const referenceReader = baseline ? await baseline.openReader(source) : reader
-const variants = ['nested/reference', 'columnar/reference', 'columnar/stream']
+const variants = ['reference', 'stream']
 const samples = []
 for (const [z, lon, lat] of [
   [8, 139.76, 35.68],
@@ -38,28 +35,11 @@ for (const [z, lon, lat] of [
       // favour the same variant. The first three rounds are warmup.
       for (let j = 0; j < variants.length; j++) {
         const implementation = variants[(j + round) % variants.length]
-        const [mode, encoder] = implementation.split('/')
         const a = performance.now()
-        const data =
-          mode === 'columnar'
-            ? await reader.readGeometryByTile(lod, z, x, y, properties)
-            : await referenceReader.readLodByTile(
-                referenceReader.lodForZoom(z),
-                z,
-                x,
-                y,
-                properties,
-              )
+        const data = await reader.readLodByTile(lod, z, x, y, properties)
         const b = performance.now()
-        let geometry = data.geometry
-        if (!geometry) {
-          const builder = new (baseline?.GeometryBuilder ?? GeometryBuilder)()
-          for (const coords of data.coords) builder.add(lod.geometry_type, coords)
-          geometry = builder.finish(lod.scale, lod.offset)
-        }
-        const c = performance.now()
-        const out = (encoder === 'stream' ? streamMvt : referenceMvt)(
-          { geometry, rowIndex: data.rows, columns: data.columns },
+        const out = (implementation === 'stream' ? streamMvt : referenceMvt)(
+          { geometry: data.geometry, rowIndex: data.rows, columns: data.columns },
           { z, x, y, layer: 'features' },
         )
         const d = performance.now()
@@ -77,8 +57,7 @@ for (const [z, lon, lat] of [
             implementation,
             round,
             readMs: b - a,
-            flattenMs: c - b,
-            mvtMs: d - c,
+            mvtMs: d - b,
             totalMs: d - a,
             bytes: out.byteLength,
           })
@@ -105,12 +84,12 @@ for (const sample of samples) {
   )
   const entry = { ...sample }
   delete entry.round
-  for (const key of ['readMs', 'flattenMs', 'mvtMs', 'totalMs']) {
+  for (const key of ['readMs', 'mvtMs', 'totalMs']) {
     const values = group.map((r) => r[key]).sort((a, b) => a - b)
     entry[key] =
       (values[Math.floor((values.length - 1) / 2)] + values[Math.floor(values.length / 2)]) / 2
   }
   results.push(entry)
 }
-console.log(JSON.stringify({ path, baselineModule, runs: 12, results, samples }, null, 2))
+console.log(JSON.stringify({ path, runs: 12, results, samples }, null, 2))
 await file.close()

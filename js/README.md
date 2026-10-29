@@ -26,11 +26,10 @@ compiled output. See
 `src/COGP-LICENSE.txt`. The optional vendored Esri comparison reader is not
 included in this package.
 
-Use `readGeometryBatch(reader, { bbox, resolution, columns, geometry })` for a
-renderer-neutral result with typed coordinate buffers, hierarchy offsets, source
-row IDs and attributes. `toGeometryBatch` converts a `readFeatures`
-result. `batchToGeoJSON`, `batchToGeoArrow` (Arrow IPC), and `batchToMvt` consume
-the same batch. GeoArrow conversion uses the `@cogp/reader` dependency; nested or
+Use `readFeatures(reader, { bbox, resolution, columns, geometry })` for a
+renderer-neutral batch with typed coordinate buffers, hierarchy offsets, source
+row IDs and attributes. `batchToGeoJSON`, `batchToGeoArrow` (Arrow IPC), and
+`batchToMvt` consume it. GeoArrow conversion uses the `@cogp/reader` dependency; nested or
 mixed attributes become display strings. GeoJSON is intended for small results.
 The deck.gl example is `demo/deck/index.html` after `npm run demo:bundle`,
 served with Range support; it feeds `batchToGeoArrow` output to the GeoArrow

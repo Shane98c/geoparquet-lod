@@ -6,16 +6,16 @@
 import { LOD_CRS } from './web-mercator.js'
 
 /**
- * Assembles decoded LOD rows (nested arrays of grid coordinates in the
- * family's shape) into the columnar GeometryColumn our MVT encoder consumes.
- * Coordinates stay in grid units; `finish` records the LOD's scale and offset
- * so `offset + scale * value` is an EPSG:3857 coordinate in metres.
+ * Assembles decoded LOD rows into the columnar GeometryColumn our MVT encoder
+ * consumes. Coordinates stay in grid units; `finish` records the LOD's scale
+ * and offset so `offset + scale * value` is an EPSG:3857 coordinate in metres.
  */
 
 export type GeometryType = 'Point' | 'MultiLineString' | 'MultiPolygon'
 
 /** GeoArrow family codes `toMvt` understands. */
 const TYPE_CODE: Record<GeometryType, 1 | 5 | 6> = { Point: 1, MultiLineString: 5, MultiPolygon: 6 }
+const FAMILY: Record<number, GeometryType> = { 1: 'Point', 5: 'MultiLineString', 6: 'MultiPolygon' }
 
 export class GeometryBuilder {
   length = 0
@@ -28,30 +28,6 @@ export class GeometryBuilder {
   ringOffsets = new Uint32Array(1025)
   x = new Int32Array(8192)
   y = new Int32Array(8192)
-
-  /** One row of the coordinate leaf: a pair for a point, rings of pairs for shapes. */
-  add(type: GeometryType, coords: unknown): void {
-    this.begin(type)
-    if (type === 'Point') {
-      this.startPolygon()
-      this.startRing()
-      this.push([coords as [number, number]])
-    } else if (type === 'MultiLineString') {
-      this.startPolygon()
-      for (const ring of coords as [number, number][][]) {
-        this.startRing()
-        this.push(ring)
-      }
-    } else {
-      for (const polygon of coords as [number, number][][][]) {
-        this.startPolygon()
-        for (const ring of polygon) {
-          this.startRing()
-          this.push(ring)
-        }
-      }
-    }
-  }
 
   /** Begin one feature when decoding directly into the coordinate buffers. */
   begin(type: GeometryType) {
@@ -85,14 +61,18 @@ export class GeometryBuilder {
     return start
   }
 
-  private push(ring: [number, number][]) {
-    this.x = ensure(this.x, this.coords + ring.length)
-    this.y = ensure(this.y, this.coords + ring.length)
-    for (const pair of ring) {
-      if (pair.length !== 2) throw new Error('coordinate is not an [x, y] pair')
-      this.x[this.coords] = pair[0]
-      this.y[this.coords] = pair[1]
-      this.coords++
+  /** Copy feature `i` of a finished column on the same grid. */
+  append(source: LodGeometry, i: number) {
+    const { geometryOffsets: go, polygonOffsets: po, ringOffsets: ro } = source
+    this.begin(FAMILY[source.types[i]])
+    for (let p = go[i]; p < go[i + 1]; p++) {
+      this.startPolygon()
+      for (let r = po[p]; r < po[p + 1]; r++) {
+        this.startRing()
+        const start = this.reserveCoordinates(ro[r + 1] - ro[r])
+        this.x.set(source.x.subarray(ro[r], ro[r + 1]), start)
+        this.y.set(source.y.subarray(ro[r], ro[r + 1]), start)
+      }
     }
   }
 
@@ -114,6 +94,9 @@ export class GeometryBuilder {
     }
   }
 }
+
+/** Finished columnar geometry of one LOD, in grid units. */
+export type LodGeometry = ReturnType<GeometryBuilder['finish']>
 
 function ensure<T extends Uint32Array | Int32Array>(a: T, n: number): T {
   if (n <= a.length) return a

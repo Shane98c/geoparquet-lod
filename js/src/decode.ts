@@ -16,22 +16,6 @@ export interface AttributeField {
   values?: string[]
 }
 
-export interface DecodedCopy {
-  /** `zoom * 2^48 + x * 2^zoom + y` of the tile the copy serves. */
-  tile: number
-  /** File row index of the copied feature. */
-  id: number
-  geometry: unknown
-  attrs: unknown[]
-}
-
-export interface DecodedRow {
-  /** Nested arrays of grid coordinates in the LOD's family shape; empty for a row that only hosts copies. */
-  geometry: unknown
-  attrs: unknown[]
-  spill: DecodedCopy[]
-}
-
 /** The attribute kinds the packer writes, from the Arrow type names in the metadata. */
 export const attributeKind = (type: string): AttributeKind => {
   const t = type.toLowerCase()
@@ -84,37 +68,6 @@ class Cursor {
 
 const unzigzag = (v: number): number => (v % 2 ? -(v + 1) / 2 : v / 2)
 
-const ring = (c: Cursor): [number, number][] => {
-  const n = c.varint()
-  const out: [number, number][] = new Array(n)
-  let x = 0
-  let y = 0
-  for (let i = 0; i < n; i++) {
-    x += unzigzag(c.varint())
-    y += unzigzag(c.varint())
-    out[i] = [x, y]
-  }
-  return out
-}
-
-const geometry = (c: Cursor, type: GeometryType): unknown => {
-  if (type === 'Point') return [unzigzag(c.varint()), unzigzag(c.varint())]
-  const n = c.varint()
-  if (type === 'MultiLineString') {
-    const parts: [number, number][][] = new Array(n)
-    for (let i = 0; i < n; i++) parts[i] = ring(c)
-    return parts
-  }
-  const polygons: [number, number][][][] = new Array(n)
-  for (let i = 0; i < n; i++) {
-    const rings = c.varint()
-    const p: [number, number][][] = new Array(rings)
-    for (let j = 0; j < rings; j++) p[j] = ring(c)
-    polygons[i] = p
-  }
-  return polygons
-}
-
 /** Attribute values with string slots left as byte lengths, filled from the trailing payload later. */
 const attributes = (
   c: Cursor,
@@ -155,28 +108,30 @@ const attributes = (
   return out
 }
 
-export const decodeRow = (
+/** A row's own attributes, skipping its geometry and the copies it hosts. */
+export const decodeAttributes = (
   bytes: Uint8Array,
   type: GeometryType,
   fields: AttributeField[],
-): DecodedRow => {
+): unknown[] => {
   const c = new Cursor(bytes)
   const strings: [unknown[], number, number][] = []
-  const own = geometry(c, type)
+  geometryInto(c, type)
   const attrs = attributes(c, fields, strings)
+  if (!strings.length) return attrs
+  // The row's own strings lead the trailing payload, after every copy.
   const count = c.varint()
-  const spill: DecodedCopy[] = new Array(count)
   for (let k = 0; k < count; k++) {
-    const tile = c.varint()
-    const id = c.varint()
-    const g = geometry(c, type)
-    spill[k] = { tile, id, geometry: g, attrs: attributes(c, fields, strings) }
+    c.varint()
+    c.varint()
+    geometryInto(c, type)
+    skipAttributes(c, fields)
   }
   for (const [slot, i, length] of strings) {
     slot[i] = textDecoder.decode(bytes.subarray(c.pos, c.pos + length))
     c.pos += length
   }
-  return { geometry: own, attrs, spill }
+  return attrs
 }
 
 /** Decode selected geometry directly into columnar buffers. Unwanted copies

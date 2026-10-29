@@ -1,5 +1,5 @@
 // Bundled by `npm --prefix js run demo:bundle` into demo/dist/deck.js.
-import { openReader, httpSource, readGeometryBatch, batchToGeoArrow } from '../../js/src/index.ts'
+import { openReader, httpSource, readFeatures, batchToGeoArrow } from '../../js/src/index.ts'
 import { Deck, MapView } from '@deck.gl/core'
 import { TileLayer } from '@deck.gl/geo-layers'
 import {
@@ -68,7 +68,7 @@ function tileLayer() {
     maxZoom: Math.max(...zooms),
     extent: reader.bounds,
     getTileData: async ({ index, bbox, signal }) => {
-      const batch = await readGeometryBatch(reader, {
+      const batch = await readFeatures(reader, {
         bbox: [bbox.west, bbox.south, bbox.east, bbox.north],
         resolution: 360 / (reader.lod.tile_size * 2 ** index.z),
         signal,

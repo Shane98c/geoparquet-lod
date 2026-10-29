@@ -1,9 +1,6 @@
-import { geometryColumnFromWkb, toGeoArrow, toGeoJSON } from '@cogp/reader'
+import { toGeoArrow, toGeoJSON } from '@cogp/reader'
 import type { GeometryColumn, GeoArrowOptions } from '@cogp/reader'
-import { GeometryBuilder } from './geometry.js'
-import { readFeatures, type FeatureQuery, type FeatureResult } from './query.js'
 import { toMvt, type MvtTileOptions } from './mvt.js'
-import type { TileReader } from './spatial.js'
 import { LOD_CRS, latitudeOf, longitudeOf } from './web-mercator.js'
 
 /** A geometry column whose `crs` marks EPSG:3857 LOD coordinates; absent, they are lon/lat. */
@@ -19,32 +16,6 @@ export interface GeometryBatch {
   rowIndex: number[]
   columns: Record<string, unknown[]>
   source: 'overview' | 'primary'
-}
-
-/** Normalize either readFeatures result without converting geometry to objects. */
-export function toGeometryBatch(result: FeatureResult): GeometryBatch {
-  if (Object.values(result.columns).some((column) => column.length !== result.rows.length))
-    throw new Error('attribute column length does not match row IDs')
-  let geometry: LodGeometryColumn
-  if (result.geometry === 'primary') {
-    if (result.wkb.length !== result.rows.length)
-      throw new Error('geometry length does not match row IDs')
-    geometry = geometryColumnFromWkb(result.wkb)
-  } else {
-    if (result.coords.length !== result.rows.length)
-      throw new Error('geometry length does not match row IDs')
-    const builder = new GeometryBuilder()
-    for (const coords of result.coords) builder.add(result.lod.geometry_type, coords)
-    geometry = builder.finish(result.lod.scale, result.lod.offset)
-  }
-  return { geometry, rowIndex: result.rows, columns: result.columns, source: result.geometry }
-}
-
-export async function readGeometryBatch(
-  reader: TileReader,
-  query: FeatureQuery,
-): Promise<GeometryBatch> {
-  return toGeometryBatch(await readFeatures(reader, query))
 }
 
 /** The batch with overview coordinates as float64 longitude/latitude. */

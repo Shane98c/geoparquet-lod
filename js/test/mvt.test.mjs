@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { toMvt as reference } from '@cogp/reader'
 import { toMvt } from '../dist/mvt.js'
-import { GeometryBuilder } from '../dist/geometry.js'
 import { mercatorX, mercatorY } from '../dist/web-mercator.js'
+import { columnar } from './columnar.mjs'
 
 let seed = 71
 const random = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32
@@ -17,8 +17,8 @@ for (const type of ['Point', 'MultiLineString', 'MultiPolygon']) {
     [-0.1, 0.1],
     [0.00001, 0.00001],
   ]) {
-    const builder = new GeometryBuilder()
-    const rows = [],
+    const features = [],
+      rows = [],
       values = []
     for (let i = 0; i < 2200; i++) {
       const x = Math.floor(random() * 800 - 400)
@@ -44,8 +44,7 @@ for (const type of ['Point', 'MultiLineString', 'MultiPolygon']) {
         [x + 1, y + 2],
         [x + 1, y + 1],
       ]
-      builder.add(
-        type,
+      features.push(
         type === 'Point'
           ? [x, y]
           : type === 'MultiLineString'
@@ -68,7 +67,7 @@ for (const type of ['Point', 'MultiLineString', 'MultiPolygon']) {
       )
     }
     // COGP's encoder reads lon/lat, so these coordinates are degrees
-    const { crs: _, ...geometry } = builder.finish(scale, [0, 0])
+    const { crs: _, ...geometry } = columnar(type, features, scale, [0, 0])
     for (const [z, x, y] of [
       [0, 0, 0],
       [1, 0, 0],
@@ -194,7 +193,6 @@ console.log('EPSG:3857 LOD coordinates encode as their lon/lat equivalents do')
     }
     return out
   }
-  const builder = new GeometryBuilder()
   const values = [
     Math.fround(0.2863907),
     0.1,
@@ -209,12 +207,12 @@ console.log('EPSG:3857 LOD coordinates encode as their lon/lat equivalents do')
     2 ** 52 + 1,
     2n ** 60n,
   ]
-  for (let i = 0; i < values.length; i++) builder.add('Point', [i, i])
+  const geometry = columnar(
+    'Point',
+    values.map((_, i) => [i, i]),
+  )
   const tile = new Uint8Array(
-    toMvt(
-      { geometry: builder.finish([1, 1], [0, 0]), columns: { value: values } },
-      { z: 0, x: 0, y: 0, layer: 'typed' },
-    ),
+    toMvt({ geometry, columns: { value: values } }, { z: 0, x: 0, y: 0, layer: 'typed' }),
   )
   const [[, layerBytes]] = fields(tile)
   const layer = fields(layerBytes)

@@ -1,4 +1,7 @@
-import type { Bbox, Lod, LodRows, PrimaryRows } from './reader.js'
+import { geometryColumnFromWkb } from '@cogp/reader'
+import type { GeometryBatch } from './batch.js'
+import { GeometryBuilder, type LodGeometry } from './geometry.js'
+import type { Bbox } from './reader.js'
 import type { TileReader } from './spatial.js'
 import { HALF_WORLD, mercatorX, mercatorY } from './web-mercator.js'
 
@@ -13,18 +16,17 @@ export interface FeatureQuery {
   maxTiles?: number
   signal?: AbortSignal
 }
-export type FeatureResult =
-  (LodRows & { geometry: 'overview'; lod: Lod }) | (PrimaryRows & { geometry: 'primary' })
 
-/** Whole, unclipped features selected by their geometry's bounding box.
- * Overview results are simplified/quantized and may be thinned. Primary results
- * use original WKB and source bbox selection. Neither is an exact intersection
- * predicate. Row IDs are deduplicated across tiles and wrapped query halves.
+/** Whole, unclipped features selected by their geometry's bounding box, as one
+ * columnar batch. Overview results are simplified/quantized and may be thinned.
+ * Primary results use original WKB and source bbox selection. Neither is an
+ * exact intersection predicate. Row IDs are deduplicated across tiles and
+ * wrapped query halves.
  */
 export async function readFeatures(
   reader: TileReader,
   query: FeatureQuery,
-): Promise<FeatureResult> {
+): Promise<GeometryBatch> {
   const { bbox, signal, resolution } = query
   signal?.throwIfAborted()
   if (
@@ -50,13 +52,9 @@ export async function readFeatures(
           [-180, bbox[1], bbox[2], bbox[3]],
         ]
   const seen = new Set<number>()
+  const rows: number[] = []
   if (query.geometry === 'primary') {
-    const result: PrimaryRows & { geometry: 'primary' } = {
-      geometry: 'primary',
-      rows: [],
-      wkb: [],
-      columns: Object.fromEntries(columns.map((n) => [n, []])),
-    }
+    const wkb: Uint8Array[] = []
     // Primary queries explicitly project original source values, including for
     // names that also have overridden display values in the overview profile.
     for (const box of boxes) {
@@ -64,12 +62,16 @@ export async function readFeatures(
       for (let i = 0; i < part.rows.length; i++) {
         if (seen.has(part.rows[i])) continue
         seen.add(part.rows[i])
-        result.rows.push(part.rows[i])
-        result.wkb.push(part.wkb[i])
+        rows.push(part.rows[i])
+        wkb.push(part.wkb[i])
       }
     }
-    result.columns = await reader.readColumns(result.rows, columns, signal)
-    return result
+    return {
+      geometry: geometryColumnFromWkb(wkb),
+      rowIndex: rows,
+      columns: await reader.readColumns(rows, columns, signal),
+      source: 'primary',
+    }
   }
   // Sparse profiles have no payload or spill tags at intervening zooms.
   // Choose the first declared zoom at least as detailed as the requested one.
@@ -105,13 +107,8 @@ export async function readFeatures(
   }
   if (cells.size > limit)
     throw new Error('query exceeds maxTiles; use a coarser resolution or primary geometry')
-  const result: LodRows & { geometry: 'overview'; lod: Lod } = {
-    geometry: 'overview',
-    lod,
-    rows: [],
-    coords: [],
-    columns: Object.fromEntries(columns.map((n) => [n, []])),
-  }
+  const builder = new GeometryBuilder()
+  const values: Record<string, unknown[]> = Object.fromEntries(columns.map((n) => [n, []]))
   // Bounded batches share in-flight page requests without scheduling an entire
   // world's worth of decodes or retaining every tile result at once.
   const tiles = [...cells.values()]
@@ -126,7 +123,7 @@ export async function readFeatures(
       for (let i = 0; i < part.rows.length; i++) {
         const id = part.rows[i]
         if (seen.has(id)) continue
-        const bounds = coordinateBounds(part.coords[i], lod)
+        const bounds = featureBounds(part.geometry, i)
         if (
           !projected.some(
             (b) => bounds[0] <= b[2] && bounds[2] >= b[0] && bounds[1] <= b[3] && bounds[3] >= b[1],
@@ -134,28 +131,39 @@ export async function readFeatures(
         )
           continue
         seen.add(id)
-        result.rows.push(id)
-        result.coords.push(part.coords[i])
-        for (const name of columns) result.columns[name].push(part.columns[name][i])
+        rows.push(id)
+        builder.append(part.geometry, i)
+        for (const name of columns) values[name].push(part.columns[name][i])
       }
   }
   signal?.throwIfAborted()
-  return result
+  return {
+    geometry: builder.finish(lod.scale, lod.offset),
+    rowIndex: rows,
+    columns: values,
+    source: 'overview',
+  }
 }
 
-function coordinateBounds(coords: unknown, lod: Lod): Bbox {
-  const bounds: Bbox = [Infinity, Infinity, -Infinity, -Infinity]
-  const visit = (value: unknown): void => {
-    if (!Array.isArray(value)) return
-    if (typeof value[0] === 'number' && typeof value[1] === 'number') {
-      const x = value[0] * lod.scale[0] + lod.offset[0],
-        y = value[1] * lod.scale[1] + lod.offset[1]
-      bounds[0] = Math.min(bounds[0], x)
-      bounds[1] = Math.min(bounds[1], y)
-      bounds[2] = Math.max(bounds[2], x)
-      bounds[3] = Math.max(bounds[3], y)
-    } else value.forEach(visit)
+/** The bounds of feature `i` in EPSG:3857 metres; empty bounds for an empty feature. */
+function featureBounds(geometry: LodGeometry, i: number): Bbox {
+  const { x, y, scale, offset, ringOffsets: ro, polygonOffsets: po } = geometry
+  const start = ro[po[geometry.geometryOffsets[i]]],
+    end = ro[po[geometry.geometryOffsets[i + 1]]]
+  if (start === end) return [Infinity, Infinity, -Infinity, -Infinity]
+  let x0 = x[start],
+    y0 = y[start],
+    x1 = x0,
+    y1 = y0
+  for (let j = start + 1; j < end; j++) {
+    if (x[j] < x0) x0 = x[j]
+    else if (x[j] > x1) x1 = x[j]
+    if (y[j] < y0) y0 = y[j]
+    else if (y[j] > y1) y1 = y[j]
   }
-  visit(coords)
-  return bounds
+  const ax = offset[0] + scale[0] * x0,
+    bx = offset[0] + scale[0] * x1,
+    ay = offset[1] + scale[1] * y0,
+    by = offset[1] + scale[1] * y1
+  return [Math.min(ax, bx), Math.min(ay, by), Math.max(ax, bx), Math.max(ay, by)]
 }

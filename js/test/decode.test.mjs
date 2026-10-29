@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
-import { GeometryBuilder, decodeRow } from '../dist/index.js'
+import { GeometryBuilder } from '../dist/index.js'
+import { decodeAttributes, decodeSelectedRow } from '../dist/decode.js'
+import { columnar, nested } from './columnar.mjs'
 
-// a MultiPolygon row as the decoder returns it: polygons > rings > [x, y] in grid units
+// a MultiPolygon, a MultiLineString and a Point in grid units, copied feature by feature
 const mp = [
   [
     [
@@ -20,15 +22,17 @@ const mp = [
     ],
   ],
 ]
-const b = new GeometryBuilder()
-b.add('MultiPolygon', mp)
-b.add('MultiLineString', [
+const line = [
   [
     [0, 0],
     [1, 1],
   ],
-])
-b.add('Point', [7, 8])
+]
+const sources = [columnar('MultiPolygon', [mp]), columnar('MultiLineString', [line])]
+const b = new GeometryBuilder()
+b.append(sources[0], 0)
+b.append(sources[1], 0)
+b.append(columnar('Point', [[7, 8]]), 0)
 const g = b.finish([1, 1], [0, 0])
 assert.equal(g.length, 3)
 assert.deepEqual(Array.from(g.types), [6, 5, 1])
@@ -37,8 +41,9 @@ assert.deepEqual(Array.from(g.polygonOffsets), [0, 1, 2, 3, 4])
 assert.deepEqual(Array.from(g.ringOffsets), [0, 4, 8, 10, 11])
 assert.deepEqual(Array.from(g.x), [0, 3, 3, 0, 10, 12, 10, 10, 0, 1, 7])
 assert.deepEqual(Array.from(g.y), [0, 0, 3, 0, 10, 10, 12, 10, 0, 1, 8])
-
-assert.throws(() => b.add('MultiPolygon', [[[[0, 1, 2]]]]), /pair/)
+assert.deepEqual(nested(g, 0, 'MultiPolygon'), mp)
+assert.deepEqual(nested(g, 1, 'MultiLineString'), line)
+assert.deepEqual(nested(g, 2, 'Point'), [7, 8])
 
 // a packed row: one square at (5, 5) of side 2, attributes h=3 (int), name='ab' (string),
 // hosting one copy for tile zoom 12 / 7 of row 9: a unit square at (1, 1), h=4, name=null
@@ -87,17 +92,52 @@ const bytes = Uint8Array.from([
   ...varint(zz(4)), // copy attrs: only h present
   ...new TextEncoder().encode('ab'),
 ])
-const row = decodeRow(bytes, 'MultiPolygon', [
+const fields = [
   { name: 'h', kind: 'int' },
   { name: 'name', kind: 'string' },
+]
+const decode = (own, tile, withAttributes = true) => {
+  const builder = new GeometryBuilder()
+  const features = []
+  const add = (id, attrs, slot) => features.push({ id, attrs, slot })
+  decodeSelectedRow(bytes, 'MultiPolygon', fields, builder, own, 4, tile, add, withAttributes)
+  const geometry = builder.finish([1, 1], [0, 0])
+  return features.map((f, i) => ({ ...f, geometry: nested(geometry, i, 'MultiPolygon') }))
+}
+const copyTile = 12 * 2 ** 48 + 7
+assert.deepEqual(decode(true, copyTile), [
+  { id: 4, attrs: [3, 'ab'], slot: 0, geometry: [[square(5, 5, 2)]] },
+  { id: 9, attrs: [4, null], slot: 1, geometry: [[square(1, 1, 1)]] },
 ])
-assert.deepEqual(row.geometry, [[square(5, 5, 2)]])
-assert.deepEqual(row.attrs, [3, 'ab'])
-assert.equal(row.spill.length, 1)
-assert.equal(row.spill[0].tile, 12 * 2 ** 48 + 7)
-assert.equal(row.spill[0].id, 9)
-assert.deepEqual(row.spill[0].geometry, [[square(1, 1, 1)]])
-assert.deepEqual(row.spill[0].attrs, [4, null])
+assert.deepEqual(decode(true, copyTile + 1), [
+  { id: 4, attrs: [3, 'ab'], slot: 0, geometry: [[square(5, 5, 2)]] },
+])
+assert.deepEqual(decode(false, copyTile), [
+  { id: 9, attrs: [4, null], slot: 1, geometry: [[square(1, 1, 1)]] },
+])
+assert.deepEqual(decode(false, copyTile + 1), [])
+assert.deepEqual(
+  decode(true, copyTile, false).map((f) => [f.id, f.attrs, f.geometry]),
+  [
+    [4, [], [[square(5, 5, 2)]]],
+    [9, [], [[square(1, 1, 1)]]],
+  ],
+  'geometry without attributes',
+)
+assert.deepEqual(decodeAttributes(bytes, 'MultiPolygon', fields), [3, 'ab'])
+// a hosted copy's strings trail the row's own
+const named = Uint8Array.from([
+  ...bytes.subarray(0, bytes.length - 2 - 2),
+  ...varint(0b11),
+  ...varint(zz(4)),
+  ...varint(3),
+  ...new TextEncoder().encode('abxyz'),
+])
+assert.deepEqual(decodeAttributes(named, 'MultiPolygon', fields), [3, 'ab'])
+const copy = new GeometryBuilder()
+const copies = []
+decodeSelectedRow(named, 'MultiPolygon', fields, copy, false, 4, copyTile, (...f) => copies.push(f))
+assert.deepEqual(copies, [[9, [4, 'xyz'], 1]])
 console.log('decode tests passed')
 
 // the stored key: a tile is one interval, its parent the union of its four children
@@ -125,7 +165,7 @@ assert.deepEqual(
 console.log('key tests passed')
 
 // Float64 packing stores raw bits, including low mantissa bits above Number’s
-// integer precision. Both the row and direct geometry decoders use this parser.
+// integer precision.
 for (const value of [
   0.1,
   -13.37,
@@ -147,6 +187,6 @@ for (const value of [
   } while (bits)
   const row = Uint8Array.from([0, 0, 1, ...encoded, 0]) // point(0,0), one attr, no copies
   assert.ok(
-    Object.is(decodeRow(row, 'Point', [{ name: 'value', kind: 'float64' }]).attrs[0], value),
+    Object.is(decodeAttributes(row, 'Point', [{ name: 'value', kind: 'float64' }])[0], value),
   )
 }

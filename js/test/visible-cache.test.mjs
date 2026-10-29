@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict'
 import { VisibleTileCache, decodedTileBytes, waitForTile } from '../dist/visible-cache.js'
-import { GeometryBuilder } from '../dist/index.js'
 import { renderDecodedTile } from '../dist/tile.js'
-const builder = new GeometryBuilder()
-builder.add('Point', [0, 0])
+import { columnar } from './columnar.mjs'
 const tile = {
   lod: { geometry_type: 'Point', scale: [1, 1], offset: [0, 0] },
   z: 0,
@@ -11,11 +9,11 @@ const tile = {
   y: 0,
   rows: [7],
   columns: { height: [3] },
-  geometry: builder.finish([1, 1], [0, 0]),
+  geometry: columnar('Point', [[0, 0]]),
 }
 const size = decodedTileBytes(tile)
 assert.ok(
-  size >= builder.x.buffer.byteLength + builder.y.buffer.byteLength,
+  size >= tile.geometry.x.buffer.byteLength + tile.geometry.y.buffer.byteLength,
   'counts full backing stores',
 )
 const cache = new VisibleTileCache(size * 2, 2)

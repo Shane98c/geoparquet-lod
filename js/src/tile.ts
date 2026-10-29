@@ -1,7 +1,7 @@
 import { MVT_BUFFER, MVT_EXTENT, toMvt } from './mvt.js'
 import { geometryColumnFromWkb } from '@cogp/reader'
-import { GeometryBuilder } from './geometry.js'
-import type { Bbox, Lod } from './reader.js'
+import type { LodGeometry } from './geometry.js'
+import type { Bbox, Lod, LodRows } from './reader.js'
 import { decodeTile, type PreparedTile, type TileReader } from './spatial.js'
 import { HALF_WORLD } from './web-mercator.js'
 
@@ -66,15 +66,9 @@ export const renderTile = async (
       { z, x, y, layer, signal },
     )
   }
-  if (reader.readGeometryByTile) {
-    const data = await reader.readGeometryByTile(lod, z, x, y, names, signal)
-    return renderGeometryTile(lod, data, z, x, y, options)
-  }
-  const { rows, coords, columns } = await reader.readLodByTile(lod, z, x, y, names, signal)
-  const builder = new GeometryBuilder()
-  for (let i = 0; i < rows.length; i++) builder.add(lod.geometry_type, coords[i])
-  const geometry = builder.finish(lod.scale, lod.offset)
-  return renderGeometryTile(lod, { rows, columns, geometry }, z, x, y, options)
+  const data = await reader.readLodByTile(lod, z, x, y, names, signal)
+  signal?.throwIfAborted()
+  return renderDecodedTile(normalizeTile(lod, data, z, x, y), options)
 }
 
 export const tileResolution = (z: number, y: number) => {
@@ -89,23 +83,15 @@ export interface DecodedTile {
   y: number
   rows: number[]
   columns: Record<string, unknown[]>
-  geometry: ReturnType<GeometryBuilder['finish']>
+  geometry: LodGeometry
 }
 
 export function decodePreparedTile(task: PreparedTile): DecodedTile {
-  const builder = new GeometryBuilder()
-  const { rows, columns } = decodeTile(
+  const data = decodeTile(
     task,
     task.fields.map((f) => f.name),
-    builder,
   )
-  return normalizeTile(
-    task.lod,
-    { rows, columns, geometry: builder.finish(task.lod.scale, task.lod.offset) },
-    task.z,
-    task.x,
-    task.y,
-  )
+  return normalizeTile(task.lod, data, task.z, task.x, task.y)
 }
 
 export function renderDecodedTile(tile: DecodedTile, options: TileOptions = {}): ArrayBuffer {
@@ -125,26 +111,8 @@ export function renderDecodedTile(tile: DecodedTile, options: TileOptions = {}):
   )
 }
 
-function renderGeometryTile(
-  lod: Lod,
-  data: Awaited<ReturnType<NonNullable<TileReader['readGeometryByTile']>>>,
-  z: number,
-  x: number,
-  y: number,
-  options: TileOptions,
-): ArrayBuffer {
-  options.signal?.throwIfAborted()
-  return renderDecodedTile(normalizeTile(lod, data, z, x, y), options)
-}
-
 /** Point filtering happens once before caching; rendering is read-only. */
-function normalizeTile(
-  lod: Lod,
-  data: Pick<DecodedTile, 'rows' | 'columns' | 'geometry'>,
-  z: number,
-  x: number,
-  y: number,
-): DecodedTile {
+function normalizeTile(lod: Lod, data: LodRows, z: number, x: number, y: number): DecodedTile {
   const bbox = mercatorTileBounds(z, x, y)
   const names = Object.keys(data.columns)
   const pointFamily = lod.geometry_type === 'Point'

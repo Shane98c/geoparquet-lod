@@ -3,14 +3,8 @@ import { readFile } from 'node:fs/promises'
 import { workerClient } from './worker-client.mjs'
 import { VectorTile } from '@mapbox/vector-tile'
 import { PbfReader } from 'pbf'
-import {
-  GeometryBuilder,
-  LodReader,
-  SpatialReader,
-  openReader,
-  coalescing,
-  renderTile,
-} from '../dist/index.js'
+import { LodReader, SpatialReader, openReader, coalescing, renderTile } from '../dist/index.js'
+import { nested } from './columnar.mjs'
 
 const [oldPath, newPath, casesPath] = process.argv.slice(2)
 if (!oldPath) throw new Error('spatial.test.mjs needs source, optimized file, and tile cases')
@@ -34,13 +28,6 @@ assert.ok(fast instanceof SpatialReader)
 assert.deepEqual(fast.bounds, old.bounds)
 assert.deepEqual(fast.scalarColumns(), old.scalarColumns())
 assert.deepEqual(optimized.reads, [[0, 16384]], 'one small open, no footer')
-const nested = new Proxy(fast, {
-  get(target, key) {
-    if (key === 'readGeometryByTile') return undefined
-    const value = Reflect.get(target, key)
-    return typeof value === 'function' ? value.bind(target) : value
-  },
-})
 const footer = await LodReader.open(coalescing(await makeSource(newPath)))
 const canonical = (buffer) => {
   const tile = new VectorTile(new PbfReader(new Uint8Array(buffer)))
@@ -168,34 +155,33 @@ for (const cancelBoth of [false, true]) {
 for (const [i, [z, x, y]] of cases.entries()) {
   const [a, b, c] = await Promise.all([old, fast, footer].map((r) => renderTile(r, z, x, y)))
   assert.deepEqual(canonical(c), canonical(a), `standard reader of relocated pages ${z}/${x}/${y}`)
-  assert.deepEqual(
-    new Uint8Array(b),
-    new Uint8Array(await renderTile(nested, z, x, y)),
-    `direct decoding preserves MVT bytes ${z}/${x}/${y}`,
-  )
   if (expected[i]) {
-    const attrs = fast.lod.attributes.map((a) => a.name)
-    const rows = await fast.readLodByTile(fast.lodForZoom(z), z, x, y, attrs)
-    const direct = await fast.readGeometryByTile(fast.lodForZoom(z), z, x, y, attrs)
-    const builder = new GeometryBuilder()
-    for (const coords of rows.coords) builder.add(fast.lodForZoom(z).geometry_type, coords)
-    const lod = fast.lodForZoom(z)
-    assert.deepEqual(direct.rows, rows.rows)
-    assert.deepEqual(direct.columns, rows.columns)
-    assert.deepEqual(direct.geometry, builder.finish(lod.scale, lod.offset))
-    const unstyled = await fast.readGeometryByTile(lod, z, x, y, [])
-    assert.deepEqual(unstyled.rows, direct.rows)
-    assert.deepEqual(unstyled.geometry, direct.geometry)
-    const actual = rows.rows.map((id, i) => [
-      id,
-      rows.coords[i],
-      Object.fromEntries(attrs.map((a) => [a, rows.columns[a][i]])),
-    ])
     assert.deepEqual(
-      actual.sort((a, b) => a[0] - b[0]),
-      expected[i].sort((a, b) => a[0] - b[0]),
-      `exact directory membership ${z}/${x}/${y}`,
+      new Uint8Array(b),
+      new Uint8Array(c),
+      `the spatial index and the footer give the same MVT bytes ${z}/${x}/${y}`,
     )
+    const attrs = fast.lod.attributes.map((a) => a.name)
+    const lod = fast.lodForZoom(z)
+    const rows = await fast.readLodByTile(lod, z, x, y, attrs)
+    const unstyled = await fast.readLodByTile(lod, z, x, y, [])
+    assert.deepEqual(unstyled.rows, rows.rows)
+    assert.deepEqual(unstyled.geometry, rows.geometry)
+    for (const [reader, data, name] of [
+      [fast, rows, 'directory'],
+      [old, await old.readLodByTile(lod, z, x, y, attrs), 'key interval'],
+    ]) {
+      const actual = data.rows.map((id, i) => [
+        id,
+        nested(data.geometry, i, lod.geometry_type),
+        Object.fromEntries(attrs.map((a) => [a, data.columns[a][i]])),
+      ])
+      assert.deepEqual(
+        actual.sort((a, b) => a[0] - b[0]),
+        [...expected[i]].sort((a, b) => a[0] - b[0]),
+        `exact ${name} membership ${z}/${x}/${y} (${reader.constructor.name})`,
+      )
+    }
   } else {
     assert.deepEqual(canonical(b), canonical(a), `exact geometry fallback ${z}/${x}/${y}`)
   }

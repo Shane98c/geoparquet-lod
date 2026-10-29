@@ -276,16 +276,25 @@ disk space of eight bytes per source row for key verification. The returned
 ### Whole-feature reads
 
 ```js
-import { readFeatures } from 'geoparquet-lod'
+import {
+  openReader,
+  httpSource,
+  readFeatures,
+  batchToGeoJSON,
+  batchToGeoArrow,
+  batchToMvt,
+} from 'geoparquet-lod'
 
-const features = await readFeatures(reader, {
-  bbox: [139.7, 35.6, 139.8, 35.7],
+const reader = await openReader(await httpSource([url]))
+const batch = await readFeatures(reader, {
+  bbox: [-105.1, 39.6, -104.9, 39.8],
   resolution: 360 / (512 * 2 ** 12), // longitude degrees per pixel
-  columns: ['height', 'version'],
-  geometry: 'overview',
+  columns: ['details.height'],
+  geometry: 'overview', // or 'primary' for original WKB and source attributes
 })
-// features.coords are whole quantized geometries; offset + scale * [x, y] is EPSG:3857 metres.
-// geometry: 'primary' instead returns original WKB and original source values.
+const features = batchToGeoJSON(batch)
+const arrowIPC = batchToGeoArrow(batch, { crs: 'OGC:CRS84' })
+const mvt = batchToMvt(batch, { z: 12, x: 852, y: 1555 })
 ```
 
 Overview queries return bbox-overlapping, deduplicated features and retain LOD
@@ -293,7 +302,28 @@ thinning. They do not perform exact intersection tests. The query enumerates
 the intersecting tiles, up to 256 by default; see the `maxTiles` option.
 Carried display attributes take precedence in overview queries; other columns
 are projected from the source by row id. Primary queries return original source
-attributes.
+attributes. Sparse zoom profiles select the first declared zoom at least as
+detailed as the requested resolution, clamped at the finest profile; queries
+enumerate tiles at that same declared zoom so boundary copies match.
+
+The result is a renderer-neutral batch with `geometry`, `rowIndex`, `columns`
+and `source`. Geometry uses typed x/y buffers and
+feature→polygon→ring/line→vertex offsets, with coordinates
+`offset + scale * [x, y]`. Overview coordinates remain quantized `Int32Array`
+in EPSG:3857 metres, marked by `geometry.crs`; primary WKB becomes
+`Float64Array` in longitude/latitude and retains supported Z coordinates.
+`batchInDegrees` converts an overview batch to longitude/latitude. Overview
+batches may be thinned and simplified.
+
+GeoJSON is an optional object adapter for small results; attribute values retain
+their decoded JS types, so BigInt needs conversion before JSON serialization.
+GeoArrow produces an Arrow IPC stream through the `@cogp/reader` converter. Both
+adapters return longitude/latitude; GeoArrow dequantizes coordinates, uses a GeoArrow multi geometry family, and preserves
+scalar attribute types where supported; nested and mixed attributes become
+display strings. Mixed geometry families cannot be written in one GeoArrow
+geometry column. `batchToMvt` clips the same buffers to one tile, defaults to
+layer `shapes`, and uses the same MVT encoder and property semantics as
+`renderTile`, which remains the optimized tile-serving path.
 
 ### Nested source attributes
 
@@ -318,61 +348,17 @@ pages of the selected collection leaves in each selected row group, so values
 crossing page boundaries reconstruct correctly; it materializes full
 collections before extracting one index or key and is not cached. Explicit
 physical Parquet collection leaf names such as `nums.list.element` return their
-low-level wrapped values. The same logical paths work in `readFeatures` and
-`readGeometryBatch` `columns`.
+low-level wrapped values. The same logical paths work in `readFeatures`
+`columns`.
 
-### Renderer-neutral geometry batches
-
-```js
-import {
-  openReader,
-  httpSource,
-  readGeometryBatch,
-  batchToGeoJSON,
-  batchToGeoArrow,
-  batchToMvt,
-} from 'geoparquet-lod'
-
-const reader = await openReader(await httpSource([url]))
-const batch = await readGeometryBatch(reader, {
-  bbox: [-105.1, 39.6, -104.9, 39.8],
-  resolution: 360 / (512 * 2 ** 12),
-  columns: ['details.height'],
-  geometry: 'overview', // or 'primary' for original WKB/source attributes
-})
-const features = batchToGeoJSON(batch)
-const arrowIPC = batchToGeoArrow(batch, { crs: 'OGC:CRS84' })
-const mvt = batchToMvt(batch, { z: 12, x: 852, y: 1555 })
-```
-
-`toGeometryBatch(await readFeatures(reader, query))` normalizes a
-`readFeatures` result without another read. The batch exposes `geometry`,
-`rowIndex`, `columns` and `source`. Geometry uses typed x/y buffers and
-feature→polygon→ring/line→vertex offsets, with coordinates
-`offset + scale * [x, y]`. Overview coordinates remain quantized `Int32Array`
-in EPSG:3857 metres, marked by `geometry.crs`; primary WKB becomes
-`Float64Array` in longitude/latitude and retains supported Z coordinates.
-`batchInDegrees` converts an overview batch to longitude/latitude. Overview batches may be thinned and simplified. Sparse zoom
-profiles select the first declared zoom at least as detailed as the requested
-resolution, clamped at the finest profile; queries enumerate tiles at that same
-declared zoom so boundary copies match.
-
-GeoJSON is an optional object adapter for small results; attribute values retain
-their decoded JS types, so BigInt needs conversion before JSON serialization.
-GeoArrow produces an Arrow IPC stream through the `@cogp/reader` converter. Both
-adapters return longitude/latitude; GeoArrow dequantizes coordinates, uses a GeoArrow multi geometry family, and preserves
-scalar attribute types where supported; nested and mixed attributes become
-display strings. Mixed geometry families cannot be written in one GeoArrow
-geometry column. `batchToMvt` clips the same buffers to one tile, defaults to
-layer `shapes`, and uses the same MVT encoder and property semantics as
-`renderTile`, which remains the optimized tile-serving path.
+### deck.gl example
 
 A second renderer is hosted at
 <https://geoparquet-lod-compare.pages.dev/deck/> and runnable locally at
 `http://localhost:8091/demo/deck/index.html?url=/buildings.lod.parquet` after
 `npm --prefix js run demo`. `demo/deck/main.js` bundles deck.gl 9.1 with the
 GeoArrow deck.gl layers under a `TileLayer`: each tile reads its extent as a
-geometry batch at the tile's zoom, converts it to a GeoArrow table, and
+`readFeatures` batch at the tile's zoom, converts it to a GeoArrow table, and
 renders through `GeoArrowPolygonLayer` (or the path and scatterplot layers
 for lines and points), so coordinates move from Arrow buffers into GPU
 attributes without per-feature objects. The tile layer keeps loaded tiles and

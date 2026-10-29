@@ -5,7 +5,7 @@ import { DEFAULT_PARSERS } from 'hyparquet/src/convert.js'
 import { getSchemaPath } from 'hyparquet/src/schema.js'
 import { parquetMetadata } from 'hyparquet'
 import { compressors } from './compressors.js'
-import { attributeKind, decodeRow, decodeSelectedRow, type AttributeField } from './decode.js'
+import { attributeKind, decodeSelectedRow, type AttributeField } from './decode.js'
 import { visitPlainPage } from './pages.js'
 import { GeometryBuilder } from './geometry.js'
 import { tileInterval } from './key.js'
@@ -89,7 +89,7 @@ export type TileReader = Pick<
   | 'readPrimary'
   | 'readRow'
   | 'readColumns'
-> & { readGeometryByTile?: SpatialReader['readGeometryByTile'] }
+>
 
 export async function openReader(file: RangeSource): Promise<TileReader> {
   const head = await file.slice(0, Math.min(BOOTSTRAP_BYTES, file.byteLength))
@@ -329,19 +329,6 @@ export class SpatialReader implements TileReader {
     return Promise.all(pages.map((p) => wanted.get(p[2])!))
   }
 
-  async readGeometryByTile(
-    lod: Lod,
-    z: number,
-    x: number,
-    y: number,
-    attributes: string[] = [],
-    signal?: AbortSignal,
-  ) {
-    const builder = new GeometryBuilder()
-    const { rows, columns } = await this.readTile(lod, z, x, y, attributes, signal, builder)
-    return { rows, columns, geometry: builder.finish(lod.scale, lod.offset) }
-  }
-
   async readLodByTile(
     lod: Lod,
     z: number,
@@ -350,7 +337,12 @@ export class SpatialReader implements TileReader {
     attributes: string[] = [],
     signal?: AbortSignal,
   ): Promise<LodRows> {
-    return this.readTile(lod, z, x, y, attributes, signal)
+    const carried = attributes.filter((a) => this.lod.attributes.some((f) => f.name === a))
+    const source = attributes.filter((a) => !carried.includes(a))
+    const prepared = await this.prepareTile(lod, z, x, y, signal)
+    const out = decodeTile(prepared, carried, signal)
+    if (source.length) Object.assign(out.columns, await this.readColumns(out.rows, source, signal))
+    return out
   }
 
   async prepareTile(
@@ -408,23 +400,6 @@ export class SpatialReader implements TileReader {
       payloads,
     }
   }
-
-  private async readTile(
-    lod: Lod,
-    z: number,
-    x: number,
-    y: number,
-    attributes: string[] = [],
-    signal?: AbortSignal,
-    builder?: GeometryBuilder,
-  ): Promise<LodRows> {
-    const carried = attributes.filter((a) => this.lod.attributes.some((f) => f.name === a))
-    const source = attributes.filter((a) => !carried.includes(a))
-    const prepared = await this.prepareTile(lod, z, x, y, signal)
-    const out = decodeTile(prepared, carried, builder, signal)
-    if (source.length) Object.assign(out.columns, await this.readColumns(out.rows, source, signal))
-    return out
-  }
 }
 
 export interface PreparedTile {
@@ -446,7 +421,6 @@ export interface PreparedTile {
 export function decodeTile(
   task: PreparedTile,
   attributes: string[],
-  builder?: GeometryBuilder,
   signal?: AbortSignal,
 ): LodRows {
   signal?.throwIfAborted()
@@ -454,11 +428,9 @@ export function decodeTile(
   const wanted = attributes.map((a) => fields.findIndex((f) => f.name === a))
   for (const [i, name] of attributes.entries())
     if (wanted[i] < 0) throw new Error(`attribute ${name} is not carried`)
-  const out: LodRows = {
-    rows: [],
-    coords: [],
-    columns: Object.fromEntries(attributes.map((a) => [a, []])),
-  }
+  const rows: number[] = []
+  const columns: Record<string, unknown[]> = Object.fromEntries(attributes.map((a) => [a, []]))
+  const builder = new GeometryBuilder()
   const element = { name: lod.name, type: 'BYTE_ARRAY', repetition_type: 'OPTIONAL' }
   const decoder = {
     type: 'BYTE_ARRAY',
@@ -478,13 +450,9 @@ export function decodeTile(
     utf8: false,
   }
   const tile = z * 2 ** 48 + x * 2 ** z + y
-  const addColumnar = (id: number, attrs: unknown[]) => {
-    out.rows.push(id)
-    attributes.forEach((a, i) => out.columns[a].push(attrs[wanted[i]]))
-  }
-  const add = (id: number, geometry: unknown, attrs: unknown[]) => {
-    out.coords.push(geometry)
-    addColumnar(id, attrs)
+  const add = (id: number, attrs: unknown[]) => {
+    rows.push(id)
+    attributes.forEach((a, i) => columns[a].push(attrs[wanted[i]]))
   }
   for (let i = 0; i < pages.length; i++) {
     const page = pages[i]
@@ -495,25 +463,17 @@ export function decodeTile(
       const cell = page[6][fence]
       const own = cell >= firstCell && cell < endCell
       if (!own && row !== hostRow) return
-      if (builder) {
-        decodeSelectedRow(
-          value,
-          lod.geometry_type,
-          fields,
-          builder,
-          own,
-          row,
-          tile,
-          addColumnar,
-          wanted.some((i) => i >= 0),
-        )
-      } else {
-        const decoded = decodeRow(value, lod.geometry_type, fields)
-        if (own && (lod.geometry_type === 'Point' || (decoded.geometry as unknown[]).length))
-          add(row, decoded.geometry, decoded.attrs)
-        for (const copy of decoded.spill)
-          if (copy.tile === tile) add(copy.id, copy.geometry, copy.attrs)
-      }
+      decodeSelectedRow(
+        value,
+        lod.geometry_type,
+        fields,
+        builder,
+        own,
+        row,
+        tile,
+        add,
+        wanted.length > 0,
+      )
     }
     if (visitPlainPage(payloads[i], codec, page[5], visit)) continue
     const { data } = readColumn(
@@ -529,5 +489,5 @@ export function decodeTile(
         row++
       }
   }
-  return out
+  return { rows, columns, geometry: builder.finish(lod.scale, lod.offset) }
 }

@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { LodReader, coalescing, renderTile } from '../dist/index.js'
+import { nested } from './columnar.mjs'
 
 const [path, casesPath] = process.argv.slice(2)
 if (!path) {
@@ -19,10 +20,10 @@ const cases = JSON.parse(await readFile(casesPath, 'utf8'))
 let copies = 0
 for (const { z, x, y, id, attribute = 'h' } of cases) {
   const lod = reader.lodForZoom(z)
-  const { rows, coords, columns } = await reader.readLodByTile(lod, z, x, y, [attribute])
+  const { rows, columns, geometry } = await reader.readLodByTile(lod, z, x, y, [attribute])
   const at = rows.indexOf(id)
   assert.ok(at >= 0, `row ${id} reaches tile ${z}/${x}/${y} but was not read`)
-  assert.ok(Array.isArray(coords[at]) && coords[at].length, 'the copy carries geometry')
+  assert.ok(nested(geometry, at, lod.geometry_type).length, 'the copy carries geometry')
   assert.ok(columns[attribute][at] !== undefined, 'the copy carries its attributes')
   if (attribute === 'zone') assert.match(columns[attribute][at], /^zone\d$/)
   copies++

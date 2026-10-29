@@ -15,9 +15,14 @@ import { readColumn } from 'hyparquet/src/column.js'
 import { DEFAULT_PARSERS } from 'hyparquet/src/convert.js'
 import { isListLike, isMapLike, getSchemaPath } from 'hyparquet/src/schema.js'
 import { compressors } from './compressors.js'
-import { attributeKind, decodeRow, type AttributeField } from './decode.js'
+import {
+  attributeKind,
+  decodeAttributes,
+  decodeSelectedRow,
+  type AttributeField,
+} from './decode.js'
 import { decodeProjection, type ProjectionExecutor, type ProjectionTask } from './projection.js'
-import type { GeometryType } from './geometry.js'
+import { GeometryBuilder, type GeometryType, type LodGeometry } from './geometry.js'
 import { tileInterval, type Interval } from './key.js'
 
 export type Bbox = [number, number, number, number]
@@ -72,12 +77,13 @@ export interface PageLocation {
   byteEnd: number
 }
 
-/** Rows shown at one LOD inside a bbox: decoded geometry and attributes by name. */
+/** Rows shown at one LOD in a tile: columnar geometry and attributes by name. */
 export interface LodRows {
-  /** Global row index of each value, so a feature can be addressed later. */
+  /** Global row index of each feature, so a feature can be addressed later. */
   rows: number[]
-  coords: unknown[]
   columns: Record<string, unknown[]>
+  /** One feature per row index, on the LOD's grid. */
+  geometry: LodGeometry
 }
 
 /** Rows for a tile finer than any LOD: exact WKB plus attributes from the finest LOD. */
@@ -277,11 +283,8 @@ export class LodReader {
   ): Promise<LodRows> {
     const key = this.lod.key
     if (!key) throw new Error('file has no stored key column')
-    const out: LodRows = {
-      rows: [],
-      coords: [],
-      columns: Object.fromEntries(attributes.map((a) => [a, []])),
-    }
+    const rows: number[] = []
+    const columns: Record<string, unknown[]> = Object.fromEntries(attributes.map((a) => [a, []]))
     const interval = tileInterval(key.depth, z, x, y)
     const [start, end] = interval
     const stats = (g: number) => {
@@ -331,28 +334,32 @@ export class LodReader {
         return { g, values, keys }
       }),
     )
+    const builder = new GeometryBuilder()
+    const add = (id: number, attrs: unknown[]) => {
+      rows.push(id)
+      attributes.forEach((a, i) => columns[a].push(attrs[wanted[i]]))
+    }
+    const carried = wanted.some((i) => i >= 0)
     for (const { g, values, keys } of perGroup) {
       const rowStart = this.rowGroupStarts[g]
       for (const [row, raw] of values) {
-        const decoded = decodeRow(raw as Uint8Array, lod.geometry_type, this.fields)
-        const own = decoded.geometry as unknown[]
-        if (
-          Number(keys.get(row)) >= start &&
-          Number(keys.get(row)) < end &&
-          (lod.geometry_type === 'Point' || own.length)
-        ) {
-          out.rows.push(rowStart + row)
-          out.coords.push(decoded.geometry)
-          attributes.forEach((a, i) => out.columns[a].push(decoded.attrs[wanted[i]]))
-        }
-        for (const copy of decoded.spill) {
-          if (copy.tile !== tile) continue
-          out.rows.push(copy.id)
-          out.coords.push(copy.geometry)
-          attributes.forEach((a, i) => out.columns[a].push(copy.attrs[wanted[i]]))
-        }
+        const k = Number(keys.get(row))
+        const own = k >= start && k < end
+        const id = rowStart + row
+        decodeSelectedRow(
+          raw as Uint8Array,
+          lod.geometry_type,
+          this.fields,
+          builder,
+          own,
+          id,
+          tile,
+          add,
+          carried,
+        )
       }
     }
+    const out = { rows, columns, geometry: builder.finish(lod.scale, lod.offset) }
     await this.hydrateColumns(out, attributes, signal)
     return out
   }
@@ -519,7 +526,9 @@ export class LodReader {
           if (!attributes.length) continue
           const raw = packed.get(row)
           const attrs =
-            raw instanceof Uint8Array ? decodeRow(raw, finest.geometry_type, this.fields).attrs : []
+            raw instanceof Uint8Array
+              ? decodeAttributes(raw, finest.geometry_type, this.fields)
+              : []
           attributes.forEach((name, i) => out.columns[name].push(attrs[wanted[i]] ?? null))
         }
       }
