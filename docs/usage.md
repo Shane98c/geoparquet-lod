@@ -194,9 +194,9 @@ from the usual AWS chain); the output is a local path. `metadata=` adds
 key-value metadata to the file. `write()` builds the overviews, then the tile-aligned pages and
 spatial directory, in one call; `lod_page_bytes` (`--lod-page-bytes`) sets the
 overview page target, 64 KiB by default. Writing a 155.6 million building
-national file (OCR's buildings, two carried attributes) took 51 minutes on a
+national file (OCR's buildings, two carried attributes) took 43 minutes on a
 64 GB laptop with `workers=6` and `memory_limit='16GB'`; the main process
-peaked at 34 GB while the thinnings ran, and the build needs free disk of
+peaked at 41 GB, and the build needs free disk of
 about twice the output for its intermediate files. The main process sorts,
 thins and writes; worker processes quantize and pack the overviews, each row
 group split evenly among them in runs of at most 65,536 rows. Workers each

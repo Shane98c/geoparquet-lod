@@ -34,20 +34,20 @@
       "opening": {
         "bytes": 16384,
         "requests": 1,
-        "ms": 11.681750000000001
+        "ms": 12.441834
       },
       "cold": {
-        "bytes": 648373,
+        "bytes": 623663,
         "requests": 2,
-        "ms": 60.097166,
-        "features": 93814,
-        "outputBytes": 2221176
+        "ms": 73.39529100000004,
+        "features": 93801,
+        "outputBytes": 2220876
       },
       "next": {
-        "bytes": 16632,
+        "bytes": 16052,
         "requests": 1,
-        "ms": 4.183042,
-        "features": 2597
+        "ms": 3.256791999999905,
+        "features": 2591
       }
     },
     {
@@ -106,20 +106,20 @@
       "opening": {
         "bytes": 16384,
         "requests": 1,
-        "ms": 0.8367080000000158
+        "ms": 3.6095410000000356
       },
       "cold": {
-        "bytes": 335494,
+        "bytes": 274054,
         "requests": 2,
-        "ms": 24.95683299999999,
-        "features": 24144,
-        "outputBytes": 627299
+        "ms": 31.95049999999992,
+        "features": 23371,
+        "outputBytes": 607826
       },
       "next": {
-        "bytes": 172540,
+        "bytes": 152482,
         "requests": 1,
-        "ms": 10.170040999999998,
-        "features": 13645
+        "ms": 11.912291000000096,
+        "features": 13228
       }
     },
     {
@@ -178,20 +178,20 @@
       "opening": {
         "bytes": 16384,
         "requests": 1,
-        "ms": 0.6025419999999997
+        "ms": 3.1028329999999187
       },
       "cold": {
-        "bytes": 396826,
+        "bytes": 328860,
         "requests": 2,
-        "ms": 19.348292000000015,
-        "features": 29378,
-        "outputBytes": 767701
+        "ms": 27.86762499999986,
+        "features": 28334,
+        "outputBytes": 741091
       },
       "next": {
-        "bytes": 364003,
-        "requests": 2,
-        "ms": 18.258834000000007,
-        "features": 28710
+        "bytes": 291496,
+        "requests": 1,
+        "ms": 21.701583000000028,
+        "features": 27537
       }
     },
     {
@@ -250,20 +250,20 @@
       "opening": {
         "bytes": 16384,
         "requests": 1,
-        "ms": 0.47979100000000585
+        "ms": 1.4819170000000668
       },
       "cold": {
-        "bytes": 376034,
+        "bytes": 305413,
         "requests": 2,
-        "ms": 18.381207999999987,
-        "features": 29915,
-        "outputBytes": 771575
+        "ms": 23.555750000000444,
+        "features": 28630,
+        "outputBytes": 739349
       },
       "next": {
-        "bytes": 265404,
+        "bytes": 233083,
         "requests": 1,
-        "ms": 12.512583000000006,
-        "features": 20999
+        "ms": 11.942332999999962,
+        "features": 20397
       }
     },
     {
@@ -322,20 +322,20 @@
       "opening": {
         "bytes": 16384,
         "requests": 1,
-        "ms": 0.7653329999999983
+        "ms": 3.0115829999995185
       },
       "cold": {
-        "bytes": 83082,
+        "bytes": 50910,
         "requests": 2,
-        "ms": 5.557708000000019,
-        "features": 4967,
-        "outputBytes": 123886
+        "ms": 25.373499999999694,
+        "features": 4689,
+        "outputBytes": 117025
       },
       "next": {
-        "bytes": 92570,
+        "bytes": 80876,
         "requests": 1,
-        "ms": 4.949542000000008,
-        "features": 8968
+        "ms": 11.50512499999968,
+        "features": 8731
       }
     },
     {
@@ -394,20 +394,20 @@
       "opening": {
         "bytes": 16384,
         "requests": 1,
-        "ms": 0.3628750000000025
+        "ms": 2.6267500000003565
       },
       "cold": {
-        "bytes": 38288,
+        "bytes": 11016,
         "requests": 2,
-        "ms": 1.2079169999999806,
-        "features": 229,
-        "outputBytes": 7188
+        "ms": 8.031582999999955,
+        "features": 206,
+        "outputBytes": 6629
       },
       "next": {
-        "bytes": 24769,
+        "bytes": 20920,
         "requests": 1,
-        "ms": 1.118832999999995,
-        "features": 1595
+        "ms": 4.929500000000189,
+        "features": 1531
       }
     },
     {
@@ -466,20 +466,20 @@
       "opening": {
         "bytes": 16384,
         "requests": 1,
-        "ms": 0.24370900000002393
+        "ms": 3.0693329999994603
       },
       "cold": {
-        "bytes": 66954,
+        "bytes": 30640,
         "requests": 2,
-        "ms": 1.8529589999999985,
-        "features": 1356,
-        "outputBytes": 37062
+        "ms": 10.087541999999303,
+        "features": 1261,
+        "outputBytes": 34773
       },
       "next": {
-        "bytes": 43095,
+        "bytes": 36830,
         "requests": 1,
-        "ms": 1.8082910000000538,
-        "features": 2397
+        "ms": 6.5335419999992155,
+        "features": 2282
       }
     },
     {
@@ -542,20 +542,20 @@
       "opening": {
         "bytes": 16384,
         "requests": 1,
-        "ms": 11.681750000000001
+        "ms": 12.441834
       },
       "cold": {
-        "bytes": 648373,
+        "bytes": 623663,
         "requests": 2,
-        "ms": 60.097166,
-        "features": 93814,
-        "outputBytes": 2221176
+        "ms": 73.39529100000004,
+        "features": 93801,
+        "outputBytes": 2220876
       },
       "next": {
-        "bytes": 16632,
+        "bytes": 16052,
         "requests": 1,
-        "ms": 4.183042,
-        "features": 2597
+        "ms": 3.256791999999905,
+        "features": 2591
       }
     },
     {
@@ -617,20 +617,20 @@
       "opening": {
         "bytes": 16384,
         "requests": 1,
-        "ms": 0.8367080000000158
+        "ms": 3.6095410000000356
       },
       "cold": {
-        "bytes": 335494,
+        "bytes": 274054,
         "requests": 2,
-        "ms": 24.95683299999999,
-        "features": 24144,
-        "outputBytes": 627299
+        "ms": 31.95049999999992,
+        "features": 23371,
+        "outputBytes": 607826
       },
       "next": {
-        "bytes": 172540,
+        "bytes": 152482,
         "requests": 1,
-        "ms": 10.170040999999998,
-        "features": 13645
+        "ms": 11.912291000000096,
+        "features": 13228
       }
     },
     {
@@ -692,20 +692,20 @@
       "opening": {
         "bytes": 16384,
         "requests": 1,
-        "ms": 0.6025419999999997
+        "ms": 3.1028329999999187
       },
       "cold": {
-        "bytes": 396826,
+        "bytes": 328860,
         "requests": 2,
-        "ms": 19.348292000000015,
-        "features": 29378,
-        "outputBytes": 767701
+        "ms": 27.86762499999986,
+        "features": 28334,
+        "outputBytes": 741091
       },
       "next": {
-        "bytes": 364003,
-        "requests": 2,
-        "ms": 18.258834000000007,
-        "features": 28710
+        "bytes": 291496,
+        "requests": 1,
+        "ms": 21.701583000000028,
+        "features": 27537
       }
     },
     {
@@ -767,20 +767,20 @@
       "opening": {
         "bytes": 16384,
         "requests": 1,
-        "ms": 0.47979100000000585
+        "ms": 1.4819170000000668
       },
       "cold": {
-        "bytes": 376034,
+        "bytes": 305413,
         "requests": 2,
-        "ms": 18.381207999999987,
-        "features": 29915,
-        "outputBytes": 771575
+        "ms": 23.555750000000444,
+        "features": 28630,
+        "outputBytes": 739349
       },
       "next": {
-        "bytes": 265404,
+        "bytes": 233083,
         "requests": 1,
-        "ms": 12.512583000000006,
-        "features": 20999
+        "ms": 11.942332999999962,
+        "features": 20397
       }
     },
     {
@@ -842,20 +842,20 @@
       "opening": {
         "bytes": 16384,
         "requests": 1,
-        "ms": 0.7653329999999983
+        "ms": 3.0115829999995185
       },
       "cold": {
-        "bytes": 83082,
+        "bytes": 50910,
         "requests": 2,
-        "ms": 5.557708000000019,
-        "features": 4967,
-        "outputBytes": 123886
+        "ms": 25.373499999999694,
+        "features": 4689,
+        "outputBytes": 117025
       },
       "next": {
-        "bytes": 92570,
+        "bytes": 80876,
         "requests": 1,
-        "ms": 4.949542000000008,
-        "features": 8968
+        "ms": 11.50512499999968,
+        "features": 8731
       }
     },
     {
@@ -917,20 +917,20 @@
       "opening": {
         "bytes": 16384,
         "requests": 1,
-        "ms": 0.3628750000000025
+        "ms": 2.6267500000003565
       },
       "cold": {
-        "bytes": 38288,
+        "bytes": 11016,
         "requests": 2,
-        "ms": 1.2079169999999806,
-        "features": 229,
-        "outputBytes": 7188
+        "ms": 8.031582999999955,
+        "features": 206,
+        "outputBytes": 6629
       },
       "next": {
-        "bytes": 24769,
+        "bytes": 20920,
         "requests": 1,
-        "ms": 1.118832999999995,
-        "features": 1595
+        "ms": 4.929500000000189,
+        "features": 1531
       }
     },
     {
@@ -992,20 +992,20 @@
       "opening": {
         "bytes": 16384,
         "requests": 1,
-        "ms": 0.24370900000002393
+        "ms": 3.0693329999994603
       },
       "cold": {
-        "bytes": 66954,
+        "bytes": 30640,
         "requests": 2,
-        "ms": 1.8529589999999985,
-        "features": 1356,
-        "outputBytes": 37062
+        "ms": 10.087541999999303,
+        "features": 1261,
+        "outputBytes": 34773
       },
       "next": {
-        "bytes": 43095,
+        "bytes": 36830,
         "requests": 1,
-        "ms": 1.8082910000000538,
-        "features": 2397
+        "ms": 6.5335419999992155,
+        "features": 2282
       }
     },
     {

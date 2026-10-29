@@ -12,7 +12,7 @@ The overview policy applies `drop_smallest` followed by `tiny_polygons`, with
 height and class carried for styling. It uses one Hilbert order, full detail
 from z14 in one LOD serving z14 and z15, which a map overzooms past, 16 KiB
 staging pages and 64 KiB final overview pages. The indexed file is
-**6.59 GB**, compared with **4.84 GB** for the analytical source and
+**6.32 GB**, compared with **4.84 GB** for the analytical source and
 **1.30 GB** for PMTiles. These totals represent different capabilities.
 
 Estimated-byte thinning budgets were calibrated against PMTiles feature counts:
@@ -23,25 +23,29 @@ selection rather than reproduce Tippecanoe's compressed-tile feedback algorithm.
 
 ## Display density
 
-The profiler compares matching XYZ tiles, with no properties requested from
-our reader. Counts include tile-boundary copies. Calibration uses eight
-locations across Japan. Validation uses separate tiles around Hiroshima,
-Sendai, Kyoto, Naha, Narita and rural Niigata; coarse tiles shared with
-calibration are excluded, leaving four validation tiles at z8.
+The profiler compares matching XYZ tiles, with no properties requested from our
+reader. Counts include tile-boundary copies, which the two archives draw
+differently: a GeoParquet tile carries neighbouring features within two pixels
+of its edge, a PMTiles tile within tippecanoe's default buffer of ten.
+Calibration uses eight locations across Japan. Validation uses separate tiles
+around Hiroshima, Sendai, Kyoto, Naha, Narita and rural Niigata; coarse tiles
+shared with calibration are excluded, leaving four validation tiles at z8.
 
 | Sample      | Zoom | GeoParquet features | PMTiles features | Difference |
 | ----------- | ---: | ------------------: | ---------------: | ---------: |
-| Calibration |    8 |             242,531 |          249,738 |     -2.89% |
-| Calibration |   11 |              88,212 |           89,253 |     -1.17% |
-| Calibration |   12 |             139,020 |          138,574 |     +0.32% |
-| Validation  |    8 |              37,895 |           39,060 |     -2.98% |
-| Validation  |   11 |              44,301 |           44,244 |     +0.13% |
-| Validation  |   12 |              67,757 |           67,332 |     +0.63% |
+| Calibration |    8 |             242,477 |          249,738 |     -2.91% |
+| Calibration |   11 |              85,050 |           89,253 |     -4.71% |
+| Calibration |   12 |             133,715 |          138,574 |     -3.51% |
+| Validation  |    8 |              37,889 |           39,060 |     -3.00% |
+| Validation  |   11 |              43,254 |           44,244 |     -2.24% |
+| Validation  |   12 |              65,245 |           67,332 |     -3.10% |
 
-These aggregate counts do not guarantee identical feature selection or visual
-coverage. At z8, Chiba and Sapporo have about 12% fewer features than PMTiles.
-The raw profiles also record summed polygon area and interior polygon area
-quantiles; summed area is not raster union coverage.
+Counting only features wholly inside each tile, GeoParquet has 1.4% to 2.2%
+more than PMTiles in every row. These aggregate counts do not guarantee
+identical feature selection or visual coverage. At z8, Chiba and Sapporo have
+about 12% fewer features than PMTiles in all, but 1.2% and 1.4% more inside the
+tile. The raw profiles also record summed polygon area and interior polygon
+area quantiles; summed area is not raster union coverage.
 
 ## Map transfer
 
@@ -51,15 +55,16 @@ simulated latency; elapsed times are not a CDN performance benchmark.
 
 | Tokyo tile | GeoParquet bytes | PMTiles bytes | Requests, each |
 | ---------- | ---------------: | ------------: | -------------: |
-| z8         |          648,373 |       499,425 |              2 |
-| z11        |          335,494 |       306,211 |              2 |
-| z12        |          396,826 |       363,153 |              2 |
+| z8         |          623,663 |       499,425 |              2 |
+| z11        |          274,054 |       306,211 |              2 |
+| z12        |          328,860 |       363,153 |              2 |
 
-This demonstrates matching request counts and nearby transfer sizes for these
-tiles, with remaining byte overhead. The z12 result illustrates that matching
-feature counts does not automatically match transferred bytes: page layout,
-geometry encoding and feature selection also matter. These tile measurements
-do not establish equal whole-session performance across datasets or devices.
+Request counts match. At z11 and z12 GeoParquet transfers 10% and 9% fewer
+bytes than PMTiles. Its tiles hold 4% and 3% fewer features, all of them
+boundary copies; inside the tile it has 2% more. At z8 it transfers 25% more
+bytes, with 1% more features inside the tile: there, page layout and geometry
+encoding cost more than PMTiles' pre-cut tiles. These tile measurements do not
+establish equal whole-session performance across datasets or devices.
 
 The [hosted demo](hosted-comparison.md) serves this build; the
 [four-reader comparison](comparison.md) measures it beside COGP, PMTiles and
