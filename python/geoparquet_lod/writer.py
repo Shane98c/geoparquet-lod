@@ -1013,8 +1013,10 @@ def _write_unindexed(
 
     # 5. write every row in Hilbert order
     writer = pq.ParquetWriter(out, schema, **options)
-    # workers keep the largest batch they rendered; recycling them bounds the pool's memory
-    pool = ProcessPoolExecutor(max_workers=workers, max_tasks_per_child=16)
+    # Workers stay for the whole build, each holding about the largest job it has run;
+    # with max_tasks_per_child, a pool fed in bursts can stop replacing the workers that
+    # exit, leaving jobs that never run.
+    pool = ProcessPoolExecutor(max_workers=workers)
 
     # the straddlers' copies, rendered once per LOD, and their attributes
     spill_store: dict[str, tuple] = {}
