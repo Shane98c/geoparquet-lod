@@ -598,6 +598,31 @@ def test_covering_geometry_and_key_columns_are_checked(indexed, tmp_path, mutati
 
 
 @pytest.mark.parametrize(
+    'kind, message',
+    [
+        ('halffloat', None),
+        ('large_string', None),
+        ('date32', 'attribute id: type "date32" is not an integer, float, bool or string type'),
+        ('decimal', 'attribute id: type "decimal" is not an integer, float, bool or string type'),
+        (None, 'attribute id: type null is not an integer, float, bool or string type'),
+    ],
+)
+def test_carried_attribute_types_are_checked(indexed, tmp_path, kind, message):
+    """A carried attribute declares the Arrow name of a type the packer writes."""
+
+    def change(table, geo):
+        geo['lod_columns']['attributes'] = [{'name': 'id', 'type': kind}]
+        return table
+
+    bad = _rewritten(indexed, tmp_path / 'attributes.parquet', change)
+    if message is None:
+        validate(bad, full=True)
+        return
+    with pytest.raises(ValidationError, match=re.escape(message)):
+        validate(bad, sample_rows=0)
+
+
+@pytest.mark.parametrize(
     'mutation, message',
     [
         ('covering', 'null bbox covering on a non-empty geometry'),

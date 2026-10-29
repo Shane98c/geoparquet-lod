@@ -14,10 +14,10 @@ varints knowing the structure and then takes string payloads in turn.
                lines: n parts, per part: vertices, deltas
                point: zigzag(x) zigzag(y)
     attrs   := presence bitmap (one varint, bit i for attribute i), then each
-               present value: integers zigzag, float32 as its bit pattern,
-               float64 as its bit pattern, bool 0/1, string as its byte length,
-               or for a string attribute with a `values` table in the
-               metadata the value's index in that table
+               present value: integers zigzag, float16, float32 and float64 as
+               their bit patterns, bool 0/1, string as its byte length, or for
+               a string attribute with a `values` table in the metadata the
+               value's index in that table
     spill   := count, per copy: tile (zoom << 48 | x * 2^zoom + y), file row
                index, own, attrs
 
@@ -149,6 +149,25 @@ def _point_values(x: np.ndarray, y: np.ndarray):
     return out, np.full(len(x), 2, np.int64)
 
 
+def cast_carried(array: pa.Array, field: pa.Field) -> pa.Array:
+    """`array` as the type carried attribute `field` declares. A finite number
+    too large for a float type, which casting would make infinite, is refused."""
+    if array.type == field.type:
+        return array
+    out = array.cast(field.type)
+    numeric = pa.types.is_integer(array.type) or pa.types.is_floating(array.type)
+    if pa.types.is_floating(field.type) and numeric:
+        cast = out.to_numpy(zero_copy_only=False)
+        finite = np.isfinite(array.to_numpy(zero_copy_only=False).astype(np.float64))
+        lost = np.flatnonzero(finite & ~np.isfinite(cast))
+        if len(lost):
+            raise ValueError(
+                f'cannot pack {field.name} value {array[int(lost[0])].as_py()}: a carried '
+                f'{field.type} is at most {float(np.finfo(cast.dtype).max):g} in magnitude'
+            )
+    return out
+
+
 def _attr_values(fields: list[pa.Field], arrays: dict[str, pa.Array], n: int, dictionaries=None):
     """Varint values of the attribute block per row, values per row, and the
     string payload bytes per row (lengths and a flat byte buffer)."""
@@ -157,7 +176,7 @@ def _attr_values(fields: list[pa.Field], arrays: dict[str, pa.Array], n: int, di
     str_len = np.zeros(n, np.int64)
     str_chunks: list[np.ndarray] = []
     for i, f in enumerate(fields):
-        arr = arrays[f.name]
+        arr = cast_carried(arrays[f.name], f)
         valid = arr.is_valid().to_numpy(zero_copy_only=False)
         present |= valid.astype(np.uint64) << np.uint64(i)
         t = f.type
@@ -181,21 +200,8 @@ def _attr_values(fields: list[pa.Field], arrays: dict[str, pa.Array], n: int, di
                 )
             vals = zigzag(v)
         elif pa.types.is_floating(t):
-            if pa.types.is_float64(t):
-                vals = (
-                    arr.fill_null(0.0)
-                    .to_numpy(zero_copy_only=False)
-                    .astype(np.float64)
-                    .view(np.uint64)
-                )
-            else:
-                vals = (
-                    arr.fill_null(0.0)
-                    .to_numpy(zero_copy_only=False)
-                    .astype(np.float32)
-                    .view(np.uint32)
-                    .astype(np.uint64)
-                )
+            bits = {16: np.uint16, 32: np.uint32, 64: np.uint64}[t.bit_width]
+            vals = arr.to_numpy(zero_copy_only=False).view(bits).astype(np.uint64)
         elif pa.types.is_boolean(t):
             vals = arr.fill_null(False).to_numpy(zero_copy_only=False).astype(np.uint64)
         elif pa.types.is_string(t) or pa.types.is_large_string(t) or pa.types.is_binary(t):

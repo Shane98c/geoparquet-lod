@@ -114,10 +114,14 @@ def polygons(tmp_path_factory):
         'name': pa.array([None if i % 13 == 0 else f'建物 {i} é' for i in range(n)]),
         'zone': pa.array([f'zone{i % 4}' for i in range(n)]),
         'kind': pa.nulls(n, pa.string()),
+        'share': pa.array(
+            [[0.3, -1.5, 2.5e4, math.inf, math.nan, None][i % 6] for i in range(n)], pa.float32()
+        ),
     }
     src = source(work / 'polygons.parquet', geometry, columns, ['Polygon', 'MultiPolygon'])
     out = work / 'out.parquet'
-    return write(src, out, carry=list(columns), row_group_rows=512, workers=1, log=quiet)
+    carry = [(name, 'halffloat') if name == 'share' else name for name in columns]
+    return write(src, out, carry=carry, row_group_rows=512, workers=1, log=quiet)
 
 
 def test_polygons_agree(polygons):
@@ -262,3 +266,14 @@ def test_malformed_values_name_their_row(value, message):
     with pytest.raises(UnpackError, match=message) as error:
         list(unpack_batches(chunks, 'MultiPolygon', fields, zones, batch_bytes=1))
     assert error.value.row == 3, 'rows count from the first chunk'
+
+
+def test_a_float16_wider_than_16_bits_names_its_row():
+    fields = [pa.field('v', pa.float16())]
+    one = bytes([*SQUARE, 1, 0x80, 0x78, 0])  # 1.0, the bit pattern 0x3c00
+    wide = bytes([*SQUARE, 1, 0x80, 0x80, 0x04, 0])  # 0x10000
+    values = pa.array([one, wide], pa.binary())
+    assert unpack(values.slice(0, 1), 'MultiPolygon', fields).attrs['v'].to_pylist() == [1.0]
+    with pytest.raises(UnpackError, match='v has a float16 wider than 16 bits') as error:
+        unpack(values, 'MultiPolygon', fields)
+    assert error.value.row == 1

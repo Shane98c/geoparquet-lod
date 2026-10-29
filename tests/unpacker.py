@@ -70,6 +70,8 @@ class Unpacker:
                 out[f.name] = unzigzag(v)
             elif pa.types.is_float64(t):
                 out[f.name] = float(np.array([v], np.uint64).view(np.float64)[0])
+            elif pa.types.is_float16(t):
+                out[f.name] = float(np.array([v], np.uint16).view(np.float16)[0])
             elif pa.types.is_floating(t):
                 out[f.name] = float(np.array([v], np.uint32).view(np.float32)[0])
             elif pa.types.is_boolean(t):

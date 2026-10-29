@@ -11,7 +11,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import shapely
 
-from .encoding import ENCODING, INT32, PACK_VERSION
+from .encoding import ENCODING, INT32, PACK_VERSION, is_carried_type
 from .pack import FAMILY_DEPTH
 from .unpack import Unpacked, UnpackError, carried, lod_values, unpack_batches
 from .writer import LOD_KEY, LOD_VERSION
@@ -104,6 +104,7 @@ def validate(path: str | Path, sample_rows: int = 2000, *, full: bool = False) -
             isinstance(placeholder, (int, float)) and math.isfinite(placeholder) and placeholder > 0
         ):
             raise ValidationError(f'lod {name}: placeholder must be a positive width in grid cells')
+    _check_attributes(lod.get('attributes', []))
 
     # statistics on the covering and page indexes on every column, in every row group
     for g in range(md.num_row_groups):
@@ -181,6 +182,26 @@ def _check_covering(field: pa.Field, covering, geometry: str) -> None:
         if declared[bound] != ['bbox', bound]:
             raise ValidationError(
                 f'{where}.{bound} must be ["bbox", "{bound}"], not {json.dumps(declared[bound])}'
+            )
+
+
+def _check_attributes(attributes) -> None:
+    """Raise unless every carried attribute has a name and the Arrow name of a
+    type the packer writes."""
+    if not isinstance(attributes, list) or not all(isinstance(a, dict) for a in attributes):
+        raise ValidationError('attributes must be a list of {name, type} objects')
+    for a in attributes:
+        name, kind = a.get('name'), a.get('type')
+        if not isinstance(name, str):
+            raise ValidationError(f'attribute {json.dumps(a)} has no name')
+        try:
+            t = pa.type_for_alias(kind) if isinstance(kind, str) else None
+        except ValueError:
+            t = None
+        if t is None or not is_carried_type(t):
+            raise ValidationError(
+                f'attribute {name}: type {json.dumps(kind)} is not an integer, float, bool '
+                'or string type'
             )
 
 

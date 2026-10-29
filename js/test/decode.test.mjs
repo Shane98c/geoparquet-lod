@@ -191,3 +191,28 @@ for (const value of [
     Object.is(decodeAttributes(row, 'Point', [{ name: 'value', kind: 'float64' }])[0], value),
   )
 }
+
+// Float16 packing stores the half-precision bit pattern; values from numpy.
+for (const [bits, value] of [
+  [0x0000, 0],
+  [0x8000, -0],
+  [0x0001, 5.960464477539063e-8],
+  [0x03ff, 6.097555160522461e-5],
+  [0x0400, 6.103515625e-5],
+  [0x3555, 0.333251953125],
+  [0x3bff, 0.99951171875],
+  [0x3c00, 1],
+  [0x3fff, 1.9990234375],
+  [0x4000, 2],
+  [0xc000, -2],
+  [0x7bff, 65504],
+  [0xfbff, -65504],
+  [0x7c00, Infinity],
+  [0xfc00, -Infinity],
+  [0x7e00, NaN],
+  [0x7c01, NaN],
+]) {
+  const row = Uint8Array.from([0, 0, 1, ...varint(bits), 0])
+  const fields = [{ name: 'value', kind: 'float16' }]
+  assert.ok(Object.is(decodeAttributes(row, 'Point', fields)[0], value), `0x${bits.toString(16)}`)
+}

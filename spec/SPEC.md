@@ -131,7 +131,7 @@ Under the `geo` key, a `lod_columns` object:
 | `tile_size`    | int      | pixels per tile the zooms assume (512)                                                                                                                                                                                      |
 | `encoding`     | string   | `packed`, see Geometry                                                                                                                                                                                                      |
 | `pack_version` | int      | `2`, the packed row format version; readers reject any other value                                                                                                                                                          |
-| `attributes`   | object[] | `{name, type, values?}` of carried attributes; `type` is the Arrow type name used to decode packed values; optional `values` is a string dictionary holding every value packed for the attribute                            |
+| `attributes`   | object[] | `{name, type, values?}` of carried attributes; `type` is the Arrow name of the packed type, see Geometry; optional `values` is a string dictionary holding every value packed for the attribute                             |
 | `thinning`     | object   | description of the rule used; informational                                                                                                                                                                                 |
 | `lods`         | object   | LOD name to `{zooms, geometry_type, scale, offset, placeholder}`; `scale` and `offset` are `[x, y]` pairs in EPSG:3857 metres, `placeholder` the width in grid cells of the square drawn for a shape too small for the grid |
 
@@ -205,10 +205,11 @@ geometry :=
   MultiLineString: n parts, per part: vertices, steps as above
   Point:           zigzag(x) zigzag(y)
 attrs  := presence bitmap (one varint, bit i for attribute i in metadata
-          order), then each present value: integers zigzag, float32 as its
-          bit pattern, float64 as its bit pattern, bool 0/1, string as its
-          byte length, or its zero-based dictionary index when the attribute
-          declares `values` (no trailing string bytes for dictionary values)
+          order), then each present value: integers zigzag, float16 as its
+          bit pattern, float32 as its bit pattern, float64 as its bit
+          pattern, bool 0/1, string as its byte length, or its zero-based
+          dictionary index when the attribute declares `values` (no trailing
+          string bytes for dictionary values)
 spill  := count, per copy: tile (zoom << 48 | x * 2^zoom + y), file row
           index, geometry, attrs
 ```
@@ -243,9 +244,16 @@ is a quarter of a Web Mercator pixel at the LOD's finest zoom, close to
 tippecanoe's eighth-pixel tolerance; features a pixel or two across keep
 their own shape.
 
-Carried attributes keep their declared Arrow types and nulls. Integers are
-zigzagged as int64, so a packed carried uint64 value MUST NOT exceed
-2^63 - 1; the source column itself is unrestricted. A copy MUST carry the
+Carried attributes keep their declared Arrow types and nulls. The types
+are the integer types (`int8` to `uint64`), `halffloat`, `float`, `double`,
+`bool`, `string` and `large_string`. Integers are zigzagged as int64, so a
+packed carried uint64 value MUST NOT exceed 2^63 - 1; the source column
+itself is unrestricted. A float is packed in its declared type, so a source
+column carried as `halffloat` packs each value rounded to the nearest
+half-precision float, a varint of at most two bytes in [0, 2) and of three
+otherwise. A finite value too large for the declared type MUST NOT be
+packed, and the reference writer refuses it; NaN and the infinities pack as
+themselves. A copy MUST carry the
 attribute values its row has at the LOD: a thinning that overrides an
 attribute writes the overridden value, cast to the declared type, into that
 LOD's rows and their copies, so a feature reads the same in every tile it

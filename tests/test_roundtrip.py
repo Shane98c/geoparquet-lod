@@ -1,6 +1,8 @@
 """Write synthetic datasets, validate them, and read payloads back."""
 
 import json
+import math
+import re
 from pathlib import Path
 
 import numpy as np
@@ -266,6 +268,129 @@ def test_every_integer_type_packs_its_range(kind):
     fields = [pa.field('v', t)]
     blobs = pack('Point', (np.zeros(3, np.int32), np.zeros(3, np.int32)), fields, {'v': values})
     assert unpack(blobs, 'Point', fields).attrs['v'].equals(values)
+
+
+def varint(value: int) -> bytes:
+    out = bytearray()
+    while value >= 128:
+        out.append(value & 127 | 128)
+        value >>= 7
+    out.append(value)
+    return bytes(out)
+
+
+def test_float16_packs_its_bit_pattern():
+    """A carried float16 packs as a varint of its half-precision bits, two
+    bytes below 2.0 and three for larger or negative values. Values round to
+    the nearest float16, and NaN and the infinities pack as themselves."""
+    from geoparquet_lod.pack import pack
+    from geoparquet_lod.unpack import unpack
+
+    values = pa.array(
+        [0.1, 1.5, 1.999, 2.0, -0.5, 65504.0, 65519.0, math.inf, -math.inf, math.nan, None],
+        pa.float32(),
+    )
+    half = values.cast(pa.float16())
+    bits = half.to_numpy(zero_copy_only=False).view(np.uint16)[:-1].tolist()
+    assert bits[:7] == [0x2E66, 0x3E00, 0x3FFF, 0x4000, 0xB800, 0x7BFF, 0x7BFF]
+    fields = [pa.field('v', pa.float16())]
+    points = (np.zeros(len(values), np.int32),) * 2
+    blobs = pack('Point', points, fields, {'v': values})
+    # a point at the origin, the presence bitmap, the value and no copies
+    assert blobs.to_pylist() == [bytes([0, 0, 1, *varint(b), 0]) for b in bits] + [bytes(4)]
+    assert [len(varint(b)) for b in bits[:5]] == [2, 2, 2, 3, 3]
+    decoded = unpack(blobs, 'Point', fields).attrs['v']
+    assert decoded.type == pa.float16() and decoded.null_count == 1
+    assert decoded.to_numpy(zero_copy_only=False).view(np.uint16)[:-1].tolist() == bits
+
+
+@pytest.mark.parametrize(
+    'source, carried, value, largest',
+    [
+        (pa.float32(), pa.float16(), 65520.0, '65504'),
+        (pa.float32(), pa.float16(), -70000.0, '65504'),
+        (pa.float64(), pa.float16(), 1e6, '65504'),
+        (pa.int32(), pa.float16(), 100_000, '65504'),
+        (pa.float64(), pa.float32(), 1e39, '3.40282e+38'),
+    ],
+)
+def test_a_finite_value_too_large_for_its_float_type_is_refused(source, carried, value, largest):
+    """Casting would make it infinite. A value rounding to the largest packs."""
+    from geoparquet_lod.pack import cast_carried
+
+    field = pa.field('v', carried)
+    held = cast_carried(pa.array([1, -65519, None], source), field)
+    assert held.to_pylist() == [1.0, -65504.0 if carried == pa.float16() else -65519.0, None]
+    message = f'cannot pack v value {value}: a carried {carried} is at most {largest} in magnitude'
+    with pytest.raises(ValueError, match=re.escape(message)):
+        cast_carried(pa.array([1, value], source), field)
+
+
+@pytest.mark.parametrize('where', ['source', 'thinning'])
+def test_the_writer_refuses_a_value_float16_cannot_hold(tmp_path, where):
+    """In a source column or in a value a thinning gives the attribute."""
+    x = -105 + np.arange(40) * 1e-3
+    share = np.linspace(0, 1, 40, dtype=np.float32)
+    if where == 'source':
+        share[7] = 7e4
+    table = pa.table(
+        {
+            'share': share,
+            'geometry': pa.array(shapely.to_wkb(shapely.box(x, 39.7, x + 5e-4, 39.7005))),
+        }
+    )
+    src = geoparquet(tmp_path / 'share.parquet', table, ['Polygon'])
+
+    def large(rows, zoom, ctx):
+        kept = rows.slice(0, 4)
+        values = pa.array([7e4] * kept.num_rows, pa.float32())
+        return kept.set_column(kept.schema.get_field_index('share'), 'share', values)
+
+    with pytest.raises(ValueError, match=re.escape('cannot pack share value 70000.0')):
+        write(
+            src,
+            tmp_path / 'share.lod.parquet',
+            thinning=large if where == 'thinning' else None,
+            zooms=[13, 14],
+            complete_from=14,
+            carry=[('share', 'halffloat')],
+            workers=1,
+            log=lambda *_: None,
+        )
+
+
+def test_float16_overviews_hold_the_source_rounded(buildings, tmp_path):
+    """The source column keeps its float32 values; every LOD, its copies
+    included, holds them rounded to float16."""
+    from geoparquet_lod import read_overview
+    from geoparquet_lod.unpack import carried, lod_values, unpack_batches
+
+    out = write(
+        buildings,
+        tmp_path / 'half.parquet',
+        carry=[('risk', 'halffloat')],
+        workers=1,
+        log=lambda *_: None,
+    )
+    validate(out, full=True)
+    f = pq.ParquetFile(out)
+    lod = json.loads(f.schema_arrow.metadata[b'geo'])['lod_columns']
+    assert lod['attributes'] == [{'name': 'risk', 'type': 'halffloat'}]
+    risk = pq.read_table(out, columns=['risk']).column('risk').combine_chunks()
+    assert risk.type == pa.float32(), 'the source column keeps full precision'
+    rounded = risk.cast(pa.float16()).to_numpy(zero_copy_only=False)
+    fields, dictionaries = carried(lod)
+    copies = 0
+    for name, child in lod['lods'].items():
+        for u in unpack_batches(lod_values(f, 0, 'lod', name), child['geometry_type'], fields):
+            rows = np.where(u.copy, u.id, u.row)
+            got = u.attrs['risk'].to_numpy(zero_copy_only=False)
+            assert got.dtype == np.float16 and np.array_equal(got, rounded[rows], equal_nan=True)
+            copies += int(u.copy.sum())
+    assert copies, 'the fixture has boundary copies'
+    table = read_overview(out, max(lod['zooms']))
+    assert table.schema.field('risk').type == pa.float16()
+    assert np.array_equal(table['risk'].to_numpy(), rounded[table['row'].to_numpy()])
 
 
 def test_points_importance_and_cluster(points, tmp_path):

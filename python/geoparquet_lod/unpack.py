@@ -365,9 +365,12 @@ def _attributes(tok, bitmaps, rows, fields, dictionaries):
             attrs[f.name] = pa.array(v, mask=~has).cast(t)
         elif pa.types.is_float64(t):
             attrs[f.name] = pa.array(raw.view(np.float64), mask=~has)
+        elif pa.types.is_float16(t):
+            _refuse(raw > 0xFFFF, rows, f'{f.name} has a float16 wider than 16 bits')
+            attrs[f.name] = pa.array(raw.astype(np.uint16).view(np.float16), mask=~has)
         elif pa.types.is_floating(t):
             _refuse(raw > 0xFFFFFFFF, rows, f'{f.name} has a float32 wider than 32 bits')
-            attrs[f.name] = pa.array(raw.astype(np.uint32).view(np.float32), mask=~has).cast(t)
+            attrs[f.name] = pa.array(raw.astype(np.uint32).view(np.float32), mask=~has)
         elif pa.types.is_boolean(t):
             attrs[f.name] = pa.array(raw != 0, mask=~has)
         else:

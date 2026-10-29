@@ -80,6 +80,17 @@ functions can read any source column via `columns=` without carrying it.
 Carried integers are packed as int64, so the writer refuses a uint64 value
 above 2^63 - 1 with an error naming the column and the value.
 
+A float column can be carried at half precision, as
+`carry=[('rps_2011', 'halffloat')]` or `--carry rps_2011:halffloat`. The
+source column keeps its full precision for analysis and row reads, while
+tiles get each value rounded to the nearest float16, about three significant
+digits, packed in at most two bytes from 0 up to 2 and three otherwise, where
+a typical float32 takes five. A style threshold compares with the rounded
+value, so a value that close to a threshold can land on its other side, and
+a magnitude under about 3e-8 rounds to 0. Float16 holds magnitudes up to
+65504; the writer refuses a finite value beyond that with an error naming the
+column and the value, and packs NaN and the infinities as they are.
+
 ## Geometry
 
 Points, lines and polygons, one family per file, and a family keeps its

@@ -7,7 +7,7 @@
 
 import { GeometryBuilder, type GeometryType } from './geometry.js'
 
-export type AttributeKind = 'int' | 'float32' | 'float64' | 'bool' | 'string' | 'enum'
+export type AttributeKind = 'int' | 'float16' | 'float32' | 'float64' | 'bool' | 'string' | 'enum'
 
 export interface AttributeField {
   name: string
@@ -20,7 +20,8 @@ export interface AttributeField {
 export const attributeKind = (type: string): AttributeKind => {
   const t = type.toLowerCase()
   if (t === 'double' || t === 'float64') return 'float64'
-  if (t === 'float' || t === 'float32' || t === 'halffloat' || t === 'float16') return 'float32'
+  if (t === 'halffloat' || t === 'float16') return 'float16'
+  if (t === 'float' || t === 'float32') return 'float32'
   if (t === 'bool' || t === 'boolean') return 'bool'
   if (t === 'string' || t === 'utf8' || t === 'large_string' || t === 'large_utf8') return 'string'
   if (/int/.test(t)) return 'int'
@@ -68,6 +69,15 @@ class Cursor {
 
 const unzigzag = (v: number): number => (v % 2 ? -(v + 1) / 2 : v / 2)
 
+/** An IEEE half-precision bit pattern as a number. */
+const half = (bits: number): number => {
+  const sign = bits & 0x8000 ? -1 : 1
+  const exponent = (bits >> 10) & 0x1f
+  const fraction = bits & 0x3ff
+  if (exponent === 0x1f) return fraction ? NaN : sign * Infinity
+  return sign * (exponent ? 0x400 + fraction : fraction) * 2 ** ((exponent || 1) - 25)
+}
+
 /** Attribute values with string slots left as byte lengths, filled from the trailing payload later. */
 const attributes = (
   c: Cursor,
@@ -89,6 +99,9 @@ const attributes = (
     switch (fields[i].kind) {
       case 'int':
         out[i] = unzigzag(v)
+        break
+      case 'float16':
+        out[i] = half(v)
         break
       case 'float32':
         f32.setUint32(0, v, true)

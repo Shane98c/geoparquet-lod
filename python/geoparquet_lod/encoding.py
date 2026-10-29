@@ -19,6 +19,18 @@ def lod_type() -> pa.DataType:
     return pa.binary()
 
 
+def is_carried_type(t: pa.DataType) -> bool:
+    """Whether the packer writes values of type `t`: integers, floats, booleans
+    and strings."""
+    return (
+        pa.types.is_integer(t)
+        or pa.types.is_floating(t)
+        or pa.types.is_boolean(t)
+        or pa.types.is_string(t)
+        or pa.types.is_large_string(t)
+    )
+
+
 def infer_attributes(schema: pa.Schema, carry) -> list[pa.Field]:
     """`carry` is a list of column names or (name, Arrow type alias) pairs. Only
     scalar types are carried: integers, floats, booleans and strings."""
@@ -32,16 +44,10 @@ def infer_attributes(schema: pa.Schema, carry) -> list[pa.Field]:
         else:
             out.append(pa.field(item, schema.field(item).type, nullable=True))
     for f in out:
-        t = f.type
-        ok = (
-            pa.types.is_integer(t)
-            or pa.types.is_floating(t)
-            or pa.types.is_boolean(t)
-            or pa.types.is_string(t)
-            or pa.types.is_large_string(t)
-        )
-        if not ok:
-            raise ValueError(f'cannot carry {f.name}: {t} is not an integer, float, bool or string')
+        if not is_carried_type(f.type):
+            raise ValueError(
+                f'cannot carry {f.name}: {f.type} is not an integer, float, bool or string'
+            )
     return out
 
 

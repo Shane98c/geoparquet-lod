@@ -46,7 +46,7 @@ from .key import (
     sql_mercator_x,
     sql_mercator_y,
 )
-from .pack import pack
+from .pack import cast_carried, pack
 from .quantize import DOT_CELLS, SUBPIXELS, grid, render_lines, render_polygons
 from .spill import hosts, ranges, straddlers, take_ragged
 from .thinning import Context, Thin, default_thinning, describe
@@ -510,7 +510,7 @@ def _spill_for_batch(
         parts = take_ragged(store, pos)
     attr_sorted, attr_perm = src_ids
     at = attr_perm[np.searchsorted(attr_sorted, src[pick])]
-    attrs = {a.name: attr_values[a.name].take(pa.array(at)).cast(a.type) for a in attributes}
+    attrs = {a.name: cast_carried(attr_values[a.name].take(pa.array(at)), a) for a in attributes}
     if b['name'] in overrides:
         hit, replaced = _overridden(src[pick] + 1, *overrides[b['name']])
         for field, column in replaced.items():
@@ -924,11 +924,13 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
         lod_overrides[b['name']] = (
             ids[order],
             {
-                a.name: changed.column(a.name)
-                .combine_chunks()
-                .take(order)
-                .cast(sorted_schema.field(a.name).type)
-                .cast(a.type)
+                a.name: cast_carried(
+                    changed.column(a.name)
+                    .combine_chunks()
+                    .take(order)
+                    .cast(sorted_schema.field(a.name).type),
+                    a,
+                )
                 for a in attributes
                 if a.name in changed.column_names
             },
@@ -1215,7 +1217,7 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
         wkb = None
         if shape_lods:
             wkb = table.column(geometry).combine_chunks().cast(pa.large_binary())
-        attrs = {a.name: table.column(a.name).combine_chunks().cast(a.type) for a in attributes}
+        attrs = {a.name: cast_carried(table.column(a.name).combine_chunks(), a) for a in attributes}
         per_worker = -(-table.num_rows // (JOB_ROWS * workers))
         step = -(-table.num_rows // (per_worker * workers))
         for start in range(0, table.num_rows, step):
