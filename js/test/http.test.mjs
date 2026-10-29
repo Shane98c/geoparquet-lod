@@ -59,7 +59,7 @@ try {
     2,
     'HEAD fallback when Content-Range is hidden and no root sizes the file',
   )
-  setRoot({ version: 2, file_bytes: file.length })
+  setRoot({ version: 3, file_bytes: file.length })
   calls.length = 0
   file.set(new TextEncoder().encode('PAR1'), file.length - 4)
   const sized = await httpSource(['https://example.test/data.parquet'])
@@ -69,13 +69,13 @@ try {
   assert.equal(calls.length, 3, 'the first read past the bootstrap checks the footer magic')
   await sized.slice(30000, 30010)
   assert.equal(calls.length, 4, 'the footer magic is checked once')
-  setRoot({ version: 1, file_bytes: file.length })
+  setRoot({ version: 2, file_bytes: file.length })
   await assert.rejects(
     openReader(await httpSource(['https://example.test/data.parquet'])),
-    /unsupported spatial index version 1/,
-    'a version-1 root is rejected, not read as this version',
+    /unsupported spatial index version 2/,
+    'a version-2 root is rejected, not read as this version',
   )
-  setRoot({ version: 2, file_bytes: file.length })
+  setRoot({ version: 3, file_bytes: file.length })
   // a server error on the check is retried by the next read
   failTail = 1
   const retried = await httpSource(['https://example.test/data.parquet'])
