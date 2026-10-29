@@ -73,14 +73,6 @@ export class TilePool {
     void this.ready.catch((error: Error) => this.fail(error))
   }
 
-  async run(task: PreparedTile, options: TileOptions): Promise<ArrayBuffer> {
-    const { signal, ...settings } = options
-    return (
-      (await this.submit({ type: 'render', task, options: settings }, signal)) as {
-        data: ArrayBuffer
-      }
-    ).data
-  }
   async decode(
     task: PreparedTile,
     options?: TileOptions,

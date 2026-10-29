@@ -92,13 +92,13 @@ export interface DecodedTile {
   geometry: ReturnType<GeometryBuilder['finish']>
 }
 
-export function decodePreparedTile(
-  task: PreparedTile,
-  names = task.fields.map((f) => f.name),
-  signal?: AbortSignal,
-): DecodedTile {
+export function decodePreparedTile(task: PreparedTile): DecodedTile {
   const builder = new GeometryBuilder()
-  const { rows, columns } = decodeTile(task, names, builder, signal)
+  const { rows, columns } = decodeTile(
+    task,
+    task.fields.map((f) => f.name),
+    builder,
+  )
   return normalizeTile(
     task.lod,
     { rows, columns, geometry: builder.finish(task.lod.scale, task.lod.offset) },
@@ -123,10 +123,6 @@ export function renderDecodedTile(tile: DecodedTile, options: TileOptions = {}):
     { geometry: geometry as never, rowIndex: rows, columns },
     { z, x, y, layer, signal: options.signal },
   )
-}
-
-export function renderPreparedTile(task: PreparedTile, options: TileOptions = {}): ArrayBuffer {
-  return renderDecodedTile(decodePreparedTile(task, options.properties, options.signal), options)
 }
 
 function renderGeometryTile(

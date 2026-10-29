@@ -5,7 +5,7 @@ import { decodeProjection } from './projection.js'
 import type { Transfer, WorkerRequest, WorkerResponse } from './maplibre.js'
 import { coalescing, httpSource, s3Mirrors } from './range-buffer.js'
 import { openReader, SpatialReader, type TileReader } from './spatial.js'
-import { decodePreparedTile, renderDecodedTile, renderPreparedTile, renderTile } from './tile.js'
+import { decodePreparedTile, renderDecodedTile, renderTile } from './tile.js'
 import { TilePool, geometryTransfers } from './tile-pool.js'
 import type { CpuRequest, TileReply } from './tile-protocol.js'
 
@@ -53,12 +53,7 @@ scope.addEventListener('message', (event: MessageEvent<WorkerRequest | CpuReques
     zstdReady.then(() => scope.postMessage({ ready: true } satisfies TileReply))
     return
   }
-  if (
-    request.type === 'render' ||
-    request.type === 'decode' ||
-    request.type === 'encode' ||
-    request.type === 'project'
-  ) {
+  if (request.type === 'decode' || request.type === 'encode' || request.type === 'project') {
     try {
       if (request.type === 'project') {
         scope.postMessage({
@@ -73,10 +68,7 @@ scope.addEventListener('message', (event: MessageEvent<WorkerRequest | CpuReques
           ...(data ? [data] : []),
         ])
       } else {
-        const data =
-          request.type === 'render'
-            ? renderPreparedTile(request.task, request.options)
-            : renderDecodedTile(request.tile, request.options)
+        const data = renderDecodedTile(request.tile, request.options)
         scope.postMessage({ id: request.id, data } satisfies TileReply, [data])
       }
     } catch (error) {
@@ -167,11 +159,7 @@ scope.addEventListener('message', (event: MessageEvent<WorkerRequest | CpuReques
             }
             const cpu = getPool()
             const properties = options.properties ?? reader.lod.attributes.map((a) => a.name)
-            if (
-              reader instanceof SpatialReader &&
-              reader.lod.encoding === 'packed' &&
-              request.z <= reader.finestZoom
-            ) {
+            if (reader instanceof SpatialReader && request.z <= reader.finestZoom) {
               const source = properties.filter(
                 (name) => !reader.lod.attributes.some((a) => a.name === name),
               )
@@ -225,21 +213,6 @@ scope.addEventListener('message', (event: MessageEvent<WorkerRequest | CpuReques
               )
               const styled = { ...tile, columns }
               return cpu ? cpu.render(styled, options) : renderDecodedTile(styled, options)
-            }
-            if (
-              cpu &&
-              reader instanceof SpatialReader &&
-              request.z <= reader.finestZoom &&
-              properties.every((name) => reader.lod.attributes.some((a) => a.name === name))
-            ) {
-              const task = await reader.prepareTile(
-                reader.lodForZoom(request.z),
-                request.z,
-                request.x,
-                request.y,
-                controller.signal,
-              )
-              return cpu.run(task, options)
             }
             return renderTile(reader, request.z, request.x, request.y, options)
           })

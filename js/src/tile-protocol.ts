@@ -3,7 +3,6 @@ import type { PreparedTile } from './spatial.js'
 import type { ProjectionTask } from './projection.js'
 
 export type TileWork =
-  | { type: 'render'; task: PreparedTile; options: Omit<TileOptions, 'signal'> }
   | { type: 'decode'; task: PreparedTile; options?: Omit<TileOptions, 'signal'> }
   | { type: 'encode'; tile: DecodedTile; options: Omit<TileOptions, 'signal'> }
   | { type: 'project'; task: ProjectionTask }
