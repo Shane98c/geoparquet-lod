@@ -236,9 +236,11 @@ their own shape.
 
 Carried attributes keep their declared Arrow types and nulls. Integers are
 zigzagged as int64, so a packed carried uint64 value MUST NOT exceed
-2^63 - 1; the source column itself is unrestricted. A thinning that overrides an attribute writes the overridden
-value, cast to the declared type, into that LOD's rows; copies carry the
-source row's values.
+2^63 - 1; the source column itself is unrestricted. A copy MUST carry the
+attribute values its row has at the LOD: a thinning that overrides an
+attribute writes the overridden value, cast to the declared type, into that
+LOD's rows and their copies, so a feature reads the same in every tile it
+reaches.
 
 ## Reading without the spatial index
 

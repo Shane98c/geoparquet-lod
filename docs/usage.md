@@ -31,8 +31,9 @@ tippecanoe draws it. `rows` carries `id`, centroid, bbox diagonal and area in
 Web Mercator metres, vertex count, a per-row uniform `u` hashed from the
 geometry, and the carried attributes; `Context` converts area and size to
 screen pixels at a zoom. Returning a carried column overrides its value in that
-zoom's LOD, which is how a cluster passes its count along. Built-ins are a
-few lines each and meant to be copied:
+zoom's LOD, on the row and on its copies in neighbouring tiles, which is how a
+cluster passes its count along. Built-ins are a few lines each and meant to be
+copied:
 
 | thinning                        | rule                                                                                                                                                 | good for                                            |
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |

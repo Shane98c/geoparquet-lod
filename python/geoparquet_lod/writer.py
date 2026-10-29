@@ -446,10 +446,20 @@ def _concat_parts(parts_list):
     )
 
 
+def _overridden(ids: np.ndarray, sorted_ids: np.ndarray, values: dict) -> tuple:
+    """Which of `ids` (1-based) a thinning overrode, and their values, from
+    `sorted_ids` and the override `values` in that order."""
+    at = np.minimum(np.searchsorted(sorted_ids, ids), len(sorted_ids) - 1)
+    hit = sorted_ids[at] == ids
+    return hit, {k: v.take(at[hit]) for k, v in values.items()}
+
+
 def _spill_for_batch(
-    b, ids, attributes, spill_entries, spill_store, attr_values, file_pos, grids, src_ids
+    b, ids, attributes, spill_entries, spill_store, attr_values, file_pos, grids, src_ids, overrides
 ):
-    """The copies one batch hosts for LOD `b`, as `pack` takes them, or None."""
+    """The copies one batch hosts for LOD `b`, as `pack` takes them, or None.
+    A copy carries its row's attributes as the LOD shows them, so with the
+    thinning's `overrides` for that LOD."""
     entries = spill_entries.get(b['name'])
     if entries is None:
         return None
@@ -469,6 +479,10 @@ def _spill_for_batch(
     attr_sorted, attr_perm = src_ids
     at = attr_perm[np.searchsorted(attr_sorted, src[pick])]
     attrs = {a.name: attr_values[a.name].take(pa.array(at)).cast(a.type) for a in attributes}
+    if b['name'] in overrides:
+        hit, replaced = _overridden(src[pick] + 1, *overrides[b['name']])
+        for field, column in replaced.items():
+            attrs[field] = pc.replace_with_mask(attrs[field], pa.array(hit), column)
     return (counts, tile_of[pick], file_pos[src[pick]], parts, attrs)
 
 
@@ -1174,11 +1188,10 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
             stop = min(start + step, table.num_rows)
             part_ids = ids[start:stop]
             overridden = {}
-            for name, (sorted_ids, values) in lod_overrides.items():
-                at = np.minimum(np.searchsorted(sorted_ids, part_ids), len(sorted_ids) - 1)
-                hit = sorted_ids[at] == part_ids
+            for name, override in lod_overrides.items():
+                hit, values = _overridden(part_ids, *override)
                 if hit.any():
-                    overridden[name] = (hit, {k: v.take(at[hit]) for k, v in values.items()})
+                    overridden[name] = (hit, values)
             spills = {}
             for b in lod_plan:
                 spill = _spill_for_batch(
@@ -1191,6 +1204,7 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
                     file_pos,
                     grids,
                     src_ids,
+                    lod_overrides,
                 )
                 if spill is not None:
                     spills[b['name']] = spill

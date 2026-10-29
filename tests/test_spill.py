@@ -4,10 +4,11 @@ import json
 
 import numpy as np
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import pytest
 import shapely
-from geoparquet_lod import write
+from geoparquet_lod import validate, write
 from geoparquet_lod.key import KEY_DEPTH, hilbert_key, tile_x, tile_y
 from geoparquet_lod.quantize import render_polygons
 from geoparquet_lod.spill import BUFFER, straddlers, take_ragged
@@ -182,3 +183,57 @@ def test_every_tile_a_feature_reaches_holds_it_once(edge_features, tmp_path):
             for x, y in near:
                 found = tile_rows(keys, decoded, zoom, x, y)
                 assert found.count(row) == ((x, y) in tiles), (label, zoom, x, y)
+
+
+@pytest.mark.parametrize('override', [99, None])
+def test_a_copy_carries_the_value_its_row_has_at_the_lod(tmp_path, override):
+    """A thinning's value for an attribute, null included, reaches the copy in
+    the next tile as well as the row, so the feature reads the same on both
+    sides of the edge, here on a host the LOD does not show."""
+    zoom = 14
+    edge = -180 + 3413 * 360 / 2**zoom
+    row = int(tile_y(39.7, zoom)) + 0.5
+    lat = float(np.degrees(np.arctan(np.sinh(np.pi * (1 - 2 * row / 2**zoom)))))
+    boxes = [
+        shapely.box(edge - 0.003, lat - 0.0005, edge + 0.001, lat + 0.0005),
+        shapely.box(edge + 0.005, lat - 0.0005, edge + 0.006, lat + 0.0005),
+    ]
+    geo = {
+        'version': '1.1.0',
+        'primary_column': 'geometry',
+        'columns': {'geometry': {'encoding': 'WKB', 'geometry_types': ['Polygon']}},
+    }
+    table = pa.table({'value': pa.array([1, 2], pa.int64()), 'geometry': shapely.to_wkb(boxes)})
+    src = tmp_path / 'override.parquet'
+    pq.write_table(table.replace_schema_metadata({b'geo': json.dumps(geo).encode()}), src)
+
+    def first(rows, zoom, ctx):
+        kept = rows.filter(pc.equal(rows.column('value'), 1))
+        values = pa.array([override] * kept.num_rows, pa.int64())
+        return kept.set_column(kept.schema.get_field_index('value'), 'value', values)
+
+    out = write(
+        src,
+        tmp_path / 'override.lod.parquet',
+        thinning=first,
+        zooms=[zoom, zoom + 1],
+        complete_from=zoom + 1,
+        carry=['value'],
+        single_lod_bytes=0,
+        workers=1,
+        log=lambda *_: None,
+    )
+    validate(out, full=True)
+    table = pq.read_table(out)
+    meta = json.loads(table.schema.metadata[b'geo'])['lod_columns']
+    name, info = next((n, i) for n, i in meta['lods'].items() if zoom in i['zooms'])
+    decoded = [
+        Unpacker(blob, info['geometry_type'], [pa.field('value', pa.int64())]).row()
+        for blob in table.column('lod').combine_chunks().field(name).to_pylist()
+    ]
+    straddler, host = (table.column('value').to_pylist().index(v) for v in (1, 2))
+    assert decoded[straddler]['attrs'] == {'value': override}
+    assert decoded[host]['geometry'] == [], 'the host is not shown at the LOD'
+    (copy,) = decoded[host]['spill']
+    assert copy['id'] == straddler
+    assert copy['attrs'] == {'value': override}
