@@ -23,7 +23,7 @@ import {
 } from './decode.js'
 import { decodeProjection, type ProjectionExecutor, type ProjectionTask } from './projection.js'
 import { GeometryBuilder, type GeometryType, type LodGeometry } from './geometry.js'
-import { tileInterval, type Interval } from './key.js'
+import { tileInterval } from './key.js'
 
 export type Bbox = [number, number, number, number]
 
@@ -98,8 +98,6 @@ export interface PrimaryRows {
  * finest LOD, at any zoom, reuse geometry an earlier tile fetched. */
 const PAGE_CACHE_BYTES = { bbox: 4 * 1024 * 1024, geometry: 16 * 1024 * 1024 }
 type PageKind = keyof typeof PAGE_CACHE_BYTES
-/** LOD bytes a tile may read past its exact rows rather than fetch key pages to trim them. */
-const LOOSE_BYTES = 32 * 1024
 const BBOX_LEAVES = ['bbox.xmin', 'bbox.ymin', 'bbox.xmax', 'bbox.ymax'] as const
 
 /**
@@ -268,10 +266,10 @@ export class LodReader {
 
   /**
    * Every row shown at `lod` in tile z/x/y, located through the stored
-   * Hilbert key: row groups by the key's footer statistics, pages by its page
-   * index, exact rows by the boundary key pages. Features centred outside the
-   * tile that reach into it come as copies in the `spill` of a row inside the
-   * interval or of the first row past it, so no bbox is read.
+   * Hilbert key: row groups by the key's footer statistics, the interval's
+   * boundaries by its page index and the key pages they fall inside. Features
+   * centred outside the tile that reach into it come as copies on the host,
+   * the first row at or past the interval, so no bbox is read.
    */
   async readLodByTile(
     lod: Lod,
@@ -283,23 +281,13 @@ export class LodReader {
   ): Promise<LodRows> {
     const key = this.lod.key
     if (!key) throw new Error('file has no stored key column')
-    const rows: number[] = []
-    const columns: Record<string, unknown[]> = Object.fromEntries(attributes.map((a) => [a, []]))
-    const interval = tileInterval(key.depth, z, x, y)
-    const [start, end] = interval
-    const stats = (g: number) => {
-      const s = this.chunk(g, key.column).meta_data!.statistics
-      return s && s.min_value != null && s.max_value != null
-        ? [unsigned(s.min_value), unsigned(s.max_value)]
-        : [-Infinity, Infinity]
-    }
+    const [start, end] = tileInterval(key.depth, z, x, y)
     const all = this.metadata.row_groups.map((_, g) => g)
-    const groups = all.filter((g) => {
-      const [lo, hi] = stats(g)
-      return lo < end && hi >= start
-    })
-    // the host of copies for this tile: the first row with key >= start
-    const hostGroup = all.find((g) => stats(g)[1] >= start) ?? all[all.length - 1]
+    const stats = all.map((g) => this.keyStatistics(g, key.column))
+    const groups = all.filter((g) => stats[g] && stats[g][0] < end && stats[g][1] >= start)
+    // the host of copies for this tile: the first row with key >= start, else the last keyed row
+    const hostGroup =
+      all.find((g) => stats[g] && stats[g][1] >= start) ?? all.filter((g) => stats[g]).at(-1)
     if (hostGroup !== undefined && !groups.includes(hostGroup)) groups.push(hostGroup)
     const leaf = this.lodLeaf(lod)
     const tile = z * 2 ** 48 + x * 2 ** z + y
@@ -317,42 +305,36 @@ export class LodReader {
     }
     const perGroup = await Promise.all(
       groups.map(async (g) => {
-        const ranges = await this.keyRanges(
-          g,
-          key.column,
-          [interval],
-          g === hostGroup ? start : null,
-          leaf,
-          signal,
+        void this.offsetIndex(g, leaf).catch(() => undefined)
+        const { own, host } = await this.keyRows(g, key.column, start, end, g === hostGroup, signal)
+        const ranges = mergeRanges(host < 0 ? [own] : [own, [host, host + 1]]).filter(
+          ([a, b]) => a < b,
         )
-        if (!ranges.length)
-          return { g, values: new Map<number, unknown>(), keys: new Map<number, unknown>() }
-        const [values, keys] = await Promise.all([
-          this.readLeafRows(g, leaf, ranges, signal),
-          this.readLeafValues(g, key.column, ranges, signal),
-        ])
-        return { g, values, keys }
+        const values = ranges.length
+          ? await this.readLeafRows(g, leaf, ranges, signal)
+          : new Map<number, unknown>()
+        return { g, own, values }
       }),
     )
+    const rows: number[] = []
+    const columns: Record<string, unknown[]> = Object.fromEntries(attributes.map((a) => [a, []]))
     const builder = new GeometryBuilder()
     const add = (id: number, attrs: unknown[]) => {
       rows.push(id)
       attributes.forEach((a, i) => columns[a].push(attrs[wanted[i]]))
     }
     const carried = wanted.some((i) => i >= 0)
-    for (const { g, values, keys } of perGroup) {
-      const rowStart = this.rowGroupStarts[g]
+    for (const { g, own, values } of perGroup) {
+      const first = this.rowGroupStarts[g]
       for (const [row, raw] of values) {
-        const k = Number(keys.get(row))
-        const own = k >= start && k < end
-        const id = rowStart + row
+        const inside = row >= own[0] && row < own[1]
         decodeSelectedRow(
           raw as Uint8Array,
           lod.geometry_type,
           this.fields,
           builder,
-          own,
-          id,
+          inside,
+          first + row,
           tile,
           add,
           carried,
@@ -364,113 +346,70 @@ export class LodReader {
     return out
   }
 
+  /** The key range of row group `g` from its footer statistics; null when it has no keys. */
+  private keyStatistics(g: number, column: string): [number, number] | null {
+    const s = this.chunk(g, column).meta_data!.statistics
+    if (s && s.min_value != null && s.max_value != null)
+      return [unsigned(s.min_value), unsigned(s.max_value)]
+    const nulls = s?.null_count
+    return nulls != null && Number(nulls) === Number(this.metadata.row_groups[g].num_rows)
+      ? null
+      : [-Infinity, Infinity]
+  }
+
   /**
-   * Row ranges of group `g` whose key lies in `intervals`: the key pages whose
-   * statistics overlap, with the first and last page of each run read to find
-   * the exact rows, since a page's rows run far past a fine tile's. With
-   * `host`, also the first row whose key is at or past it.
+   * The rows of group `g` whose key lies in [start, end), and with `findHost`
+   * the tile's host: the first row whose key is at or past `start`, else the
+   * last row with a key. Keys are sorted, so each boundary is in the first
+   * page whose maximum reaches it, at that page's first row when its minimum
+   * does too; only a page a boundary falls inside is read.
    */
-  private async keyRanges(
+  private async keyRows(
     g: number,
     column: string,
-    intervals: Interval[],
-    host: number | null,
-    leaf: string,
+    start: number,
+    end: number,
+    findHost: boolean,
     signal?: AbortSignal,
-  ): Promise<[number, number][]> {
-    const [pages, index, leafPages] = await Promise.all([
+  ): Promise<{ own: [number, number]; host: number }> {
+    const [pages, index] = await Promise.all([
       this.offsetIndex(g, column),
       this.columnIndex(g, column),
-      this.offsetIndex(g, leaf),
     ])
     signal?.throwIfAborted()
-    const inside = (k: number) => intervals.some(([a, b]) => k >= a && k < b)
-    const hit = pages.map((_, p) => {
-      const lo = unsigned(index.min_values[p] as unknown as number)
-      const hi = unsigned(index.max_values[p] as unknown as number)
-      return intervals.some(([a, b]) => lo < b && hi >= a)
-    })
-    const hostPage =
-      host === null
-        ? -1
-        : pages.findIndex((_, p) => unsigned(index.max_values[p] as unknown as number) >= host)
-    if (hostPage >= 0) hit[hostPage] = true
-    else if (host !== null && pages.length) hit[pages.length - 1] = true
-    const runs: [number, number][] = []
-    for (let p = 0; p < pages.length; p++) {
-      if (!hit[p]) continue
-      const last = runs[runs.length - 1]
-      if (last && last[1] === p) last[1] = p + 1
-      else runs.push([p, p + 1])
+    const keyed = (p: number) => !index.null_pages[p]
+    const min = (p: number) => unsigned(index.min_values[p])
+    const max = (p: number) => unsigned(index.max_values[p])
+    const pageOf = (k: number) => pages.findIndex((_, p) => keyed(p) && max(p) >= k)
+    let last = pages.length - 1
+    while (last >= 0 && !keyed(last)) last--
+    const first = pageOf(start),
+      after = pageOf(end)
+    const read = new Set<number>()
+    if (first >= 0 && min(first) < start) read.add(first)
+    if (after >= 0 && min(after) < end) read.add(after)
+    if (findHost && first < 0 && last >= 0) read.add(last)
+    const wanted = [...read].sort((a, b) => a - b)
+    const decoded = await this.pageValues(
+      g,
+      column,
+      wanted.map((p) => pages[p]),
+      signal,
+    )
+    const values = new Map(wanted.map((p, i) => [p, decoded[i]]))
+    const bound = (k: number, p: number): number => {
+      if (p < 0) return last >= 0 ? pages[last].rowEnd : 0
+      const rows = values.get(p)
+      if (!rows) return pages[p].rowStart
+      for (const [row, value] of rows) if (value != null && unsigned(value) >= k) return row
+      return pages[p].rowEnd
     }
-    // Reading the key pages at a run's ends finds the exact rows; when the LOD pages those
-    // rows could add weigh less than the key pages do, take the runs at page granularity.
-    const leafBytes = (rows: [number, number][]) =>
-      leafPages
-        .filter((p) => rows.some(([a, b]) => p.rowStart < b && p.rowEnd > a))
-        .reduce((n, p) => n + p.byteEnd - p.byteStart, 0)
-    const whole = runs.map(([a, b]): [number, number] => [pages[a].rowStart, pages[b - 1].rowEnd])
-    // an edge page's rows outside the interval are wasted reads; estimate them by the share of
-    // the page's key span the interval misses, so an empty or tiny tile reads its key pages
-    // rather than a run of LOD pages holding nothing of its own
-    let waste = 0
-    for (const [a, b] of runs) {
-      for (const p of new Set([a, b - 1])) {
-        const lo = unsigned(index.min_values[p] as unknown as number)
-        const hi = unsigned(index.max_values[p] as unknown as number)
-        const span = Math.max(hi - lo, 1)
-        const covered = intervals.reduce(
-          (n, [s0, e0]) => n + Math.max(0, Math.min(hi, e0 - 1) - Math.max(lo, s0)),
-          0,
-        )
-        const miss = 1 - Math.min(1, covered / span)
-        waste += leafBytes([[pages[p].rowStart, pages[p].rowEnd]]) * miss
-      }
-    }
-    const keyBytes = runs.reduce((n, [a, b]) => {
-      const edge = new Set([a, b - 1])
-      return n + [...edge].reduce((m, p) => m + pages[p].byteEnd - pages[p].byteStart, 0)
-    }, 0)
-    if (waste <= Math.max(keyBytes, LOOSE_BYTES)) return mergeRanges(whole)
-    const edges = new Set<number>()
-    for (const [a, b] of runs) {
-      edges.add(a)
-      edges.add(b - 1)
-    }
-    if (hostPage >= 0) edges.add(hostPage)
-    else if (host !== null && pages.length) edges.add(pages.length - 1)
-    const edgePages = [...edges].sort((a, b) => a - b).map((p) => pages[p])
-    const decoded = await this.pageValues(g, column, edgePages, signal)
-    const exact = new Map<number, [number, number][]>()
-    let hostRow = -1
-    edgePages.forEach((page, i) => {
-      const rows: [number, number][] = []
-      let lastRow = -1
-      for (const [row, value] of decoded[i]) {
-        const k = unsigned(value as number)
-        lastRow = row
-        if (host !== null && hostRow < 0 && k >= host) hostRow = row
-        if (!inside(k)) continue
-        const last = rows[rows.length - 1]
-        if (last && last[1] === row) last[1] = row + 1
-        else rows.push([row, row + 1])
-      }
-      // past every key: the last row stands in as host
-      if (host !== null && hostRow < 0 && i === edgePages.length - 1 && hostPage < 0)
-        hostRow = lastRow
-      exact.set(page.rowStart, rows)
-    })
-    const out: [number, number][] = []
-    for (const [a, b] of runs) {
-      for (let p = a; p < b; p++) {
-        const page = pages[p]
-        const rows = exact.get(page.rowStart)
-        if (rows) out.push(...rows)
-        else out.push([page.rowStart, page.rowEnd])
-      }
-    }
-    if (hostRow >= 0) out.push([hostRow, hostRow + 1])
-    return mergeRanges(out)
+    const own: [number, number] = [bound(start, first), bound(end, after)]
+    let host = -1
+    if (findHost && first >= 0) host = own[0]
+    else if (findHost && last >= 0)
+      for (const [row, value] of values.get(last)!) if (value != null) host = row
+    return { own, host }
   }
 
   /**

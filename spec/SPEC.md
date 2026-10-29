@@ -247,15 +247,20 @@ reader serves files without the index and how it reaches analytical rows.
    alone choose the rows, and their exact WKB is small at those zooms.
 3. The tile's key interval, see Layout 1. Candidate row groups: those whose
    key statistics intersect it, plus the host group, the first group whose
-   maximum key is at or past the interval start.
-4. In each group, the key pages whose statistics intersect the interval;
-   read the first and last page of each run, and the host page, to find
-   the exact rows, and the first row at or past the interval start as the
-   host.
-5. Read the LOD column's pages overlapping those rows, merging adjacent
-   pages into one range. Decode each row: a row with geometry is a
-   feature, and each hosted copy whose tile is this tile is a feature with
-   the copy's row index as its id.
+   maximum key is at or past the interval start, or the last group with
+   keys when none is.
+4. In each group, the interval's two boundaries: the first rows whose keys
+   are at or past its start and its end. Keys are sorted, so the page index
+   places each boundary in the first key page whose maximum reaches it, on
+   that page's first row when its minimum does too; only a key page a
+   boundary falls inside is read. The rows between the boundaries are the
+   tile's own, and the start boundary is the host. When no key reaches the
+   interval start, the host is the last row with a key, read from the last
+   key page that has one.
+5. Read the LOD column's pages overlapping the own rows and the host,
+   merging adjacent pages into one range. Decode each row: an own row with
+   geometry is a feature, and each hosted copy whose tile is this tile is a
+   feature with the copy's row index as its id.
 6. Points are clipped to the tile; polygons and lines are clipped by the
    tile encoder. The MVT feature id is the file row index.
 
