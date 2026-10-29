@@ -588,7 +588,9 @@ console.log('page headers: counts and encoding agree with the directory before r
 
 {
   // A NaN x or y leaves that ordinate alone out of a row's bbox, as the
-  // covering's bounds do: this line reaches latitude 50 but not longitude 12.
+  // covering's bounds do: the first line reaches latitude 50 but not
+  // longitude 12. A geometry with an infinite coordinate, or with no x but
+  // NaN, has no finite bounds and so a null covering, and is never kept.
   const file = store()
   const geometry = file.raw(
     binaryPage([
@@ -597,15 +599,24 @@ console.log('page headers: counts and encoding agree with the directory before r
         [NaN, 50],
         [11, 11],
       ]),
+      lineString([
+        [10.5, 40],
+        [Infinity, 40],
+      ]),
+      lineString([
+        [NaN, 40],
+        [NaN, 41],
+      ]),
     ]),
   )
   const page = { offset: geometry[0], length: geometry[1], first: 0 }
   const leaf = file.add(
-    primaryLeaf([{ ...page, runs: [{ box: join(at(10, 10), at(11, 50)), count: 1 }] }]),
+    primaryLeaf([{ ...page, runs: [{ box: join(at(10, 10), at(11, 50)), count: 3 }] }]),
   )
   const top = cellBranch(1, [{ low: 0, high: 15, offset: leaf[0], length: leaf[1] }])
   const r = reader(file.bytes, EMPTY_TOP, top)
   assert.deepEqual((await r.readPrimary([10.4, 39.9, 10.6, 40.1])).rows, [0])
+  assert.deepEqual((await r.readPrimary([-180, -85, 180, 85])).rows, [0])
   assert.deepEqual((await r.readPrimary([11.5, 30, 12, 60])).rows, [])
 }
-console.log('exact bboxes: NaN ordinates left out one axis at a time')
+console.log('exact bboxes: NaN ordinates left out one axis at a time, no finite bounds no row')

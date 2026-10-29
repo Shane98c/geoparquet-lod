@@ -286,7 +286,7 @@ def lods(
 
 def _bbox_float32(column: pa.ChunkedArray) -> pa.Array:
     """Covering bbox in float32, rounded outward so it still contains the
-    geometry, and null where the geometry is null or empty."""
+    geometry, and null where the geometry has no finite bounds."""
     parts = []
     for name, outward in (('xmin', -1), ('ymin', -1), ('xmax', 1), ('ymax', 1)):
         exact = pc.struct_field(column, name).to_numpy(zero_copy_only=False).astype(np.float64)
@@ -741,13 +741,20 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
         raise ValueError(
             f'columns {bad} clash with the names thinnings see; rename them in the source'
         )
-    valid = f'({quoted} IS NOT NULL AND NOT ST_IsEmpty({quoted}))'
+    # a row is keyed, covered and shown when its geometry has finite bounds; DuckDB
+    # leaves NaN out of them, giving an axis of NaN alone a minimum past its maximum
+    limits = [f'ST_{b}({quoted})' for b in ('XMin', 'YMin', 'XMax', 'YMax')]
+    valid = (
+        f'({quoted} IS NOT NULL AND NOT ST_IsEmpty({quoted}) '
+        + ''.join(f'AND isfinite({b}) ' for b in limits)
+        + f'AND {limits[0]} <= {limits[2]} AND {limits[1]} <= {limits[3]})'
+    )
     xmin, ymin, xmax, ymax = con.execute(
         f'SELECT min(ST_XMin({quoted})), min(ST_YMin({quoted})), max(ST_XMax({quoted})), max(ST_YMax({quoted})) '
         f"FROM read_parquet('{src}') WHERE {valid}"
     ).fetchone()
     if xmin is None:
-        raise ValueError(f'{src} has no non-empty geometries')
+        raise ValueError(f'{src} has no geometry with finite bounds')
     (mxmin, mxmax), (mymin, mymax) = (
         tuple(map(float, v)) for v in mercator([xmin, xmax], [ymin, ymax])
     )
@@ -848,11 +855,12 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
     ).combine_chunks()
     con.execute('SET preserve_insertion_order = false')
     ctx = Context(tuple(zooms), zooms[-1] if complete_from is None else complete_from, 512)
-    # bit i of a row's levels is set when it is shown at zooms[i]; null or empty geometry is shown nowhere
+    # bit i of a row's levels is set when it is shown at zooms[i]; a geometry without finite
+    # bounds is shown nowhere
     levels = np.zeros(n_rows, dtype=np.int64)
     if rows.num_rows < n_rows:
         log(
-            f'  {n_rows - rows.num_rows:,} rows have null or empty geometry and are shown at no zoom'
+            f'  {n_rows - rows.num_rows:,} rows have no geometry with finite bounds and are shown at no zoom'
         )
     overrides: dict[int, pa.Table] = {}
     counts = {}

@@ -24,9 +24,10 @@ export const float32Outward = ([xmin, ymin, xmax, ymax]: Bbox): Bbox => [
 
 /**
  * The x/y extent of a WKB geometry, ISO or extended, or null when it has no
- * coordinates. Each nested geometry carries its own byte order; Z and M
- * values are skipped, and a NaN x or y, as in an empty point, is left out of
- * its own axis, as GEOS and DuckDB take bounds.
+ * finite extent: no coordinates, no x or no y but NaN, or an infinite one,
+ * where its covering is null. Each nested geometry carries its own byte
+ * order; Z and M values are skipped, and a NaN x or y, as in an empty point,
+ * is left out of its own axis, as GEOS and DuckDB take bounds.
  */
 export function wkbBounds(wkb: Uint8Array): Bbox | null {
   const view = new DataView(wkb.buffer, wkb.byteOffset, wkb.byteLength)
@@ -72,5 +73,6 @@ export function wkbBounds(wkb: Uint8Array): Bbox | null {
     else throw new Error(`unsupported WKB geometry type ${base}`)
   }
   geometry(0)
-  return xmin <= xmax && ymin <= ymax ? [xmin, ymin, xmax, ymax] : null
+  const extent: Bbox = [xmin, ymin, xmax, ymax]
+  return extent.every(Number.isFinite) ? extent : null
 }

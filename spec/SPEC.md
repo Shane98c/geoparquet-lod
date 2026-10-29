@@ -35,9 +35,10 @@ column alongside the source columns.
   boundary copies it hosts. Attribute types are declared in metadata.
 - **Thinning**: the rule selecting displayed features independently at each
   zoom. Membership need not nest across zooms. The reference writer can force
-  completeness from a chosen zoom; null and empty primary geometries remain
-  absent from display LODs. This extension records the rule's description; it
-  does not define rules.
+  completeness from a chosen zoom; primary geometries without finite bounds
+  (Layout 2), null and empty ones among them, remain absent from display
+  LODs. This extension records the rule's description; it does not define
+  rules.
 
 ## Layout
 
@@ -55,10 +56,10 @@ A conforming file MUST satisfy:
    with row group statistics and a page index; a reader finds a tile's row
    groups from the footer, its key pages from the page index, and its exact
    rows by reading the two boundary key pages, then reads only those rows of
-   the LOD column. A row whose primary geometry is null or empty has a null
-   key and sorts after every row with a key. A feature centred outside a
-   tile whose geometry reaches into the tile or within 2 pixels of it
-   (16/4096 of the tile) is a _straddler_. A renderer draws each tile's
+   the LOD column. A row whose primary geometry has no finite bounds, see
+   Layout 2, has a null key and sorts after every row with a key. A feature
+   centred outside a tile whose geometry reaches into the tile or within 2
+   pixels of it (16/4096 of the tile) is a _straddler_. A renderer draws each tile's
    shapes clipped to the tile, so a feature is needed only where it draws
    inside it, and the margin holds an outline drawn along the edge. A
    straddler's row is in another interval, so each packed LOD row carries the
@@ -80,14 +81,18 @@ A conforming file MUST satisfy:
    geometry's GeoParquet 1.1 bbox covering at the paths `["bbox", "xmin"]`
    and so on, with column statistics on
    every row group, and a column index (page statistics) and offset index on
-   each of its four leaves. A row's covering MUST be its primary geometry's
-   bounds, the least and greatest x and y of its coordinates with NaN values
-   left out, rounded outward to float32: `xmin` and `ymin` to the greatest
-   float32 at most them, `xmax` and `ymax` to the least at least them. A
-   row whose primary geometry is null or empty has a null covering, so
-   statistics hold only real bounds and a page of such rows is a null page of
-   the column index. A reader may therefore take a row's bbox from its WKB
-   or its covering and select the same rows.
+   each of its four leaves. A geometry's bounds are the least and greatest x
+   and y of its coordinates with NaN values left out, and are finite when
+   all four exist and are finite: a null or empty geometry has none, nor
+   does one whose x or y values are all NaN, and one with an infinite
+   coordinate has an infinite bound. A row's covering MUST be its primary
+   geometry's finite bounds rounded outward to float32: `xmin` and `ymin` to
+   the greatest float32 at most them, `xmax` and `ymax` to the least at
+   least them. A row whose primary geometry has no finite bounds has a null
+   covering, so statistics hold only real bounds and a page of such rows is
+   a null page of the column index; the row keeps its WKB as the source had
+   it. A reader may therefore take a row's bbox from its WKB or its covering
+   and select the same rows.
 3. **Page indexes.** Every column has an offset index.
 4. **LOD columns.** A top-level required struct column named by `column`
    with one nullable binary child per LOD, named by the LOD. The child is
@@ -96,13 +101,13 @@ A conforming file MUST satisfy:
    per LOD. Each child is a nullable `binary` column, one Parquet leaf,
    holding the row packed as Geometry describes: its geometry, its carried
    attributes and the straddler copies it hosts, see Layout 1. A host-only row has empty own geometry. A row whose
-   primary geometry is null or empty is shown at no LOD.
+   primary geometry has no finite bounds is shown at no LOD.
 
 The validator checks the version, encoding and per-LOD metadata, the schema
 shapes and covering declaration, covering statistics, page indexes, and a
 sample from the first row group: every LOD's values there decode, and each
 row's covering is its primary geometry's bounds rounded outward, null on
-exactly the rows whose geometry is null or empty. In full mode it decodes
+exactly the rows whose geometry has no finite bounds. In full mode it decodes
 every LOD value and copy, checks the covering of every row against its
 geometry, checks in every row group that the covering and the key are null
 on the same rows, and, when the file has the
@@ -145,8 +150,8 @@ Under the `geo` key, a `lod_columns` object:
 All fields are required; readers MUST ignore fields they do not know. Every
 zoom in `zooms` MUST appear in exactly one LOD and lie in `0..key.depth`, so
 each tile is one interval of keys (Layout 1); `zooms` MUST be contiguous,
-and `scale` and `offset` MUST be finite. Every row with a non-null, non-empty
-primary geometry MUST
+and `scale` and `offset` MUST be finite. Every row whose primary geometry
+has finite bounds MUST
 be shown at the finest LOD. Membership at the other LODs is the writer's
 choice per LOD and need not nest: a row may be shown zoomed out and hidden
 one zoom in, as tippecanoe's per-zoom dropping produces. An LOD's zooms are
@@ -278,9 +283,9 @@ reader serves files without the index and how it reaches analytical rows.
    and validates `lod_columns`.
 2. For a tile at zoom z choose the LOD containing z, clamping to the
    coarsest LOD below `zooms`. Finer than the finest zoom, read the primary
-   geometry instead: every row is shown at the finest LOD, so the bbox pages
-   alone choose the rows, skipping null pages and null coverings, and their
-   exact WKB is small at those zooms.
+   geometry instead: every row with a covering is shown at the finest LOD, so
+   the bbox pages alone choose the rows, skipping null pages and null
+   coverings, and their exact WKB is small at those zooms.
 3. The tile's key interval, see Layout 1. Candidate row groups: those whose
    key statistics intersect it, plus the host group, the first group whose
    maximum key is at or past the interval start, or the last group with

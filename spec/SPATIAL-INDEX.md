@@ -151,7 +151,8 @@ row `floor((y + 90) * 4096)`, computed in IEEE double precision, for a
 covering value from its float32. A row's box is the cells of its covering's
 minimum and maximum, inclusive, so it contains the covering. A row has an
 extent when its four covering values are present and finite with each
-minimum at most its maximum; null and empty geometries have none. A tile's
+minimum at most its maximum; a row whose geometry has no finite bounds
+([Layout](SPEC.md#layout) 2) has a null covering and none. A tile's
 cells are those of its edges: tile column `t` at zoom `z` spans the cell
 columns of the longitudes `t * 360 / 2^z - 180` to `(t + 1) * 360 / 2^z - 180`,
 and tile row `t` the cell rows of the latitudes

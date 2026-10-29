@@ -751,7 +751,7 @@ export class LodReader {
 
   /** The covering's extent in row group `g`, from its statistics; a box that
    * intersects nothing when they have no bounds, as for a group whose
-   * geometries are all null or empty. */
+   * geometries all lack finite bounds. */
   private rowGroupBbox(g: number): Bbox {
     const box = BBOX_LEAVES.map((leaf, i) => {
       const stat = this.chunk(g, leaf).meta_data!.statistics
@@ -812,7 +812,7 @@ export class LodReader {
     for (const [a, b] of ranges) {
       for (let row = a; row < b; row++) {
         const box = columns.map((values) => unwrap(values.get(row)))
-        // a null covering, as for null or empty geometry, matches nothing
+        // a null covering, as for a geometry without finite bounds, matches nothing
         if (!box.every(Number.isFinite)) continue
         const [xmin, ymin, xmax, ymax] = box as number[]
         if (!(xmin <= xmax && ymin <= ymax)) continue

@@ -31,10 +31,11 @@ def validate(path: str | Path, sample_rows: int = 2000, *, full: bool = False) -
     The sample is the first sample_rows rows of the first row group: quick
     mode decodes their packed values, and both modes check that each one's
     covering is its primary geometry's bounds rounded outward to float32,
-    null exactly where the geometry is null or empty. Full mode checks every
-    row's covering the same way, streams one LOD column of one row group at
-    a time, decoding it in batches, and checks a row group at a time that
-    the covering and the Hilbert key are null on the same rows.
+    null exactly where the geometry has no finite bounds: where it is null
+    or empty, has no x or no y but NaN, or an infinite coordinate. Full mode
+    checks every row's covering the same way, streams one LOD column of one
+    row group at a time, decoding it in batches, and checks a row group at a
+    time that the covering and the Hilbert key are null on the same rows.
     """
     if not isinstance(sample_rows, int) or sample_rows < 0:
         raise ValueError('sample_rows must be a nonnegative integer')
@@ -165,7 +166,9 @@ def _check_covering(field: pa.Field, covering, geometry: str) -> None:
     if not pa.types.is_struct(field.type):
         raise ValidationError(f'bbox must be a struct column, not {field.type}')
     if not field.nullable:
-        raise ValidationError('bbox must be nullable: null or empty geometry has a null covering')
+        raise ValidationError(
+            'bbox must be nullable: a geometry without finite bounds has a null covering'
+        )
     names = [child.name for child in field.type]
     if sorted(names) != sorted(BOUNDS):
         raise ValidationError(
@@ -214,8 +217,8 @@ def _check_coverings(
 ) -> None:
     """Raise unless, in the first `rows` rows of row group `group`, or all of
     them, each row's covering is its primary geometry's bounds rounded
-    outward to float32, and null exactly where the geometry is null or
-    empty. Reads COVERING_BATCH_ROWS rows at a time."""
+    outward to float32, and null exactly where those bounds are not all
+    finite. Reads COVERING_BATCH_ROWS rows at a time."""
     if rows == 0:
         return
     size = COVERING_BATCH_ROWS if rows is None else min(rows, COVERING_BATCH_ROWS)
@@ -232,22 +235,27 @@ def _check_coverings(
             raise ValidationError(
                 f'row group {group}, row {row}: primary geometry is not valid WKB'
             )
-        present = ~null & ~shapely.is_empty(shapes)
+        bounds = _bounds(shapes)
+        present = np.isfinite(bounds).all(axis=1)
         bbox = batch.column('bbox')
         covered = bbox.is_valid().to_numpy(zero_copy_only=False)
         wrong = np.flatnonzero(covered != present)
         if len(wrong):
             row = wrong[0]
             if present[row]:
-                message = 'null bbox covering on a non-empty geometry'
+                message = 'null bbox covering on a geometry with finite bounds'
+            elif null[row]:
+                message = 'bbox covering on a null geometry'
+            elif shapely.is_empty(shapes[row]):
+                message = 'bbox covering on an empty geometry'
             else:
-                message = f'bbox covering on {"a null" if null[row] else "an empty"} geometry'
+                message = 'bbox covering on a geometry without finite bounds'
             raise ValidationError(f'row group {group}, row {start + row}: {message}')
         stored = np.column_stack([bbox.field(k).to_numpy(zero_copy_only=False) for k in BOUNDS])
-        exact = _bounds(shapes[present])
+        exact = bounds[present]
         expected = _outward(exact)
         stored = stored[present]
-        differs = (stored != expected) & ~(np.isnan(stored) & np.isnan(expected))
+        differs = stored != expected
         bad = np.flatnonzero(differs.any(axis=1))
         if len(bad):
             i = bad[0]
@@ -290,7 +298,7 @@ def _outward(bounds: np.ndarray) -> np.ndarray:
 
 def _check_key_covering(parquet: pq.ParquetFile, group: int, key_column: str) -> None:
     """Raise unless, in row group `group`, the covering and the Hilbert key
-    are null on the same rows: those of null or empty geometry."""
+    are null on the same rows: those whose geometry has no finite bounds."""
     table = parquet.read_row_group(group, columns=['bbox', key_column])
     covered = table.column('bbox').is_valid().to_numpy()
     keyed = table.column(key_column).is_valid().to_numpy()

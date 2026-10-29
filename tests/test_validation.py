@@ -863,25 +863,30 @@ def test_carried_attribute_types_are_checked(indexed, tmp_path, kind, message):
 @pytest.mark.parametrize(
     'mutation, message',
     [
-        ('covering', 'null bbox covering on a non-empty geometry'),
+        ('covering', 'null bbox covering on a geometry with finite bounds'),
         ('null', 'bbox covering on a null geometry'),
         ('empty', 'bbox covering on an empty geometry'),
+        ('nan', 'bbox covering on a geometry without finite bounds'),
+        ('infinite', 'bbox covering on a geometry without finite bounds'),
         ('invalid', 'primary geometry is not valid WKB'),
     ],
 )
 def test_sampled_coverings_follow_their_geometry(indexed, tmp_path, mutation, message):
-    """A sampled row's covering is null exactly where its primary geometry is
-    null or empty, in either mode; quick mode leaves a row past the sample
-    unchecked."""
+    """A sampled row's covering is null exactly where its primary geometry
+    has no finite bounds, in either mode; quick mode leaves a row past the
+    sample unchecked."""
     row = 1
 
     def change(table, geo):
         if mutation == 'covering':
             return _replace(table, 'bbox', _null_at(table['bbox'], row))
         wkb = table['geometry'].to_pylist()
-        wkb[row] = {'null': None, 'empty': shapely.to_wkb(shapely.Polygon())}.get(
-            mutation, b'\x01\x03\x00'
-        )
+        wkb[row] = {
+            'null': None,
+            'empty': shapely.to_wkb(shapely.Polygon()),
+            'nan': shapely.to_wkb(shapely.LineString([(np.nan, 39.7), (np.nan, 39.8)])),
+            'infinite': shapely.to_wkb(shapely.LineString([(np.inf, 39.7), (-105, 39.8)])),
+        }.get(mutation, b'\x01\x03\x00')
         return _replace(table, 'geometry', pa.array(wkb, pa.binary()))
 
     bad = _rewritten(indexed, tmp_path / f'{mutation}.parquet', change)
@@ -919,21 +924,25 @@ def test_coverings_are_their_geometry_bounds(indexed, tmp_path, bound, outward, 
 
 
 def _among(tmp_path, kind, odd, n=60):
-    """A source of `n` small `kind` geometries near Denver with `odd` at row 25."""
+    """A source of `n` small `kind` geometries near Denver with `odd`, unless
+    None, at row 25."""
     x, y = -105 + np.arange(n) % 10 * 0.01, 39.7 + np.arange(n) // 10 * 0.01
     corners = np.stack([np.column_stack([x, y]), np.column_stack([x, y]) + 0.004], axis=1)
     if kind == 'Polygon':
         shapes = shapely.box(x, y, x + 0.004, y + 0.004)
+    elif kind == 'LineString':
+        shapes = shapely.linestrings(corners)
     else:
         shapes = shapely.multipoints(corners)
     wkb = shapely.to_wkb(shapes).tolist()
-    wkb.insert(25, odd if isinstance(odd, bytes) else shapely.to_wkb(odd))
+    if odd is not None:
+        wkb.insert(25, shapely.to_wkb(odd))
     geo = {
         'version': '1.1.0',
         'primary_column': 'geometry',
         'columns': {'geometry': {'encoding': 'WKB', 'geometry_types': [kind]}},
     }
-    table = pa.table({'id': range(n + 1), 'geometry': pa.array(wkb, pa.binary())})
+    table = pa.table({'id': range(len(wkb)), 'geometry': pa.array(wkb, pa.binary())})
     src = tmp_path / f'{kind}.parquet'
     pq.write_table(table.replace_schema_metadata({b'geo': json.dumps(geo).encode()}), src)
     return src
@@ -970,6 +979,38 @@ def test_written_coverings_bound_every_coordinate(tmp_path, kind, odd, bounds):
     row = table['id'].to_pylist().index(25)
     covering = table['bbox'][row].as_py()
     assert [covering[k] for k in BOUNDS] == _outward(np.array([bounds])).tolist()[0]
+
+
+@pytest.mark.parametrize(
+    'kind, odd',
+    [
+        ('LineString', shapely.LineString([(np.nan, 10), (np.nan, 11)])),
+        ('MultiPoint', shapely.MultiPoint([(np.nan, 10), (np.nan, 11)])),
+        ('LineString', shapely.LineString([(np.inf, 10), (-104.95, 11)])),
+    ],
+)
+def test_a_geometry_without_finite_bounds_is_shown_nowhere(tmp_path, kind, odd):
+    """A geometry with no x or no y but NaN, or an infinite coordinate, has no
+    finite bounds, so as a null or empty one does it gets a null covering and
+    key, sorts last and is shown at no zoom, its WKB kept. The extent, grids
+    and every other row's overviews are those of the file without it."""
+    options = dict(zooms=[8, 10, 12], workers=1, log=lambda *_: None)
+    out = write(_among(tmp_path, kind, odd), tmp_path / 'out.parquet', **options)
+    validate(out, full=True)
+    (tmp_path / 'alone').mkdir()
+    alone = write(_among(tmp_path / 'alone', kind, None), tmp_path / 'alone.parquet', **options)
+    table, reference = pq.read_table(out), pq.read_table(alone)
+    last = table.num_rows - 1
+    assert table['id'][last].as_py() == 25, 'it sorts last'
+    assert not table['bbox'][last].is_valid and not table['hilbert'][last].is_valid
+    assert table['geometry'][last].as_py() == shapely.to_wkb(odd)
+    lod = table['lod'].combine_chunks()
+    assert not any(lod.field(i)[last].is_valid for i in range(lod.type.num_fields))
+    assert lod.slice(0, last).equals(reference['lod'].combine_chunks())
+    lods = [
+        json.loads(t.schema.metadata[b'geo'])['lod_columns']['lods'] for t in (table, reference)
+    ]
+    assert lods[0] == lods[1], 'the same grids, on the same origin'
 
 
 @pytest.mark.parametrize(

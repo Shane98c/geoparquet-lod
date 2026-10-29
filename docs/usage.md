@@ -9,11 +9,12 @@ how to install and run the packages, and what the reader APIs return.
 Rows are sorted once along a Hilbert curve over the Web Mercator world
 square in large row groups, so a tile's rows are one contiguous run and a
 city tile touches one or two row groups. A float32 bbox covering with page
-statistics, null for a null or empty geometry, lets a reader pick pages
-without reading geometry. Each LOD is a nullable binary child of the required
-`lod` struct. Present values pack whole quantized geometry, carried
-attributes, and boundary copies; the spatial index selects these pages
-directly.
+statistics, null for a geometry without finite bounds (null, empty, NaN on a
+whole axis or with an infinite coordinate), which no zoom shows, lets a
+reader pick pages without reading geometry. Each LOD is a nullable binary
+child of the required `lod` struct. Present values pack whole quantized
+geometry, carried attributes, and boundary copies; the spatial index selects
+these pages directly.
 
 Which rows appear at which zoom is a _thinning function_, one shape:
 
@@ -308,8 +309,8 @@ z14 and overzooms beyond it.
 covering's schema and declaration, required page indexes, and up to 2,000 rows
 of the first row group: their overview values decode, and each one's covering
 is its geometry's bounds rounded outward to float32, null exactly where the
-geometry is null or empty. Use `--sample-rows N` to change that quick sample.
-Use `geoparquet-lod validate file.parquet --full` (Python:
+geometry has no finite bounds. Use `--sample-rows N` to change that quick
+sample. Use `geoparquet-lod validate file.parquet --full` (Python:
 `validate(path, full=True)`) to decode every overview value in every row group,
 including boundary copies. Full mode checks every row's covering the same
 way, that the covering and the Hilbert key are null on the same rows, that
