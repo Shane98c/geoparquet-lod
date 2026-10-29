@@ -1,9 +1,7 @@
-// Warm-cache paired CPU comparison. Run after the writer/optimizer has finished.
+// Warm-cache CPU profile of tile reads and MVT encoding. Run after the writer/optimizer has finished.
 // node [--cpu-prof --cpu-prof-dir=/private/tmp] test/profile-tile.mjs spatial.parquet
 import { open } from 'node:fs/promises'
-import assert from 'node:assert/strict'
-import { toMvt as referenceMvt } from '@cogp/reader'
-import { toMvt as streamMvt } from '../dist/mvt.js'
+import { toMvt } from '../dist/mvt.js'
 import { openReader, coalescing } from '../dist/index.js'
 
 const [path] = process.argv.slice(2)
@@ -18,8 +16,11 @@ const source = coalescing({
   },
 })
 const reader = await openReader(source)
-const variants = ['reference', 'stream']
-const samples = []
+const median = (values) => {
+  const sorted = [...values].sort((a, b) => a - b)
+  return (sorted[Math.floor((sorted.length - 1) / 2)] + sorted[Math.floor(sorted.length / 2)]) / 2
+}
+const results = []
 for (const [z, lon, lat] of [
   [8, 139.76, 35.68],
   [11, 139.76, 35.68],
@@ -29,67 +30,26 @@ for (const [z, lon, lat] of [
   const y = Math.floor(((1 - Math.asinh(Math.tan((lat * Math.PI) / 180)) / Math.PI) / 2) * 2 ** z)
   const lod = reader.lodForZoom(z)
   for (const properties of [[], ['height', 'class']]) {
-    let expected
+    const samples = []
+    let bytes = 0
+    // The first three rounds are warmup.
     for (let round = 0; round < 15; round++) {
-      // Rotate the order so GC, warmup and background load don't consistently
-      // favour the same variant. The first three rounds are warmup.
-      for (let j = 0; j < variants.length; j++) {
-        const implementation = variants[(j + round) % variants.length]
-        const a = performance.now()
-        const data = await reader.readLodByTile(lod, z, x, y, properties)
-        const b = performance.now()
-        const out = (implementation === 'stream' ? streamMvt : referenceMvt)(
-          { geometry: data.geometry, rowIndex: data.rows, columns: data.columns },
-          { z, x, y, layer: 'features' },
-        )
-        const d = performance.now()
-        if (!expected) expected = new Uint8Array(out)
-        else
-          assert.deepEqual(
-            new Uint8Array(out),
-            expected,
-            `${z}/${implementation}: identical MVT bytes`,
-          )
-        if (round >= 3)
-          samples.push({
-            z,
-            properties,
-            implementation,
-            round,
-            readMs: b - a,
-            mvtMs: d - b,
-            totalMs: d - a,
-            bytes: out.byteLength,
-          })
-      }
+      const a = performance.now()
+      const data = await reader.readLodByTile(lod, z, x, y, properties)
+      const b = performance.now()
+      const out = toMvt(
+        { geometry: data.geometry, rowIndex: data.rows, columns: data.columns },
+        { z, x, y, layer: 'features' },
+      )
+      const c = performance.now()
+      bytes = out.byteLength
+      if (round >= 3) samples.push({ readMs: b - a, mvtMs: c - b, totalMs: c - a })
     }
+    const entry = { z, properties, bytes }
+    for (const key of ['readMs', 'mvtMs', 'totalMs'])
+      entry[key] = median(samples.map((sample) => sample[key]))
+    results.push(entry)
   }
 }
-const results = []
-for (const sample of samples) {
-  if (
-    results.some(
-      (r) =>
-        r.z === sample.z &&
-        r.properties.length === sample.properties.length &&
-        r.implementation === sample.implementation,
-    )
-  )
-    continue
-  const group = samples.filter(
-    (r) =>
-      r.z === sample.z &&
-      r.properties.length === sample.properties.length &&
-      r.implementation === sample.implementation,
-  )
-  const entry = { ...sample }
-  delete entry.round
-  for (const key of ['readMs', 'mvtMs', 'totalMs']) {
-    const values = group.map((r) => r[key]).sort((a, b) => a - b)
-    entry[key] =
-      (values[Math.floor((values.length - 1) / 2)] + values[Math.floor(values.length / 2)]) / 2
-  }
-  results.push(entry)
-}
-console.log(JSON.stringify({ path, runs: 12, results, samples }, null, 2))
+console.log(JSON.stringify({ path, runs: 12, results }, null, 2))
 await file.close()
