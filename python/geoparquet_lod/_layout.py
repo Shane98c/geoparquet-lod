@@ -2,9 +2,9 @@
 
 The output is still the same Parquet table, including every LOD value. No
 geometry, attribute or row id is changed. LOD pages are re-encoded with zstd
-at tile boundaries; every other column chunk is copied verbatim, and a box tree
-indexes the primary geometry's own pages. Readers unaware of the directories
-follow the relocated standard footer.
+at tile boundaries; every other column chunk is copied verbatim, and a
+directory of boxed runs of rows locates the primary geometry's own pages.
+Readers unaware of the directories follow the relocated standard footer.
 """
 
 from __future__ import annotations
@@ -23,6 +23,8 @@ import pyarrow.parquet as pq
 
 from ._compact import dumps, get, loads, set_value
 from .encoding import PACK_VERSION
+from .key import hilbert_key
+from .spill import ranges
 
 VERSION = 3
 BOOTSTRAP_BYTES = 16384
@@ -36,13 +38,13 @@ FENCE_FIELDS = ('fence_page', 'fence_row', 'fence_cell')
 # primary directory boxes are whole cells of 2**-BOX_BITS degrees
 BOX_BITS = 12
 BOX_FIELDS = ('x0', 'y0', 'x1', 'y1')
-RUN_FIELDS = ('offset', 'length', 'first', 'count')
-# A geometry page is cut in two, and each half once more, where the cut makes
-# the boxes cover at most PIECE_SAVING of the tiles of PIECE_TILE cells its box
-# covers.
-PIECE_ROUNDS = 2
-PIECE_SAVING = 0.7
-PIECE_TILE = 32
+SOURCE_FIELDS = ('offset', 'length', 'first', 'count')
+# A geometry page is cut into runs of rows, in two and each half once more,
+# where the cut makes the boxes cover at most RUN_SAVING of the tiles of
+# RUN_TILE cells its box covers.
+RUN_ROUNDS = 2
+RUN_SAVING = 0.7
+RUN_TILE = 32
 
 
 def _json(value):
@@ -113,29 +115,29 @@ def page_boxes(cells, bounds):
     return tuple(np.where(shown, u, 0).astype(np.int64) for u in union), shown
 
 
-def _within(ufunc, values, piece, span):
-    """`ufunc` accumulated over each run of equal, ascending `piece` from the
-    run's first value. Values lie in [0, span), and shifting each run past the
-    ones before keeps one accumulation from mixing them."""
-    shift = piece * span if ufunc is np.maximum else -piece * span
+def _within(ufunc, values, run, span):
+    """`ufunc` accumulated over each stretch of equal, ascending `run` from the
+    stretch's first value. Values lie in [0, span), and shifting each stretch
+    past the ones before keeps one accumulation from mixing them."""
+    shift = run * span if ufunc is np.maximum else -run * span
     return ufunc.accumulate(values + shift) - shift
 
 
-def page_pieces(cells, bounds, rounds=PIECE_ROUNDS, saving=PIECE_SAVING, tile=PIECE_TILE):
-    """Where pages split into pieces, runs of consecutive rows each boxed on
-    its own. A Hilbert curve leaving the data and re-entering it far away
+def page_runs(cells, bounds, rounds=RUN_ROUNDS, saving=RUN_SAVING, tile=RUN_TILE):
+    """Where pages split into runs of consecutive rows, each boxed on its
+    own. A Hilbert curve leaving the data and re-entering it far away
     puts rows of distant places in one page, whose box then spans the empty
-    space between them. Each round cuts every piece once more, at the row
+    space between them. Each round cuts every run once more, at the row
     minimizing its halves' cost `(width + tile) * (height + tile)`, roughly
     the tiles a box overlaps, when that cost is at most `saving` times the
-    piece's. Returns the cut rows, each the first row of a piece after its
+    run's. Returns the cut rows, each the first row of a run after its
     page's first."""
     rows = np.flatnonzero(~np.isnan(cells[0]))
     cuts = np.zeros(0, np.int64)
     if len(rows) < 2:
         return cuts
-    # rows with an extent, offset by piece so that one accumulation runs
-    # through every piece without mixing them
+    # rows with an extent, offset by run so that one accumulation goes
+    # through every run without mixing them
     origin = np.nanmin(cells[0]), np.nanmin(cells[1])
     values = [c[rows] - origin[i % 2] for i, c in enumerate(cells)]
     span = max(float(np.max(v)) for v in values) + 1
@@ -143,51 +145,25 @@ def page_pieces(cells, bounds, rounds=PIECE_ROUNDS, saving=PIECE_SAVING, tile=PI
     starts = np.r_[True, page[1:] != page[:-1]]
     union = (np.minimum, np.minimum, np.maximum, np.maximum)
     for _ in range(rounds):
-        piece = np.cumsum(starts) - 1
+        run = np.cumsum(starts) - 1
         last = np.r_[starts[1:], True]
-        head = [_within(f, v, piece, span) for f, v in zip(union, values, strict=True)]
+        head = [_within(f, v, run, span) for f, v in zip(union, values, strict=True)]
         tail = [
-            _within(f, v[::-1], piece[-1] - piece[::-1], span)[::-1]
+            _within(f, v[::-1], run[-1] - run[::-1], span)[::-1]
             for f, v in zip(union, values, strict=True)
         ]
         left = (head[2] - head[0] + tile) * (head[3] - head[1] + tile)
         right = (tail[2] - tail[0] + tile) * (tail[3] - tail[1] + tile)
-        whole = left[last][piece]
+        whole = left[last][run]
         both = left[:-1] + right[1:]
         inside = np.flatnonzero(~last[:-1] & (both <= saving * whole[:-1]))
-        inside = inside[np.lexsort((both[inside], piece[inside]))]
-        best = (
-            inside[np.r_[True, piece[inside][1:] != piece[inside][:-1]]] if len(inside) else inside
-        )
+        inside = inside[np.lexsort((both[inside], run[inside]))]
+        best = inside[np.r_[True, run[inside][1:] != run[inside][:-1]]] if len(inside) else inside
         if not len(best):
             break
         starts[best + 1] = True
         cuts = np.union1d(cuts, rows[best + 1])
     return cuts
-
-
-def _pieces(cells, bounds, cuts, box):
-    """Per page holding rows `bounds[i]:bounds[i + 1]`, its pieces split at
-    `cuts` as a flat list: each piece's rows, then its box's minimum cell
-    column and row minus the page box's, width and height; empty for a page
-    of one piece. `box` holds the pages' boxes."""
-    edges = np.union1d(bounds, cuts)
-    (px0, py0, px1, py1), _ = page_boxes(cells, edges)
-    page = np.searchsorted(bounds, edges[:-1], side='right') - 1
-    out = [[] for _ in range(len(bounds) - 1)]
-    for i in np.unique(page[np.searchsorted(edges, cuts)]):
-        at = np.flatnonzero(page == i)
-        flat = np.column_stack(
-            (
-                edges[at + 1] - edges[at],
-                px0[at] - box[0][i],
-                py0[at] - box[1][i],
-                px1[at] - px0[at],
-                py1[at] - py0[at],
-            )
-        )
-        out[i] = flat.ravel().tolist()
-    return out
 
 
 def primary_schema(metadata, columns):
@@ -343,7 +319,7 @@ def _column(values):
     return array.astype(np.int64)
 
 
-def _runs(offset, length, first, count):
+def _source_columns(offset, length, first, count):
     """Byte ranges and rows of consecutive pages: each one's bytes after the
     previous one's end, compressed length, first row after the previous one's
     end row, and rows. The first counts from zero."""
@@ -356,140 +332,280 @@ def _runs(offset, length, first, count):
     ]
 
 
-def _read_runs(columns):
-    """The pages `_runs` stores, as arrays, in byte and row order."""
+def _read_sources(columns):
+    """The pages `_source_columns` stores, as arrays, in byte and row order."""
     gaps, length, rows, count = (_column(values) for values in columns)
     if not len(gaps) == len(length) == len(rows) == len(count):
-        raise ValueError('malformed page run')
+        raise ValueError('malformed source pages')
     if (gaps < 0).any() or (length <= 0).any() or (rows < 0).any() or (count <= 0).any():
-        raise ValueError('page runs overlap or are empty')
+        raise ValueError('source pages overlap or are empty')
     end, last = np.cumsum(gaps + length), np.cumsum(rows + count)
     return {'offset': end - length, 'length': length, 'first': last - count, 'count': count}
 
 
-def _box_node(level, x0, y0, x1, y1, offset, length):
-    """A primary directory node's leading columns, one value per entry in row
-    order: minimum column and row cell minus the previous entry's, width and
-    height in cells, bytes between the previous entry's end and this entry's
-    start, and compressed length. The first entry counts from zero."""
-    x0, y0, x1, y1, offset, length = (
-        np.asarray(v, np.int64) for v in (x0, y0, x1, y1, offset, length)
+def directory_zoom(lod):
+    """Zoom of the primary directory's cells: the finest zoom, at most the key depth."""
+    return min(lod['key']['depth'], max(lod['zooms']))
+
+
+def leaf_starts(low, high, leaf_pages, cells):
+    """The first cells of the leaves of a primary directory over pages whose
+    keyed rows lie in cells `low[i]..high[i]` of the `cells` cells, in key
+    order. A leaf takes about `leaf_pages` pages: it ends before the coarsest
+    aligned cell among those of its last half, and a page holding that cell is
+    in both leaves."""
+    starts, s = [0], 0
+    while len(low) - s > leaf_pages:
+        a, b = max(int(low[s + leaf_pages // 2]), starts[-1]), int(high[s + leaf_pages - 1])
+        level = ((a ^ b).bit_length() - 1) // 2
+        cut = (b >> 2 * level) << 2 * level if a < b else a + 1
+        if cut >= cells:
+            break
+        starts.append(cut)
+        s = max(s + 1, int(np.searchsorted(high, cut)))
+    return np.array(starts, np.int64)
+
+
+def coarsest_zoom(starts, zoom):
+    """The coarsest zoom whose tiles each lie in one leaf, for leaves starting
+    at cells `starts` of `zoom`."""
+    levels = [((c & -c).bit_length() - 1) // 2 for c in map(int, starts) if c]
+    return zoom - min([zoom, *levels])
+
+
+def tile_edges(zoom):
+    """The cells of the edges of the tiles at `zoom`: tile column t spans the
+    cell columns `columns[t]..columns[t + 1]`, and tile row t, counted from
+    the north, the cell rows `rows[t + 1]..rows[t]`, the outer rows reaching
+    latitudes 90 and -90. Neighbouring tiles share the cells of their edge."""
+    t = np.arange(2**zoom + 1, dtype=np.int64)
+    columns = (t * (360 << BOX_BITS)) >> zoom
+    latitude = np.degrees(np.arctan(np.sinh(np.pi * (1 - 2 * t / 2**zoom))))
+    rows = np.floor((latitude + 90) * (1 << BOX_BITS)).astype(np.int64)
+    rows[0], rows[-1] = 180 << BOX_BITS, 0
+    return columns, rows
+
+
+def reached_tiles(cells, zoom, edges=None):
+    """The tiles at `zoom` whose cells the boxes `cells` (int64 `x0, y0, x1,
+    y1`) reach, as tile columns `tx0..tx1` and rows `ty0..ty1`. `edges` are
+    `tile_edges(zoom)`."""
+    columns, rows = tile_edges(zoom) if edges is None else edges
+    x0, y0, x1, y1 = cells
+    reach = (
+        np.searchsorted(columns[1:], x0),
+        np.searchsorted(-rows[1:], -y1),
+        np.searchsorted(columns[:-1], x1, 'right') - 1,
+        np.searchsorted(-rows[:-1], -y0, 'right') - 1,
     )
+    return tuple(np.clip(v, 0, 2**zoom - 1) for v in reach)
+
+
+def _rect_leaves(x0, y0, x1, y1, zoom, starts):
+    """The leaves holding the cells of tiles `x0..x1`, `y0..y1` at `zoom`, for
+    leaves starting at cells `starts` of `zoom`."""
+    found, stack = set(), [(0, 0, 0)]
+    while stack:
+        z, x, y = stack.pop()
+        shift = zoom - z
+        if x << shift > x1 or (x + 1) << shift <= x0 or y << shift > y1 or (y + 1) << shift <= y0:
+            continue
+        h = int(hilbert_key(np.array([x]), np.array([y]), z)[0])
+        ends = [h << 2 * shift, ((h + 1) << 2 * shift) - 1]
+        first, last = (int(v) for v in np.searchsorted(starts, ends, 'right') - 1)
+        inside = (
+            x << shift >= x0
+            and (x + 1) << shift <= x1 + 1
+            and y << shift >= y0
+            and (y + 1) << shift <= y1 + 1
+        )
+        if first == last or inside:
+            found.update(range(first, last + 1))
+        else:
+            stack += [(z + 1, 2 * x + dx, 2 * y + dy) for dx in (0, 1) for dy in (0, 1)]
+    return np.array(sorted(found), np.int64)
+
+
+def reached_leaves(cells, zoom, starts, edges=None):
+    """The leaves the boxes `cells` (int64 `x0, y0, x1, y1`) reach, as pairs
+    of arrays: box index and leaf, each pair once. Leaf i holds the cells of
+    `zoom` from `starts[i]` up to the next start, and every tile of `zoom`
+    lies in one leaf. `edges` are `tile_edges(zoom)`."""
+    tx0, ty0, tx1, ty1 = reached_tiles(cells, zoom, edges)
+    near = (tx1 - tx0 <= 1) & (ty1 - ty0 <= 1)
+    boxes, leaves = [], []
+    for dx in (0, 1):
+        for dy in (0, 1):
+            at = np.flatnonzero(near & (tx0 + dx <= tx1) & (ty0 + dy <= ty1))
+            boxes.append(at)
+            key = hilbert_key(tx0[at] + dx, ty0[at] + dy, zoom)
+            leaves.append(np.searchsorted(starts, key, 'right') - 1)
+    for i in np.flatnonzero(~near):
+        found = _rect_leaves(tx0[i], ty0[i], tx1[i], ty1[i], zoom, starts)
+        boxes.append(np.full(len(found), i))
+        leaves.append(found)
+    pair = np.unique(np.concatenate(boxes) * len(starts) + np.concatenate(leaves))
+    return pair // len(starts), pair % len(starts)
+
+
+def pages_over(pages, first, end):
+    """Indexes of `pages`, in row order, overlapping any rows `first[i]` up to
+    `end[i]`."""
+    a = np.searchsorted(pages['first'] + pages['count'], first, 'right')
+    b = np.searchsorted(pages['first'], end)
+    marks = np.zeros(len(pages['first']) + 1, np.int64)
+    np.add.at(marks, a, 1)
+    np.add.at(marks, b, -1)
+    return np.flatnonzero(np.cumsum(marks)[:-1] > 0)
+
+
+def primary_leaf(entries, sources):
+    """A primary directory leaf over `entries`, runs of rows each within one
+    geometry page in row order: their boxes as `_box_columns` stores them,
+    their pages' byte ranges, each page's after the previous entry's page's
+    end and of length 0 when it is that page, their first rows after the
+    previous entry's end row and their rows, then, for each source column's
+    pages in `sources`, those over the entries' rows."""
+    offset, length, first, count = (np.asarray(entries[k], np.int64) for k in SOURCE_FIELDS)
+    again = np.r_[False, offset[1:] == offset[:-1]]
+    previous = np.r_[0, offset + length][: len(offset)]
+    located = []
+    for pages in sources:
+        over = pages_over(pages, first, first + count)
+        located.append(_source_columns(*(pages[k][over] for k in SOURCE_FIELDS)))
     return [
-        level,
+        0,
+        *_box_columns(*(entries[k] for k in BOX_FIELDS)),
+        np.where(again, 0, offset - previous).tolist(),
+        np.where(again, 0, length).tolist(),
+        (first - np.r_[0, first + count][: len(first)]).tolist(),
+        count.tolist(),
+        located,
+    ]
+
+
+def _box_columns(x0, y0, x1, y1):
+    """Boxes in cells, one per entry: minimum column and row minus the
+    previous entry's, then width and height. The first counts from zero."""
+    x0, y0, x1, y1 = (np.asarray(v, np.int64) for v in (x0, y0, x1, y1))
+    return [
         np.diff(x0, prepend=0).tolist(),
         np.diff(y0, prepend=0).tolist(),
         (x1 - x0).tolist(),
         (y1 - y0).tolist(),
-        (offset - np.r_[0, offset + length][: len(offset)]).tolist(),
-        length.tolist(),
     ]
 
 
-def _box_leaf(pages, start, end, columns):
-    """A level-zero primary node over geometry pages `start:end`, adding per
-    page its first global row minus the previous page's end, its rows and its
-    pieces, then, for each source column in `columns`, the runs of that
-    column's pages overlapping the leaf's rows."""
-    first, count = pages['first'][start:end], pages['count'][start:end]
-    runs = []
-    for column in columns:
-        if start < end:
-            a = np.searchsorted(column['first'] + column['count'], first[0], side='right')
-            b = np.searchsorted(column['first'], first[-1] + count[-1])
-        else:
-            a = b = 0
-        runs.append(_runs(*(column[k][a:b] for k in RUN_FIELDS)))
-    head = _box_node(0, *(pages[k][start:end] for k in (*BOX_FIELDS, 'offset', 'length')))
-    return [
-        *head,
-        *_runs(pages['offset'][start:end], pages['length'][start:end], first, count)[2:],
-        pages['pieces'][start:end],
-        runs,
-    ]
-
-
-def read_box_node(node, columns):
-    """A primary directory node's level and its entries as arrays: boxes
-    `x0, y0, x1, y1` in cells, byte offsets and lengths, and for a leaf each
-    page's first row and rows plus, under `runs`, each of the `columns`
-    source columns' pages over the leaf's rows. Pages are in byte and row
-    order."""
-    if not isinstance(node, list) or len(node) < 7:
-        raise ValueError('malformed primary directory node')
-    level = node[0]
-    if type(level) is not int or not 0 <= level <= 32:
-        raise ValueError('invalid directory level')
-    if len(node) != (7 if level else 11):
-        raise ValueError('malformed primary directory node')
-    west, south, width, height, gaps, length = (_column(values) for values in node[1:7])
-    if not len(west) == len(south) == len(width) == len(height) == len(gaps) == len(length):
-        raise ValueError('malformed primary directory node')
+def read_primary_node(node, columns):
+    """A primary directory node's level and entries as arrays: above the
+    leaves, nodes as `read_node` reads them; in a leaf, runs of rows with
+    boxes `x0, y0, x1, y1` in cells, their pages' byte offsets and lengths,
+    first rows and rows, plus, under `sources`, each of the `columns` source
+    columns' pages over the leaf's rows. Entries are in row order."""
+    if isinstance(node, list) and node and node[0] != 0:
+        return read_node(node)
+    if not isinstance(node, list) or len(node) != 10 or type(node[0]) is not int:
+        raise ValueError('malformed primary directory leaf')
+    west, south, width, height, gaps, length, rows, count = (_column(v) for v in node[1:9])
+    if len({len(v) for v in (west, south, width, height, gaps, length, rows, count)}) != 1:
+        raise ValueError('malformed primary directory leaf')
     if (width < 0).any() or (height < 0).any():
         raise ValueError('primary directory box with a negative extent')
-    if (gaps < 0).any() or (length <= 0).any():
-        raise ValueError('directory byte ranges overlap or are empty')
-    x0, y0, end = np.cumsum(west), np.cumsum(south), np.cumsum(gaps + length)
+    again = length == 0
+    if (
+        (gaps < 0).any()
+        or (length < 0).any()
+        or (rows < 0).any()
+        or (count <= 0).any()
+        or (again & ((gaps != 0) | (rows != 0))).any()
+        or (len(again) and again[0])
+    ):
+        raise ValueError('primary directory byte or row ranges overlap or are empty')
+    page = np.cumsum(~again) - 1
+    end = np.cumsum((gaps + length)[~again])
+    x0, y0 = np.cumsum(west), np.cumsum(south)
     entries = {
         'x0': x0,
         'y0': y0,
         'x1': x0 + width,
         'y1': y0 + height,
-        'offset': end - length,
-        'length': length,
+        'offset': (end - length[~again])[page],
+        'length': length[~again][page],
+        'first': np.cumsum(rows + count) - count,
+        'count': count,
     }
-    if level:
-        return level, entries
-    rows, count = _column(node[7]), _column(node[8])
-    if len(rows) != len(x0) or len(count) != len(x0) or (rows < 0).any() or (count <= 0).any():
-        raise ValueError('malformed primary directory leaf')
-    entries['first'] = np.cumsum(rows + count) - count
-    entries['count'] = count
-    entries.update(_read_pieces(node[9], entries))
-    runs = node[10]
-    if not isinstance(runs, list) or len(runs) != len(columns):
+    sources = node[9]
+    if not isinstance(sources, list) or len(sources) != len(columns):
         raise ValueError('primary directory leaf disagrees with its columns')
-    if not all(isinstance(r, list) and len(r) == 4 for r in runs):
-        raise ValueError('malformed page run')
-    entries['runs'] = [_read_runs(r) for r in runs]
+    if not all(isinstance(r, list) and len(r) == 4 for r in sources):
+        raise ValueError('malformed source pages')
+    entries['sources'] = [_read_sources(r) for r in sources]
     return 0, entries
 
 
-def _read_pieces(stored, pages):
-    """A leaf's pieces as flat arrays in row order: each piece's page, first
-    global row, rows and box. Each page holds none or two or more pieces,
-    whose rows add up to the page's and whose boxes lie within its box."""
-    if not isinstance(stored, list) or len(stored) != len(pages['count']):
-        raise ValueError('malformed primary directory pieces')
-    if not all(isinstance(p, list) and len(p) % 5 == 0 and len(p) != 5 for p in stored):
-        raise ValueError('malformed primary directory pieces')
-    flat = _column([v for p in stored for v in p]).reshape(-1, 5)
-    page = np.repeat(np.arange(len(stored)), [len(p) // 5 for p in stored])
-    count, dx, dy, width, height = flat.T
-    if (count <= 0).any() or (flat[:, 1:] < 0).any():
-        raise ValueError('malformed primary directory pieces')
-    x0, y0 = pages['x0'][page] + dx, pages['y0'][page] + dy
-    x1, y1 = x0 + width, y0 + height
-    if (x1 > pages['x1'][page]).any() or (y1 > pages['y1'][page]).any():
-        raise ValueError('primary directory piece outside its page box')
-    total = np.bincount(page, count, len(stored))
-    split = np.bincount(page, minlength=len(stored)) > 0
-    if (total[split] != pages['count'][split]).any():
-        raise ValueError('primary directory pieces disagree with their page rows')
-    end = np.cumsum(count)
-    start = end - count - np.r_[0, end][np.searchsorted(page, page)] + pages['first'][page]
-    return {
-        'piece_page': page,
-        'piece_first': start,
-        'piece_count': count,
-        'piece_x0': x0,
-        'piece_y0': y0,
-        'piece_x1': x1,
-        'piece_y1': y1,
-    }
+def primary_leaves(parquet, covering, pages, keys, depth, zoom, leaf_pages):
+    """The primary directory's leaves: the first cell of each among the cells
+    of `zoom`, a table of runs of geometry rows in row order, and the runs
+    each leaf lists. `covering` names the covering's column and fields,
+    `pages` holds each row group's geometry pages as `_index_pages` returns
+    them, and `keys` every row's key at `depth`, a null key as 4**depth. A
+    page whose rows the curve took from distant places is cut into runs,
+    and a leaf lists every run of each page holding a row whose box reaches
+    its cells."""
+    column, fields = covering
+    table = {k: np.concatenate([part[k] for part in pages]) for k in SOURCE_FIELDS}
+    keyed = int(np.searchsorted(keys, np.uint64(4**depth)))
+    first = table['first'][table['first'] < keyed]
+    last = np.minimum(first + table['count'][: len(first)], keyed) - 1
+    shift = np.uint64(2 * (depth - zoom))
+    low, high = ((keys[rows] >> shift).astype(np.int64) for rows in (first, last))
+    starts = leaf_starts(low, high, leaf_pages, 4**zoom)
+    # tiles of the coarsest zoom at which each lies in one leaf
+    reach = coarsest_zoom(starts, zoom)
+    coarse = starts >> 2 * (zoom - reach)
+    edges = tile_edges(reach) if len(starts) > 1 else None
+    runs, pairs, numbered = [], [], 0
+    for g, part in enumerate(pages):
+        bbox = parquet.read_row_group(g, columns=[column]).column(0).combine_chunks()
+        cells = covering_cells(bbox, fields)
+        start = int(part['first'][0])
+        bounds = np.r_[part['first'] - start, len(bbox)]
+        cuts = np.union1d(bounds, page_runs(cells, bounds))
+        box, filled = page_boxes(cells, cuts)
+        page = np.searchsorted(bounds, cuts[:-1], 'right') - 1
+        run = {
+            **dict(zip(BOX_FIELDS, box, strict=True)),
+            'offset': part['offset'][page],
+            'length': part['length'][page],
+            'first': cuts[:-1] + start,
+            'count': np.diff(cuts),
+            'page': page + numbered,
+        }
+        runs.append({k: v[filled] for k, v in run.items()})
+        rows = np.flatnonzero(~np.isnan(cells[0]))
+        page = np.searchsorted(bounds, rows, 'right') - 1 + numbered
+        if len(starts) > 1:
+            row, leaf = reached_leaves(
+                [c[rows].astype(np.int64) for c in cells], reach, coarse, edges
+            )
+            pairs.append(np.unique(page[row] * len(starts) + leaf))
+        else:
+            pairs.append(np.unique(page))
+        numbered += len(bounds) - 1
+    table = {k: np.concatenate([r[k] for r in runs]) for k in runs[0]}
+    pair = np.concatenate(pairs)
+    leaf, page = pair % len(starts), pair // len(starts)
+    order = np.lexsort((page, leaf))
+    leaf, page = leaf[order], page[order]
+    bounds = np.searchsorted(leaf, np.arange(len(starts) + 1))
+    # each listed page's runs, which are consecutive in the table
+    a, b = np.searchsorted(table['page'], page), np.searchsorted(table['page'], page, 'right')
+    members = [ranges(a[i:j], b[i:j]) for i, j in zip(bounds[:-1], bounds[1:], strict=True)]
+    del table['page']
+    return starts, table, members
 
 
-def _index_runs(index, rows, start):
+def _index_pages(index, rows, start):
     """The pages a chunk's offset index lists, for a chunk of `rows` rows whose
     first global row is `start`, and the chunk's page bounds: page i holds its
     rows `bounds[i]:bounds[i + 1]`."""
@@ -510,21 +626,8 @@ def _lod_top(level, entries):
     return _node(level, *(entries[k] for k in ('low', 'high', 'offset', 'length')))
 
 
-def _box_top(level, entries):
-    return _box_node(level, *(entries[k] for k in (*BOX_FIELDS, 'offset', 'length')))
-
-
 def _lod_union(batch):
     return {'low': batch['low'][0], 'high': batch['high'][-1]}
-
-
-def _box_union(batch):
-    return {
-        'x0': min(batch['x0']),
-        'y0': min(batch['y0']),
-        'x1': max(batch['x1']),
-        'y1': max(batch['y1']),
-    }
 
 
 def _branches(target, level, entries, top, union):
@@ -887,17 +990,7 @@ def finalize_layout(src, out, *, leaf_pages=1024, page_bytes=65536, compression_
                                 for page in get(index, 1)[1]:
                                     set_value(page, 1, get(page, 1) + delta)
                             if c in tracked:
-                                part, bounds = _index_runs(index, get(group, 3), starts[g])
-                                if tracked[c] == primary:
-                                    bbox = parquet.read_row_group(g, columns=[bbox_column])
-                                    cells = covering_cells(
-                                        bbox.column(0).combine_chunks(), bbox_fields
-                                    )
-                                    box, shown = page_boxes(cells, bounds)
-                                    pieces = _pieces(cells, bounds, page_pieces(cells, bounds), box)
-                                    part = dict(zip(BOX_FIELDS, box, strict=True)) | part
-                                    part = {k: v[shown] for k, v in part.items()}
-                                    part['pieces'] = [pieces[i] for i in np.flatnonzero(shown)]
+                                part, _ = _index_pages(index, get(group, 3), starts[g])
                                 runs[tracked[c]].append(part)
                             if 6 in chunk:
                                 original.seek(get(chunk, 6))
@@ -932,41 +1025,46 @@ def finalize_layout(src, out, *, leaf_pages=1024, page_bytes=65536, compression_
                         shards['length'].append(len(raw))
                         target.write(raw)
                     trees[name] = (1, shards, _lod_top, _lod_union)
-                # The primary tree's single leaf stays in the root while it fits.
-                exact = {
-                    k: np.concatenate([part[k] for part in runs[primary]])
-                    for k in (*BOX_FIELDS, *RUN_FIELDS)
-                }
-                exact['pieces'] = [p for part in runs[primary] for p in part['pieces']]
-                columns_runs = [
-                    {k: np.concatenate([part[k] for part in runs[name]]) for k in RUN_FIELDS}
+                zoom = directory_zoom(lod)
+                first_cells, entries, members = primary_leaves(
+                    parquet,
+                    (bbox_column, bbox_fields),
+                    runs[primary],
+                    keys,
+                    depth,
+                    zoom,
+                    leaf_pages,
+                )
+                sources = [
+                    {k: np.concatenate([part[k] for part in runs[name]]) for k in SOURCE_FIELDS}
                     for name in attributes
                 ]
-                count = len(exact['offset'])
                 leaves = [
-                    (_box_leaf(exact, first, min(first + leaf_pages, count), columns_runs), first)
-                    for first in range(0, count, leaf_pages)
-                ] or [(_box_leaf(exact, 0, 0, columns_runs), 0)]
+                    primary_leaf({k: v[m] for k, v in entries.items()}, sources) for m in members
+                ]
 
                 def write_leaves():
-                    boxes = {k: [] for k in (*BOX_FIELDS, 'offset', 'length')}
-                    for leaf, first in leaves:
+                    shards = {
+                        'low': first_cells,
+                        'high': np.r_[first_cells[1:], 4**zoom] - 1,
+                        'offset': [],
+                        'length': [],
+                    }
+                    for leaf in leaves:
                         raw = _json(leaf)
-                        batch = {k: exact[k][first : first + leaf_pages] for k in BOX_FIELDS}
-                        for k, v in _box_union(batch).items():
-                            boxes[k].append(v)
-                        boxes['offset'].append(target.tell())
-                        boxes['length'].append(len(raw))
+                        shards['offset'].append(target.tell())
+                        shards['length'].append(len(raw))
                         target.write(raw)
-                    return 1, boxes
+                    return 1, shards
 
-                exact_tree = None if len(leaves) == 1 else write_leaves()
+                # A single leaf stays in the root while it fits.
+                primary_tree = None if len(leaves) == 1 else write_leaves()
                 while True:
                     root['directories'] = {
                         name: top(level, shards) for name, (level, shards, top, _) in trees.items()
                     }
-                    exact_top = leaves[0][0] if exact_tree is None else _box_top(*exact_tree)
-                    root['primary_index']['directory'] = exact_top
+                    primary_top = leaves[0] if primary_tree is None else _lod_top(*primary_tree)
+                    root['primary_index']['directory'] = primary_top
                     if len(_json(root)) <= _ROOT_TARGET_BYTES:
                         break
                     # the top nodes that can shrink, the primary directory's under None
@@ -975,18 +1073,18 @@ def finalize_layout(src, out, *, leaf_pages=1024, page_bytes=65536, compression_
                         for name, (_, shards, _, _) in trees.items()
                         if len(shards['offset']) > 1
                     }
-                    if len(exact_tree[1]['offset']) > 1 if exact_tree else count:
-                        tops[None] = exact_top
+                    if primary_tree is None or len(primary_tree[1]['offset']) > 1:
+                        tops[None] = primary_top
                     if not tops:
                         raise ValueError('LOD metadata exceeds the 16 KiB bootstrap')
                     largest = max(tops, key=lambda name: len(_json(tops[name])))
                     if largest is not None:
                         level, shards, top, union = trees[largest]
                         trees[largest] = (*_branches(target, level, shards, top, union), top, union)
-                    elif exact_tree is None:
-                        exact_tree = write_leaves()
+                    elif primary_tree is None:
+                        primary_tree = write_leaves()
                     else:
-                        exact_tree = _branches(target, *exact_tree, _box_top, _box_union)
+                        primary_tree = _branches(target, *primary_tree, _lod_top, _lod_union)
                 directory_bytes = target.tell() - directory_start
                 for group in groups:
                     chunks = get(group, 1)[1]

@@ -7,7 +7,7 @@ import { SpatialReader, hilbertIndex } from '../dist/index.js'
 const PAGES = 60000
 // Thrift metadata whose schema holds an optional binary `geometry`
 const SCHEMA = 'FQIZLEgGc2NoZW1hFQIAFQwlAhgIZ2VvbWV0cnkAFgAZDAA='
-const EMPTY_LEAF = [0, [], [], [], [], [], [], [], [], [], []]
+const EMPTY_LEAF = [0, [], [], [], [], [], [], [], [], []]
 const reader = (bytes, top, exact = EMPTY_LEAF, reads = []) =>
   new SpatialReader(
     {
@@ -240,28 +240,51 @@ const binaryPage = (values) => {
   const header = [...[0, body.length, body.length].flatMap(i32), 0x2c, ...page, 0, 0]
   return Uint8Array.from([...header, ...body])
 }
-/** A primary leaf over pages {box, offset, length, first, count, pieces}. */
-const boxLeaf = (pages) => [
-  0,
-  delta(pages.map((p) => p.box[0])),
-  delta(pages.map((p) => p.box[1])),
-  pages.map((p) => p.box[2] - p.box[0]),
-  pages.map((p) => p.box[3] - p.box[1]),
+/** A primary leaf over pages {offset, length, first, runs: [{box, count}]}:
+ * an entry per run, each but a page's first of length 0. */
+const primaryLeaf = (pages) => {
+  const runs = pages.flatMap((page) => {
+    let first = page.first
+    return page.runs.map((run, i) => {
+      const entry = { ...run, first, offset: page.offset, length: i ? 0 : page.length }
+      first += run.count
+      return entry
+    })
+  })
+  const ends = runs.map((r) => (r.length ? r.offset + r.length : null))
+  let end = 0
+  const gaps = runs.map((r, i) => {
+    const gap = r.length ? r.offset - end : 0
+    end = ends[i] ?? end
+    return gap
+  })
+  return [
+    0,
+    delta(runs.map((r) => r.box[0])),
+    delta(runs.map((r) => r.box[1])),
+    runs.map((r) => r.box[2] - r.box[0]),
+    runs.map((r) => r.box[3] - r.box[1]),
+    gaps,
+    runs.map((r) => r.length),
+    delta(
+      runs.map((r) => r.first),
+      runs.map((r) => r.count),
+    ),
+    runs.map((r) => r.count),
+    [],
+  ]
+}
+/** A level-one node over leaves {low, high, offset, length} spanning cells low..high. */
+const cellBranch = (level, children) => [
+  level,
+  delta(children.map((c) => c.low)),
+  children.map((c) => c.high - c.low),
   delta(
-    pages.map((p) => p.offset),
-    pages.map((p) => p.length),
+    children.map((c) => c.offset),
+    children.map((c) => c.length),
   ),
-  pages.map((p) => p.length),
-  delta(
-    pages.map((p) => p.first),
-    pages.map((p) => p.count),
-  ),
-  pages.map((p) => p.count),
-  pages.map((p) => p.pieces ?? []),
-  [],
+  children.map((c) => c.length),
 ]
-/** A primary node at `level` over children {box, offset, length}. */
-const boxBranch = (level, children) => boxLeaf(children).slice(0, 7).with(0, level)
 
 {
   const file = store()
@@ -271,20 +294,21 @@ const boxBranch = (level, children) => boxLeaf(children).slice(0, 7).with(0, lev
     file.raw(raw)
     return { offset, length }
   }
-  const pageA = { ...put([point(10, 10), point(10.5, 10.5)]), first: 0, count: 2 }
-  pageA.box = join(at(10, 10), at(10.5, 10.5))
-  // page B's rows lie in two distant places, so it has a piece for each
-  const pageB = { ...put([point(50, 50), null, point(-20, -20)]), first: 2, count: 3 }
-  pageB.box = join(at(50, 50), at(-20, -20))
-  const pieceAt = ([x0, y0, x1, y1], rows) => [
-    rows,
-    x0 - pageB.box[0],
-    y0 - pageB.box[1],
-    x1 - x0,
-    y1 - y0,
-  ]
-  pageB.pieces = [...pieceAt(at(50, 50), 2), ...pieceAt(at(-20, -20), 1)]
-  const leaf = boxLeaf([pageA, pageB])
+  const pageA = {
+    ...put([point(10, 10), point(10.5, 10.5)]),
+    first: 0,
+    runs: [{ box: join(at(10, 10), at(10.5, 10.5)), count: 2 }],
+  }
+  // page B's rows lie in two distant places, a run for each
+  const pageB = {
+    ...put([point(50, 50), null, point(-20, -20)]),
+    first: 2,
+    runs: [
+      { box: at(50, 50), count: 2 },
+      { box: at(-20, -20), count: 1 },
+    ],
+  }
+  const leaf = primaryLeaf([pageA, pageB])
   const reads = []
   const r = reader(file.bytes, [1, [], [], [], []], leaf, reads)
   const rows = async (box) => (await r.readPrimary(box)).rows
@@ -292,51 +316,74 @@ const boxBranch = (level, children) => boxLeaf(children).slice(0, 7).with(0, lev
   assert.deepEqual(await rows([49, 49, 51, 51]), [2])
   assert.deepEqual(await rows([-180, -85, 180, 85]), [0, 1, 2, 4])
   reads.length = 0
-  assert.deepEqual(await rows([0, 0, 1, 1]), [], 'between pieces')
-  assert.deepEqual(reads, [], 'a query between a page’s pieces leaves the page unread')
+  assert.deepEqual(await rows([0, 0, 1, 1]), [], 'between runs')
+  assert.deepEqual(reads, [], 'a query between a page’s runs leaves the page unread')
   assert.deepEqual(await rows([100, 0, 101, 1]), [])
 
-  // the same leaf under a branch: a parent box must be its children's union
-  const [offset, length] = file.add(leaf)
-  const parent = (box) => boxBranch(1, [{ box, offset, length }])
-  const ok = reader(file.bytes, [1, [], [], [], []], parent(join(pageA.box, pageB.box)))
+  // two leaves: cells 0..7 hold tile 1/2 at zoom 2 (cell 7) and cells 8..15
+  // tile 2/1 (cell 13), each listing the pages whose runs reach it
+  const west = file.add(primaryLeaf([pageB]))
+  const east = file.add(primaryLeaf([pageA, pageB]))
+  const top = cellBranch(1, [
+    { low: 0, high: 7, offset: west[0], length: west[1] },
+    { low: 8, high: 15, offset: east[0], length: east[1] },
+  ])
+  const routed = []
+  const two = reader(file.bytes, [1, [], [], [], []], top, routed)
+  assert.deepEqual((await two.readPrimary([9, 9, 11, 11])).rows, [0, 1])
+  assert.deepEqual(routed[0], [east[0], east[0] + east[1]], 'a query reads its tile’s leaf')
+  assert.ok(!routed.some(([a]) => a === west[0]), 'and no other')
+  routed.length = 0
+  assert.deepEqual((await two.readPrimary([-21, -21, -19, -19])).rows, [4])
+  assert.ok(!routed.some(([a]) => a === east[0]), 'the other leaf alone serves its tile')
+  assert.deepEqual((await two.readPrimary([-180, -85, 180, 85])).rows, [0, 1, 2, 4])
+
+  // a branch's cells must be its children's
+  const [offset, length] = east
+  const loose = cellBranch(1, [{ low: 0, high: 15, offset, length }])
+  const ok = reader(file.bytes, [1, [], [], [], []], loose)
   assert.deepEqual((await ok.readPrimary([9, 9, 11, 11])).rows, [0, 1])
-  const loose = join(pageA.box, pageB.box).with(2, cell(60, 180))
+  const node = file.add(cellBranch(1, [{ low: 8, high: 15, offset, length }]))
+  const above = (low) => cellBranch(2, [{ low, high: 15, offset: node[0], length: node[1] }])
   await assert.rejects(
-    reader(file.bytes, [1, [], [], [], []], parent(loose)).readPrimary([9, 9, 11, 11]),
+    reader(file.bytes, [1, [], [], [], []], above(0)).readPrimary([9, 9, 11, 11]),
     /disagrees with its parent entry/,
-    'a parent box larger than its children',
+    'a parent spanning cells its child does not',
   )
-  const below = boxBranch(2, [{ box: join(pageA.box, pageB.box), offset, length }])
+  assert.deepEqual(
+    (await reader(file.bytes, [1, [], [], [], []], above(8)).readPrimary([9, 9, 11, 11])).rows,
+    [0, 1],
+  )
   await assert.rejects(
-    reader(file.bytes, [1, [], [], [], []], below).readPrimary([9, 9, 11, 11]),
-    /disagrees with its parent entry/,
+    reader(
+      file.bytes,
+      [1, [], [], [], []],
+      cellBranch(2, [{ low: 8, high: 15, offset, length }]),
+    ).readPrimary([9, 9, 11, 11]),
+    /malformed spatial directory node/,
     'a leaf located as a level-one node',
   )
 
-  for (const [node, why] of [
-    [leaf.with(0, 33), 'a level above 32'],
-    [leaf.slice(0, 10), 'a leaf without runs'],
-    [leaf.with(3, [-1, 0]), 'a negative width'],
-    [leaf.with(9, [[], pageB.pieces.slice(0, 5)]), 'a single piece'],
-    [leaf.with(9, [[], pageB.pieces.with(5, 2)]), 'pieces with more rows than the page'],
-    [leaf.with(9, [[], pageB.pieces.with(6, 1e6)]), 'a piece outside its page box'],
-    [leaf.with(10, [[[], [], [], []]]), 'runs for an attribute the root lacks'],
-    [leaf.with(1, [0.5, 0]), 'a fractional cell'],
+  for (const [bad, why] of [
+    [leaf.slice(0, 9), 'a leaf without runs'],
+    [leaf.with(3, [-1, 0, 0]), 'a negative width'],
+    [leaf.with(6, [0, ...leaf[6].slice(1)]), 'a first entry in the previous entry’s page'],
+    [leaf.with(5, [...leaf[5].slice(0, 2), 1]), 'a later run with a byte gap'],
+    [leaf.with(7, [...leaf[7].slice(0, 2), 1]), 'a later run with a row gap'],
+    [leaf.with(9, [[[], [], [], []]]), 'runs for an attribute the root lacks'],
+    [leaf.with(1, [0.5, 0, 0]), 'a fractional cell'],
   ])
-    assert.throws(() => reader(file.bytes, [1, [], [], [], []], node), /malformed/, why)
+    assert.throws(() => reader(file.bytes, [1, [], [], [], []], bad), /malformed/, why)
 }
 
 {
   const file = store()
-  const box = at(5, 5)
-  // a level-one node whose one entry locates itself
+  // a level-one node whose one entry locates itself, as a leaf
   let length = 0,
     self
   for (let i = 0; i < 10; i++) {
     const offset = file.size()
-    const node = boxBranch(1, [{ box, offset, length }])
-    const packed = gzipSync(JSON.stringify(node))
+    const packed = gzipSync(JSON.stringify(cellBranch(1, [{ low: 0, high: 15, offset, length }])))
     if (packed.length === length) {
       file.raw(packed)
       self = [offset, length]
@@ -344,10 +391,10 @@ const boxBranch = (level, children) => boxLeaf(children).slice(0, 7).with(0, lev
     }
     length = packed.length
   }
-  const top = boxBranch(2, [{ box, offset: self[0], length: self[1] }])
+  const top = cellBranch(2, [{ low: 0, high: 15, offset: self[0], length: self[1] }])
   await assert.rejects(
     reader(file.bytes, [1, [], [], [], []], top).readPrimary([4, 4, 6, 6]),
-    /disagrees with its parent entry/,
+    /malformed primary directory leaf/,
     'a node locating itself is refused at the level it is located for',
   )
 }
@@ -355,24 +402,18 @@ const boxBranch = (level, children) => boxLeaf(children).slice(0, 7).with(0, lev
 {
   // two copies of every node, each locating both copies one level down
   const file = store()
-  const box = at(5, 5)
   const pair = (node) => [file.add(node), file.add(node)]
-  let below = pair(boxLeaf([{ box, offset: PAGES, length: 10, first: 0, count: 1, pieces: [] }]))
-  for (let level = 1; level < 24; level++)
-    below = pair(
-      boxBranch(
-        level,
-        below.map(([offset, length]) => ({ box, offset, length })),
-      ),
-    )
-  const top = boxBranch(
-    24,
-    below.map(([offset, length]) => ({ box, offset, length })),
+  let below = pair(
+    primaryLeaf([{ offset: PAGES, length: 10, first: 0, runs: [{ box: at(5, 5), count: 1 }] }]),
   )
+  // every entry spans one cell, so a node's two entries can locate both copies
+  const refs = (nodes) => nodes.map(([offset, length]) => ({ low: 5, high: 5, offset, length }))
+  for (let level = 1; level < 24; level++) below = pair(cellBranch(level, refs(below)))
+  const top = cellBranch(24, refs(below))
   await assert.rejects(
-    reader(file.bytes, [1, [], [], [], []], top).readPrimary([4, 4, 6, 6]),
+    reader(file.bytes, [1, [], [], [], []], top).readPrimary([-180, -85, 180, 85]),
     /referenced twice/,
     'shared nodes are read once per query',
   )
 }
-console.log('primary directory: boxes, pieces, unions, levels, self-references, shared nodes')
+console.log('primary directory: routing, runs, cells, levels, self-references, shared nodes')

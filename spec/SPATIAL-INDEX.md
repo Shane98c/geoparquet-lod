@@ -123,11 +123,10 @@ styling payload and is not an MVT archive.
 
 Past the finest LOD a map draws the primary geometry itself, which no
 overview copies. Its pages, copied byte for byte and never re-paged, are
-indexed by a packed Hilbert R-tree: rows are in Hilbert key order, so
-consecutive geometry pages are spatially compact, and each page is located
-by the box of its rows. A feature reaching into a tile from outside it is
-found by its box, so the primary geometry needs no boundary copies. The
-root's `primary_index` holds:
+located by a directory routed by key, as the LOD directories are, whose leaves
+list runs of geometry rows with the box of each. A feature reaching into a
+tile from outside it is found by its box, so the primary geometry needs no
+boundary copies. The root's `primary_index` holds:
 
 - `attributes`: carried attributes that are flat source columns, whose pages
   each leaf also locates. The reference writer lists those whose chunks have
@@ -140,58 +139,79 @@ root's `primary_index` holds:
   without the footer.
 - `directory`: the top node.
 
+Its cells are Hilbert cells at `z = min(key.depth, finest zoom)`, the finest
+LOD's. The nodes above its leaves are directory nodes as above,
+`[level, cells, spans, gaps, lengths]`, and the leaves' cells, in order, are
+every cell at `z` from 0 to `4^z - 1`, each in one leaf; a directory of one
+leaf may have it as its top node. A leaf's _region_ is its cells' tiles
+at zoom `z`.
+
 Boxes are whole cells of 2^-12 degrees, about 27 m of latitude: a longitude
 `x` lies in cell column `floor((x + 180) * 4096)` and a latitude `y` in cell
 row `floor((y + 90) * 4096)`, computed in IEEE double precision, for a
 covering value from its float32. A row's box is the cells of its covering's
 minimum and maximum, inclusive, so it contains the covering. A row has an
 extent when its four covering values are present and finite with each
-minimum at most its maximum; null and empty geometries have none, whether
-their covering is null or NaN. A page's box is the union of its rows' boxes;
-a page with no row with an extent is not indexed.
+minimum at most its maximum; null and empty geometries have none. A tile's
+cells are those of its edges: tile column `t` at zoom `z` spans the cell
+columns of the longitudes `t * 360 / 2^z - 180` to `(t + 1) * 360 / 2^z - 180`,
+and tile row `t` the cell rows of the latitudes
+`atan(sinh(pi * (1 - 2 * (t + 1) / 2^z)))` to
+`atan(sinh(pi * (1 - 2 * t / 2^z)))` in degrees, the first row reaching
+latitude 90 and the last -90. A box reaches a tile, or a region, when it
+shares a cell with it.
 
-Every node is a JSON array of its level and parallel columns with one value
-per entry, the first entry's values against zero:
+A leaf is a JSON array of level 0 and parallel columns with one value per
+entry, the first entry's values against zero:
 
 ```text
-[level, wests, souths, widths, heights, gaps, lengths]                         level > 0
-[0, wests, souths, widths, heights, gaps, lengths, rows, counts, pieces, runs]  a leaf
+[0, wests, souths, widths, heights, gaps, lengths, rows, counts, sources]
 ```
 
-- `wests`, `souths`: the entry's minimum cell column and row minus the
+Each entry is a run of one geometry page's rows, in row order; a page's runs
+are consecutive entries holding all its rows.
+
+- `wests`, `souths`: the run's box's minimum cell column and row minus the
   previous entry's.
 - `widths`, `heights`: its maximum cell column and row minus its minimum.
-- `gaps`, `lengths`, `rows`, `counts`: as in the LOD directory.
-- `pieces`: per page, nothing, or two or more runs of its rows, in order, as
-  a flat array of `[rows, x, y, width, height]` per run, `x` and `y` from the
-  page box's minimum corner. A run's box is the union of its rows' boxes, and
-  the runs' rows add up to the page's.
-- `runs`: per column in `attributes`, its pages overlapping the leaf's rows,
-  from the row of the leaf's first page to the end of its last, as
-  `[gaps, lengths, rows, counts]` coded as the leaf's own.
+- `gaps`, `lengths`: its page's byte offset minus the end of the previous
+  entry's page, and its page's compressed length; both 0 when its page is
+  the previous entry's.
+- `rows`, `counts`: its first row minus the previous entry's end row, and its
+  rows.
+- `sources`: per column in `attributes`, its pages overlapping the rows of the
+  leaf's runs, as `[gaps, lengths, rows, counts]` coded as the LOD
+  directory's pages.
 
-Entries are in row and byte order. A branch entry's box is the union of the
-boxes of the node it locates, whose level is one less. When the Hilbert
+A run's box is the union of its rows' boxes, and it holds a row with an
+extent. A leaf lists every page holding a row whose box reaches its region,
+and a page's runs are the same in every leaf that lists it. When the Hilbert
 curve leaves the data and re-enters it far away, one page can hold rows of
-distant places; its pieces keep the empty space between them out of the
+distant places; its runs keep the empty space between them out of the
 lookup. The reference writer cuts a page in two at the row where the halves'
 boxes cover the fewest tiles of 32 cells, when they cover at most 70% of the
-page box's, then each half once more the same way. A primary directory of a
-single leaf that fits stays in the root as its top node.
+page box's, then each half once more the same way. It ends a leaf after about
+1,024 pages, before the coarsest aligned cell among those of its last half
+of pages, so a leaf's region is a few large tiles: a tile past the finest
+LOD lies in one leaf, and its buffer seldom reaches another.
 
-To read the rows whose bbox intersects a WGS84 query, a tile's buffered
-bounds for an MVT tile, take the cells of the query's corners as above and
-descend from the top node into every entry whose box intersects them; in a
-leaf take each page whose box, and one of whose pieces when it has them,
-intersects them. A cell is monotone in its degrees, so every page holding a
-row whose covering intersects the query is taken. Read adjacent pages
-together. Decode each page with the primary's codec and schema element; a
-page is any data page but a dictionary-encoded one, of exactly the rows the
-leaf says. Keep the rows of intersecting pieces whose geometry is present and
-whose bbox intersects the query: the reference reader takes it from the WKB,
-rounded outward to float32 as the covering is, so it keeps the rows the
-covering would. Alongside the geometry, read the pages of each needed
-attribute that the same leaves locate over the selected pages' rows.
+To read the rows whose bbox intersects a WGS84 query, a tile's buffered bounds
+for an MVT tile, descend from the top node into every entry whose cells hold a
+tile at zoom `z` sharing a point with the query; the reference reader takes
+the tiles at the finest zoom up to `z` at which those holding the query's
+corners, latitudes clamped to the Mercator limit, span at most two columns and
+two rows. In each leaf reached, take the runs whose boxes meet the query's
+box, the cells of its corners as above. A row whose covering intersects the
+query shares a point with it; the row's box reaches the tile holding that
+point, so the tile's leaf lists the row's page, and the row's run is taken.
+Read each page once, adjacent pages together. Decode each page with the
+primary's codec and schema element; a page is any data page but a
+dictionary-encoded one, of exactly its runs' rows. Keep the rows of the taken
+runs whose geometry is present and whose bbox intersects the query: the
+reference reader takes it from the WKB, rounded outward to float32 as the
+covering is, so it keeps the rows the covering would. Alongside the geometry,
+read the pages of each needed attribute that the same leaves locate over the
+taken runs' rows.
 
 ## Analytical access and publishing
 

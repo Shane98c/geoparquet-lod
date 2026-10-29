@@ -15,21 +15,23 @@ from ._layout import (
     FENCE_FIELDS,
     MAGIC,
     PAGE_FIELDS,
-    RUN_FIELDS,
+    SOURCE_FIELDS,
     VERSION,
+    coarsest_zoom,
     covering,
     covering_cells,
+    directory_zoom,
     flat_columns,
     grid_zoom,
-    page_boxes,
     page_cells,
+    pages_over,
     primary_schema,
-    read_box_node,
+    reached_leaves,
     read_node,
+    read_primary_node,
     row_metadata,
+    tile_edges,
 )
-
-PIECE_FIELDS = ('piece_first', 'piece_count', 'piece_x0', 'piece_y0', 'piece_x1', 'piece_y1')
 
 
 def check_index(path, parquet, lod):
@@ -206,49 +208,84 @@ def check_index(path, parquet, lod):
                     raise ValueError('primary directory codecs disagree with footer')
                 _check_source_pages(read, cm, byte, length, np.diff(bounds))
 
-        def walk_boxes(level, entries):
-            """The leaves under one primary directory node, in tree order."""
+        zoom = directory_zoom(lod)
+
+        def walk_primary(level, entries, low, high):
+            """The leaves under one primary directory node holding cells
+            `low..high`, in tree order, each with its first cell."""
             if not level:
-                return [entries]
-            leaves = []
+                return [(low, entries)]
             within(entries['offset'], entries['length'])
+            if (
+                not len(entries['low'])
+                or (entries['low'][0], entries['high'][-1]) != (low, high)
+                or (entries['low'][1:] != entries['high'][:-1] + 1).any()
+            ):
+                raise ValueError('primary directory leaves do not hold every cell once')
+            leaves = []
             for i in range(len(entries['offset'])):
                 offset = int(entries['offset'][i])
                 if offset in reached:
                     raise ValueError('a directory node is referenced twice')
                 reached.add(offset)
                 raw = read(offset, int(entries['length'][i]))
-                child_level, child = read_box_node(json.loads(gzip.decompress(raw)), attributes)
+                child_level, child = read_primary_node(json.loads(gzip.decompress(raw)), attributes)
                 if child_level != level - 1:
                     raise ValueError('inconsistent directory depth')
-                if not len(child['offset']) or _union(child) != tuple(
-                    int(entries[k][i]) for k in BOX_FIELDS
-                ):
-                    raise ValueError('primary directory boxes do not cover their children exactly')
-                leaves += walk_boxes(child_level, child)
+                low, high = int(entries['low'][i]), int(entries['high'][i])
+                leaves += walk_primary(child_level, child, low, high)
             return leaves
 
-        leaves = walk_boxes(*read_box_node(index.get('directory'), attributes))
-        exact = {
-            k: np.concatenate([np.zeros(0, np.int64)] + [leaf[k] for leaf in leaves])
-            for k in (*BOX_FIELDS, *RUN_FIELDS, *PIECE_FIELDS)
+        top = read_primary_node(index.get('directory'), attributes)
+        found = walk_primary(*top, 0, 4**zoom - 1)
+        firsts = np.array([low for low, _ in found], np.int64)
+        leaves = [leaf for _, leaf in found]
+        geometry = {
+            k: np.concatenate([_index_part(*chunk)[k] for chunk in sources[primary]])
+            for k in SOURCE_FIELDS
         }
-        within(exact['offset'], exact['length'])
+        # each leaf's pages, as leaf * pages + page, and every run listed
+        listed, runs = [], []
+        for i, leaf in enumerate(leaves):
+            within(leaf['offset'], leaf['length'])
+            page = np.searchsorted(geometry['offset'], leaf['offset'])
+            if (page >= len(geometry['offset'])).any() or any(
+                not np.array_equal(geometry[k][np.minimum(page, len(geometry[k]) - 1)], leaf[k])
+                for k in ('offset', 'length')
+            ):
+                raise ValueError('primary directory run outside the geometry pages')
+            new = np.r_[True, page[1:] != page[:-1]][: len(page)]
+            heads = np.flatnonzero(new)
+            if (leaf['first'][heads] != geometry['first'][page[heads]]).any() or (
+                np.add.reduceat(leaf['count'], heads) != geometry['count'][page[heads]]
+            ).any():
+                raise ValueError("primary directory runs do not add up to their page's rows")
+            listed.append(i * len(geometry['offset']) + page[heads])
+            runs.append({k: leaf[k] for k in (*BOX_FIELDS, 'first', 'count')})
+        listed = np.sort(np.concatenate([np.zeros(0, np.int64), *listed]))
+        runs = {k: np.concatenate([np.zeros(0, np.int64), *(r[k] for r in runs)]) for k in runs[0]}
+        # a page's runs are the same in every leaf that lists it
+        order = np.argsort(runs['first'], kind='stable')
+        runs = {k: v[order] for k, v in runs.items()}
+        again = np.r_[False, runs['first'][1:] == runs['first'][:-1]]
+        if any((v[1:][again[1:]] != v[:-1][again[1:]]).any() for v in runs.values()):
+            raise ValueError('primary directory leaves cut a page differently')
+        runs = {k: v[~again] for k, v in runs.items()}
+        if (runs['first'][1:] < (runs['first'] + runs['count'])[:-1]).any():
+            raise ValueError('primary directory leaves cut a page differently')
         for i, name in enumerate(attributes):
             parts = [_index_part(*chunk) for chunk in sources[name]]
-            pages = {k: np.concatenate([part[k] for part in parts]) for k in RUN_FIELDS}
+            pages = {k: np.concatenate([part[k] for part in parts]) for k in SOURCE_FIELDS}
             for leaf in leaves:
-                actual = leaf['runs'][i]
-                if len(leaf['first']):
-                    span = leaf['first'][0], leaf['first'][-1] + leaf['count'][-1]
-                    a = np.searchsorted(pages['first'] + pages['count'], span[0], side='right')
-                    b = np.searchsorted(pages['first'], span[1])
-                else:
-                    a = b = 0
-                if any(not np.array_equal(actual[k], pages[k][a:b]) for k in RUN_FIELDS):
+                over = pages_over(pages, leaf['first'], leaf['first'] + leaf['count'])
+                if any(
+                    not np.array_equal(leaf['sources'][i][k], pages[k][over]) for k in SOURCE_FIELDS
+                ):
                     raise ValueError(f'primary directory leaf misplaces {name} pages')
+        reach = coarsest_zoom(firsts, zoom)
+        coarse = firsts >> 2 * (zoom - reach)
+        edges = tile_edges(reach) if len(leaves) > 1 else None
         bbox_column, bbox_fields = covering(geo)
-        checked_exact = 0
         # Pages compare in tree order, which must be key and row order: each
         # row group's pages follow the pages of the row groups before it.
         checked = dict.fromkeys(trees, 0)
@@ -259,33 +296,36 @@ def check_index(path, parquet, lod):
             if len(bbox) != bounds[-1]:
                 raise ValueError('covering length disagrees with the row group')
             cells = covering_cells(bbox, bbox_fields)
-            box, shown = page_boxes(cells, bounds)
-            expected = {
-                **dict(zip(BOX_FIELDS, box, strict=True)),
-                **_index_part(byte, length, bounds, None, start),
-            }
-            end = checked_exact + int(shown.sum())
-            for fields, message in (
-                (RUN_FIELDS, 'primary directory disagrees with the geometry page index'),
-                (BOX_FIELDS, "primary directory box is not the union of its rows' covering"),
+            # each run of the row group's pages boxes its rows
+            a, b = np.searchsorted(runs['first'], [start, start + bounds[-1]])
+            first, end = runs['first'][a:b] - start, (runs['first'] + runs['count'])[a:b] - start
+            cuts = np.ravel(np.column_stack((first, end)))[
+                : 2 * (b - a) - (end[-1:] == len(bbox)).sum()
+            ]
+            with np.errstate(invalid='ignore'):
+                box = [
+                    reduce.reduceat(cell, cuts)[::2] if len(cuts) else np.zeros(0)
+                    for reduce, cell in zip(
+                        (np.fmin, np.fmin, np.fmax, np.fmax), cells, strict=True
+                    )
+                ]
+            if np.isnan(box[0]).any() or any(
+                not np.array_equal(runs[k][a:b], v) for k, v in zip(BOX_FIELDS, box, strict=True)
             ):
-                if any(
-                    not np.array_equal(exact[k][checked_exact:end], expected[k][shown])
-                    for k in fields
-                ):
-                    raise ValueError(message)
-            # pieces of this row group's pages, each the union of its rows' boxes
-            a, b = np.searchsorted(exact['piece_first'], [start, start + bounds[-1]])
-            first = exact['piece_first'][a:b] - start
-            edges = np.union1d(bounds, first)
-            pieces, filled = page_boxes(cells, edges)
-            at = np.searchsorted(edges, first)
-            if not filled[at].all() or any(
-                not np.array_equal(exact[f'piece_{k}'][a:b], pieces[i][at])
-                for i, k in enumerate(BOX_FIELDS)
-            ):
-                raise ValueError("primary directory piece is not the union of its rows' covering")
-            checked_exact = end
+                raise ValueError("primary directory run box is not the union of its rows' covering")
+            # each leaf a row's box reaches lists its page
+            rows = np.flatnonzero(~np.isnan(cells[0]))
+            if len(leaves) > 1:
+                row, leaf = reached_leaves(
+                    [c[rows].astype(np.int64) for c in cells], reach, coarse, edges
+                )
+            else:
+                row, leaf = np.arange(len(rows)), np.zeros(len(rows), np.int64)
+            page = np.searchsorted(geometry['first'], rows[row] + start, 'right') - 1
+            need = np.unique(leaf * len(geometry['offset']) + page)
+            at = np.minimum(np.searchsorted(listed, need), len(listed) - 1)
+            if len(need) and (not len(listed) or (listed[at] != need).any()):
+                raise ValueError('a primary directory leaf leaves out a page whose rows reach it')
             column = parquet.read_row_group(g, columns=[key['column']]).column(0)
             if not pa.types.is_integer(column.type):
                 raise ValueError('Hilbert keys must be integers')
@@ -318,14 +358,6 @@ def check_index(path, parquet, lod):
                 checked[name] += len(shown)
         if any(checked[name] != len(actual['low']) for name, actual in trees.items()):
             raise ValueError('spatial directory omits, adds or reorders overview pages')
-        if checked_exact != len(exact['offset']):
-            raise ValueError('primary directory disagrees with the geometry page index')
-
-
-def _union(entries):
-    """The box holding every entry's box."""
-    x0, y0, x1, y1 = (entries[k] for k in BOX_FIELDS)
-    return int(x0.min()), int(y0.min()), int(x1.max()), int(y1.max())
 
 
 def _index_part(byte, length, bounds, _cm, start):

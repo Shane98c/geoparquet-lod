@@ -7,6 +7,7 @@ import struct
 import subprocess
 from pathlib import Path
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
@@ -16,12 +17,12 @@ from click.testing import CliRunner
 from geoparquet_lod import _validate_index, validate, write
 from geoparquet_lod._compact import dumps, get, loads, set_value
 from geoparquet_lod._layout import (
-    _box_node,
     _node,
     finalize_layout,
+    primary_leaf,
     primary_schema,
-    read_box_node,
     read_node,
+    read_primary_node,
     row_metadata,
 )
 from geoparquet_lod.cli import cli
@@ -307,40 +308,33 @@ def carried(tmp_path_factory):
 @pytest.mark.parametrize(
     'mutation, message',
     [
-        ('box', "box is not the union of its rows' covering"),
-        ('rows', 'disagrees with the geometry page index'),
-        ('offset', 'disagrees with the geometry page index'),
-        ('pieces', "piece is not the union of its rows' covering"),
-        ('piece_rows', 'pieces disagree with their page rows'),
-        ('runs', 'misplaces height pages'),
+        ('box', "run box is not the union of its rows' covering"),
+        ('rows', "runs do not add up to their page's rows"),
+        ('offset', 'run outside the geometry pages'),
+        ('sources', 'misplaces height pages'),
         ('codecs', 'codecs disagree with footer'),
         ('schema', 'schema disagrees with footer'),
         ('attributes', 'distinct flat source columns'),
-        ('level', 'malformed primary directory node'),
+        ('level', 'malformed directory node'),
         ('missing', 'no primary directory'),
     ],
 )
 def test_primary_directory_corruption(carried, tmp_path, mutation, message):
-    """The primary directory's pages are exactly the geometry pages holding a
-    row with an extent, each boxed by the union of its rows' coverings."""
+    """A primary leaf lists geometry pages as runs of their rows, each boxed
+    by the union of its rows' coverings, and each attribute's pages over
+    those rows."""
     raw, root = _root(carried[0])
     index = root['primary_index']
     leaf = index['directory']
     assert leaf[0] == 0 and index['attributes'] == ['height'], 'one leaf, in the root'
-    page = leaf[9].index([])
-    rows, width, height = leaf[8][page], leaf[3][page], leaf[4][page]
     if mutation == 'box':
-        leaf[3][page] += 1
+        leaf[3][1] += 1
     elif mutation == 'rows':
-        leaf[8][page] -= 1
+        leaf[8][-1] -= 1
     elif mutation == 'offset':
-        leaf[5][page + 1] += 1
-    elif mutation == 'pieces':
-        leaf[9][page] = [rows - 1, 0, 0, width, height, 1, 0, 0, width, height]
-    elif mutation == 'piece_rows':
-        leaf[9][page] = [rows, 0, 0, width, height, 1, 0, 0, width, height]
-    elif mutation == 'runs':
-        leaf[10][0][1][0] += 1
+        leaf[5][max(i for i, length in enumerate(leaf[6]) if length)] += 1
+    elif mutation == 'sources':
+        leaf[9][0][1][0] += 1
     elif mutation == 'codecs':
         index['codecs'][0] = 'SNAPPY'
     elif mutation == 'schema':
@@ -359,25 +353,70 @@ def test_primary_directory_corruption(carried, tmp_path, mutation, message):
         validate(bad, full=True)
 
 
-def test_primary_nodes_are_reached_once(carried, tmp_path):
-    """A primary directory node shared by two parents fails before its
-    subtree is read again, however deep the sharing goes."""
+def _leaves(raw, index):
+    """The top node's entries and the leaves they locate, decoded."""
+    level, entries = read_node(index['directory'])
+    assert level == 1
+    return entries, [
+        read_primary_node(json.loads(gzip.decompress(raw[o : o + n])), index['attributes'])[1]
+        for o, n in zip(entries['offset'], entries['length'], strict=True)
+    ]
+
+
+@pytest.mark.parametrize(
+    'mutation, message',
+    [
+        ('omitted', 'leaves out a page whose rows reach it'),
+        ('cut', 'cut a page differently'),
+        ('cells', 'do not hold every cell once'),
+        ('shared', 'referenced twice'),
+    ],
+)
+def test_primary_leaves_hold_every_cell_and_reaching_page(carried, tmp_path, mutation, message):
+    """Leaves hold every cell of the directory's zoom once, and each lists
+    every page holding a row whose box reaches its cells, cut into the same
+    runs wherever it is listed; a leaf is located once."""
     raw, root = _root(carried[1])
     index = root['primary_index']
-    level, entries = read_box_node(index['directory'], index['attributes'])
-    assert level == 1 and len(entries['offset']) > 2
-    start, length = int(entries['offset'][0]), int(entries['length'][0])
-    box = [int(entries[k][0]) for k in ('x0', 'y0', 'x1', 'y1')]
+    entries, leaves = _leaves(raw, index)
+    low, high = entries['low'], entries['high']
+    first = [set(leaf['first'][leaf['length'] > 0].tolist()) for leaf in leaves]
+    # a page two leaves list, and the second of them
+    i = next(i for i in range(1, len(leaves)) if first[i] & first[i - 1])
+    page = min(first[i] & first[i - 1])
+    leaf = leaves[i]
+    keep = leaf['offset'] != leaf['offset'][leaf['first'] == page][0]
+    if mutation == 'omitted':
+        leaf = {k: v[keep] for k, v in leaf.items() if k != 'sources'}
+    elif mutation == 'cut':
+        run = int(np.flatnonzero(~keep)[0])
+        assert leaf['count'][run] > 1, 'the fixture lists a page of several rows'
+        leaf = {k: np.insert(v, run + 1, v[run]) for k, v in leaf.items() if k != 'sources'}
+        leaf['count'][run], leaf['count'][run + 1] = 1, leaf['count'][run] - 1
+        leaf['first'][run + 1] += 1
+    else:
+        leaf = None
     store = _Appended(raw)
-    node = raw[start : start + length]
-    for level in range(1, 13):
-        # two copies of the node below, both referring to its children
-        copies = store(node), store(node)
-        node = _box_node(level, *([v, v] for v in box), *zip(*copies, strict=True))
+    copies = [
+        store(primary_leaf(leaf, leaves[i]['sources']) if j == i and leaf else raw[o : o + n])
+        for j, (o, n) in enumerate(zip(entries['offset'], entries['length'], strict=True))
+    ]
+    if mutation == 'cells':
+        low[next(j for j in range(1, len(low)) if high[j] > low[j])] += 1
+    if mutation == 'shared':
+        # the second level-one node's first entry locates the first one's last leaf
+        refs = [*copies[:i], copies[i - 1], *copies[i + 1 :]]
+        parts = [
+            store(_node(1, low[a:b], high[a:b], *zip(*refs[a:b], strict=True)))
+            for a, b in ((0, i), (i, len(low)))
+        ]
+        node = _node(2, [low[0], low[i]], [high[i - 1], high[-1]], *zip(*parts, strict=True))
+    else:
+        node = _node(1, low, high, *zip(*copies, strict=True))
     index['directory'] = node
-    bad = tmp_path / 'shared.parquet'
+    bad = tmp_path / 'bad.parquet'
     store.write(bad, root)
-    with pytest.raises(ValidationError, match='referenced twice'):
+    with pytest.raises(ValidationError, match=message):
         validate(bad, full=True)
 
 

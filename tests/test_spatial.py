@@ -17,14 +17,14 @@ from geoparquet_lod import chain, drop_rate, validate
 from geoparquet_lod import write as build
 from geoparquet_lod._compact import dumps, get, loads
 from geoparquet_lod._layout import (
-    PIECE_SAVING,
-    PIECE_TILE,
+    RUN_SAVING,
+    RUN_TILE,
     covering_cells,
     finalize_layout,
     page_cells,
-    page_pieces,
-    read_box_node,
+    page_runs,
     read_node,
+    read_primary_node,
 )
 from geoparquet_lod._validate_index import check_index
 from geoparquet_lod.writer import _write_unindexed as write
@@ -373,34 +373,34 @@ def test_zooming_past_the_finest_lod_reuses_exact_geometry(tmp_path):
 
 
 def _cheapest_cuts(cells, bounds, rounds=2):
-    """The cut rows of a direct search: each round cuts every piece where its
-    halves' cost is least, when that is at most PIECE_SAVING of its own."""
+    """The cut rows of a direct search: each round cuts every run where its
+    halves' cost is least, when that is at most RUN_SAVING of its own."""
 
     def cost(rows):
         x0, y0, x1, y1 = (c[rows] for c in cells)
-        return (x1.max() - x0.min() + PIECE_TILE) * (y1.max() - y0.min() + PIECE_TILE)
+        return (x1.max() - x0.min() + RUN_TILE) * (y1.max() - y0.min() + RUN_TILE)
 
     rows = np.flatnonzero(~np.isnan(cells[0]))
     page = np.searchsorted(bounds, rows, side='right') - 1
-    pieces, cuts = [rows[page == p] for p in np.unique(page)], []
+    runs, cuts = [rows[page == p] for p in np.unique(page)], []
     for _ in range(rounds):
         cut = []
-        for r in pieces:
+        for r in runs:
             costs = [cost(r[:i]) + cost(r[i:]) for i in range(1, len(r))]
-            if costs and min(costs) <= PIECE_SAVING * cost(r):
+            if costs and min(costs) <= RUN_SAVING * cost(r):
                 i = int(np.argmin(costs)) + 1
                 cuts.append(int(r[i]))
                 cut += [r[:i], r[i:]]
             else:
                 cut.append(r)
-        pieces = cut
+        runs = cut
     return sorted(cuts)
 
 
-def test_page_pieces_cut_where_a_box_spans_empty_space():
-    """Pieces cut a page where its halves' boxes cover far fewer tiles, as a
+def test_page_runs_cut_where_a_box_spans_empty_space():
+    """Runs cut a page where its halves' boxes cover far fewer tiles, as a
     direct search over every cut finds; rows without an extent never start
-    a piece."""
+    a run."""
     rng = np.random.default_rng(2)
     found = 0
     for _ in range(300):
@@ -413,7 +413,7 @@ def test_page_pieces_cut_where_a_box_spans_empty_space():
         for c in cells:
             c[gone] = np.nan
         bounds = np.unique(np.r_[0, rng.integers(1, n, 3), n])
-        cuts = page_pieces(cells, bounds)
+        cuts = page_runs(cells, bounds)
         assert cuts.tolist() == _cheapest_cuts(cells, bounds)
         assert not np.isnan(cells[0][cuts]).any() and not np.isin(cuts, bounds).any()
         found += len(cuts)
@@ -503,13 +503,19 @@ def test_rows_without_an_extent_stay_out_of_the_primary_directory(tmp_path, miss
     raw = out.read_bytes()
     root = _root(raw)
     index = root['primary_index']
-    pages = [leaf for leaf in _box_leaves(raw, index['directory'], index['attributes'])]
-    first = np.concatenate([leaf['first'] for leaf in pages])
+    leaves = _primary_leaves(raw, index['directory'], index['attributes'])
+    assert len(leaves) > 2, 'the fixture routes queries to several leaves'
+    first = np.concatenate([leaf['first'] for leaf in leaves])
     assert first.max() < shapes, 'no page of rows without an extent is indexed'
     covering = written.column('bbox').combine_chunks()
     values = {k: covering.field(k).to_numpy(zero_copy_only=False) for k in covering.type.names}
+    boxes = [[-180, -85, 180, 85], [-105, 39.6, -104.9, 39.7], [-104.95, 39.65, -104.94, 39.66]]
+    # boxes from a few cells to a leaf's width, many across leaves' edges
+    for size in rng.choice([1e-4, 1e-3, 1e-2, 5e-2], 40):
+        west, south = -105 + rng.random() * 0.2, 39.6 + rng.random() * 0.2
+        boxes.append([west, south, west + size, south + size * rng.random()])
     cases = []
-    for box in ([-180, -85, 180, 85], [-105, 39.6, -104.9, 39.7], [-104.95, 39.65, -104.94, 39.66]):
+    for box in boxes:
         hit = (
             keyed
             & (values['xmin'] <= box[2])
@@ -529,15 +535,15 @@ def test_rows_without_an_extent_stay_out_of_the_primary_directory(tmp_path, miss
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def _box_leaves(raw, node, attributes):
+def _primary_leaves(raw, node, attributes):
     """The decoded leaves under a primary directory node, in order."""
-    level, entries = read_box_node(node, attributes)
+    level, entries = read_primary_node(node, attributes)
     if not level:
         return [entries]
     return [
         leaf
         for offset, length in zip(entries['offset'], entries['length'], strict=True)
-        for leaf in _box_leaves(
+        for leaf in _primary_leaves(
             raw, json.loads(gzip.decompress(raw[offset : offset + length])), attributes
         )
     ]
@@ -573,22 +579,26 @@ def test_root_shrinks_its_largest_top_node_first(tmp_path, monkeypatch):
         log=lambda *_: None,
     )
     layout = importlib.import_module('geoparquet_lod._layout')
+    # the target leaves room for the fields added once the trees are final
+    reserve = layout.BOOTSTRAP_BYTES - layout._ROOT_TARGET_BYTES
     sizes = {}
-    for target in (16256, 3000, 1400):
+    for target in (16256, 720, 640):
         monkeypatch.setattr(layout, '_ROOT_TARGET_BYTES', target)
         out = finalize_layout(
             packed, tmp_path / f'{target}.parquet', leaf_pages=2, log=lambda *_: None
         )
         root = _root(out.read_bytes())
         sizes[target] = int.from_bytes(out.read_bytes()[12:16], 'little')
-        assert sizes[target] <= target
+        assert sizes[target] <= target + reserve
         assert validate(out, full=True)['rows'] == n
         levels = [top[0] for top in root['directories'].values()]
         exact = root['primary_index']['directory']
         if target == 16256:
             assert exact[0] == 1 and max(levels) == 1, 'a roomy root keeps every tree shallow'
-        if target == 1400:
-            assert exact[0] > 1, 'the primary directory gains branches too'
+        if target == 720:
+            assert exact[0] == 2 and max(levels) == 1, 'the largest, the primary, branches first'
+        if target == 640:
+            assert exact[0] == 2 and min(levels) == 2, 'then every other top'
     monkeypatch.setattr(layout, '_ROOT_TARGET_BYTES', 200)
     with pytest.raises(ValueError, match='exceeds the 16 KiB bootstrap'):
         finalize_layout(packed, tmp_path / 'tiny.parquet', leaf_pages=2, log=lambda *_: None)
