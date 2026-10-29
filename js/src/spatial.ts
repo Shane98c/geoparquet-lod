@@ -573,16 +573,20 @@ export class SpatialReader implements TileReader {
     const query = cellBox(bbox)
     const hits = await this.lookupBoxes(this.exact, query, new Set(), signal)
     const pages = hits.flatMap((hit) => hit.pages)
-    // per located attribute, its pages over the rows of the selected geometry pages
+    // rows of pieces whose boxes miss the query have coverings that miss it too
+    const live = hits.map((hit) =>
+      hit.pages.flatMap((page) =>
+        (page.pieces ?? [page]).filter((piece) => overlaps(piece.box, query)),
+      ),
+    )
+    // per located attribute, its pages over those rows, from the same leaves
     const sources = located.map((name) => {
       const column = indexed.indexOf(name)
       const wanted = new Map<number, SourcePage>()
-      for (const hit of hits)
+      for (const [h, hit] of hits.entries())
         for (const page of hit.runs[column])
           if (
-            hit.pages.some(
-              (p) => page.first < p.first + p.count && page.first + page.count > p.first,
-            )
+            live[h].some((p) => page.first < p.first + p.count && page.first + page.count > p.first)
           )
             wanted.set(page.offset, page)
       return [...wanted.values()].sort((a, b) => a.first - b.first)
@@ -597,22 +601,19 @@ export class SpatialReader implements TileReader {
       wkb: [],
       columns: Object.fromEntries(attributes.map((a) => [a, []])),
     }
-    // rows of pieces whose boxes miss the query have coverings that miss it too
-    const live = pages.flatMap((page) =>
-      (page.pieces ?? [page])
-        .filter((piece) => overlaps(piece.box, query))
-        .flatMap((piece) => Array.from({ length: piece.count }, (_, i) => piece.first + i)),
-    )
+    const rows = live
+      .flat()
+      .flatMap((piece) => Array.from({ length: piece.count }, (_, i) => piece.first + i))
     const wkb = decodePages(
       this.decoders[0],
       pages.map((page, i) => ({ ...page, bytes: payloads[i] })),
-      live,
+      rows,
     )
     for (const [i, value] of wkb.entries()) {
       if (!(value instanceof Uint8Array)) continue
       const extent = wkbBounds(value)
       if (!extent || !overlaps(float32Outward(extent), bbox)) continue
-      out.rows.push(live[i])
+      out.rows.push(rows[i])
       out.wkb.push(value)
     }
     for (const [i, name] of located.entries())
