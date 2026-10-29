@@ -14,6 +14,7 @@ import tempfile
 import time
 from collections.abc import Mapping
 from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 
 import duckdb
@@ -44,7 +45,7 @@ from .key import (
 )
 from .pack import pack
 from .quantize import DOT_CELLS, SUBPIXELS, grid, render_lines, render_polygons
-from .spill import hosts, straddlers, take_ragged
+from .spill import hosts, ranges, straddlers, take_ragged
 from .thinning import Context, Thin, default_thinning, describe
 
 LOD_KEY = 'lod_columns'
@@ -70,7 +71,7 @@ AUTO_FINEST_ZOOM = 15
 # A zoom whose thinning keeps this share of rows is made complete: the few
 # rows dropped cost a whole copy of every feature in an LOD of its own.
 NEAR_COMPLETE = 0.9999
-# Render workers when not given; each holds about the largest job it rendered.
+# Workers when not given; each holds about the largest job it rendered and packed.
 DEFAULT_WORKERS = 8
 # DuckDB's share of physical memory when no limit is given; its own default
 # is 80%, which leaves too little for the writer's arrays on large builds.
@@ -78,8 +79,9 @@ DEFAULT_DUCKDB_MEMORY = 0.25
 
 SORT_BUCKET_ROWS = 2_000_000
 SORT_FLUSH_ROWS = 65_536
-# rows per render job; a worker's memory follows the largest job it has rendered
-RENDER_ROWS = 131_072
+# Rows per render and pack job at most; a worker's memory follows the largest job it
+# has run.
+JOB_ROWS = 65_536
 # The unsorted copy is only read in ways that ignore its order, so its row groups can be
 # small, which bounds what DuckDB buffers per thread while writing it.
 UNSORTED_ROW_GROUP_ROWS = 122_880
@@ -421,21 +423,6 @@ def _leaf_paths(schema: pa.Schema) -> list[list[str]]:
     return out
 
 
-def _with_overrides(table: pa.Table, ids: np.ndarray, override: pa.Table) -> pa.Table:
-    """Replace carried attribute values for rows that a thinning overrode at this zoom."""
-    import pyarrow.compute as pc
-
-    idx = pc.index_in(pa.array(ids), value_set=override.column('id').combine_chunks())
-    matched = pc.is_valid(idx)
-    for name in override.column_names:
-        if name == 'id' or name not in table.column_names:
-            continue
-        values = pc.take(override.column(name).combine_chunks(), idx)
-        merged = pc.if_else(matched, values.cast(table.column(name).type), table.column(name))
-        table = table.set_column(table.schema.get_field_index(name), name, merged)
-    return table
-
-
 def _concat_parts(parts_list):
     """Ragged polygon arrays of consecutive batches as one store."""
     geom, poly, ring, xs, ys = (
@@ -478,9 +465,7 @@ def _spill_for_batch(
     counts = hi - lo
     if not counts.any():
         return None
-    pick = np.concatenate(
-        [np.arange(a, c) for a, c in zip(lo[counts > 0], hi[counts > 0], strict=True)]
-    )
+    pick = ranges(lo, hi)
     (ids_sorted, perm), store = spill_store[b['name']]
     pos = perm[np.searchsorted(ids_sorted, src[pick])]
     if b['geometry_type'] == 'Point':
@@ -506,19 +491,78 @@ def is_crs84(column) -> bool:
 
 
 def _render(args):
-    """Quantized parts per shape LOD for one batch, rendering only the rows shown
-    there; the other rows get empty geometry, which the null struct hides."""
-    wkb, cx, cy, grids, family, dot_cells = args
+    """Quantized parts of a batch of shapes on one grid."""
+    wkb, cx, cy, scale, offset, family, dot_cells = args
     render = render_lines if family == 'line' else render_polygons
-    n = len(wkb)
+    return render(wkb, cx, cy, scale, offset, dot_cells)
+
+
+@dataclass(frozen=True)
+class _Packing:
+    """What a pack job needs besides its rows: each LOD's name, geometry type,
+    zoom bit, grid scale and offset, and the carried attributes."""
+
+    family: str
+    dot_cells: float
+    lods: tuple[tuple[str, str, int, float, tuple[float, float]], ...]
+    fields: tuple[pa.Field, ...]
+    dictionaries: Mapping[str, list]
+
+
+def _binary_rows(array: pa.Array, start: int, stop: int) -> tuple[np.ndarray, np.ndarray]:
+    """Offsets and bytes of rows [start, stop) of a large binary array, as views
+    of its buffers, so a queued job holds no copy of them."""
+    _, offsets, data = array.buffers()
+    offsets = np.frombuffer(offsets, np.int64)[array.offset + start : array.offset + stop + 1]
+    data = np.zeros(0, np.uint8) if data is None else np.frombuffer(data, np.uint8)
+    return offsets, data[offsets[0] : offsets[-1]]
+
+
+def _pack_rows(job) -> list[pa.Array]:
+    """Packed values per LOD of consecutive rows, null where a row is neither
+    shown at the LOD nor hosting copies there. A shape LOD renders only the
+    rows it shows, so a row that only hosts copies has no geometry of its own."""
+    packing, wkb, cx, cy, levels, attrs, overrides, spills = job
+    if wkb is not None:
+        offsets, data = wkb
+        wkb = pa.Array.from_buffers(
+            pa.large_binary(),
+            len(levels),
+            [None, pa.py_buffer(offsets - offsets[0]), pa.py_buffer(data)],
+        ).to_numpy(zero_copy_only=False)
+    render = render_lines if packing.family == 'line' else render_polygons
     out = []
-    for scale, offset, idx in grids:
-        geom_offsets, poly_offsets, ring_offsets, x, y = render(
-            wkb[idx], cx[idx], cy[idx], scale, offset, dot_cells
+    for name, geometry_type, bit, scale, offset in packing.lods:
+        shown = (levels >> bit) & 1 == 1
+        spill = spills.get(name)
+        kept = shown | (spill[0] > 0) if spill is not None else shown
+        rows = np.flatnonzero(kept)
+        if not len(rows):
+            out.append(pa.nulls(len(levels), pa.binary()))
+            continue
+        if geometry_type == 'Point':
+            parts = point_parts(np.nan_to_num(cx[rows]), np.nan_to_num(cy[rows]), scale, offset)
+        else:
+            drawn = np.flatnonzero(shown)
+            geom_offsets, *rest = render(
+                wkb[drawn], cx[drawn], cy[drawn], scale, offset, packing.dot_cells
+            )
+            counts = np.zeros(len(rows) + 1, np.int64)
+            counts[1 + np.searchsorted(rows, drawn)] = np.diff(geom_offsets)
+            parts = (np.cumsum(counts), *rest)
+        values = dict(attrs)
+        if name in overrides:
+            changed, replaced = overrides[name]
+            changed = pa.array(changed)
+            for field, column in replaced.items():
+                values[field] = pc.replace_with_mask(values[field], changed, column)
+        values = {field: column.take(rows) for field, column in values.items()}
+        if spill is not None:
+            spill = (spill[0][rows], *spill[1:])
+        packed = pack(
+            geometry_type, parts, list(packing.fields), values, spill, packing.dictionaries
         )
-        counts = np.zeros(n + 1, dtype=np.int64)
-        counts[idx + 1] = np.diff(geom_offsets)
-        out.append((np.cumsum(counts), poly_offsets, ring_offsets, x, y))
+        out.append(packed.take(pa.array(np.cumsum(kept) - 1, mask=~kept)))
     return out
 
 
@@ -1026,6 +1070,7 @@ def _write_unindexed(
         else np.zeros(0, np.int64)
     )
     spill_attr_values: dict[str, np.ndarray] = {}
+    src_ids = None
     if len(spill_src):
         # one pass over the sorted copy picks the straddlers out as it goes, so a national file's
         # tens of millions of copies cost one scan and never sit in memory as WKB at once; each
@@ -1075,17 +1120,10 @@ def _write_unindexed(
                     continue
                 scale, offset = grids[name]
                 jobs = [
-                    (
-                        wkb_c[c],
-                        cx_c[c],
-                        cy_c[c],
-                        [(scale, offset, np.arange(len(c)))],
-                        family,
-                        dot_cells,
-                    )
+                    (wkb_c[c], cx_c[c], cy_c[c], scale, offset, family, dot_cells)
                     for c in (idx[i : i + 50_000] for i in range(0, len(idx), 50_000))
                 ]
-                rendered_parts[name].extend(r[0] for r in pool.map(_render, jobs))
+                rendered_parts[name].extend(pool.map(_render, jobs))
         ids_all = np.concatenate(attr_ids) if attr_ids else np.zeros(0, np.int64)
         perm = np.argsort(ids_all)
         src_ids = (ids_all[perm], perm)
@@ -1107,48 +1145,95 @@ def _write_unindexed(
         pa.default_memory_pool().release_unused()
         log(f'  straddler copies rendered, {time.time() - t0:.0f}s')
     row_groups = 0
+    packing = _Packing(
+        family,
+        dot_cells,
+        tuple(
+            (b['name'], b['geometry_type'], lod_bit[b['name']], *grids[b['name']]) for b in lod_plan
+        ),
+        tuple(attributes),
+        dictionaries,
+    )
+    # the attribute values a thinning changed, by row id, for the LODs of the zooms it
+    # changed them at, cast as the sorted copy's column and then as the attribute
+    sorted_schema = pq.read_schema(sorted_path)
+    lod_overrides: dict[str, tuple] = {}
+    for b in lod_plan:
+        changed = overrides.get(lod_bit[b['name']])
+        if changed is None or not changed.num_rows:
+            continue
+        ids = changed.column('id').to_numpy()
+        order = np.argsort(ids, kind='stable')
+        lod_overrides[b['name']] = (
+            ids[order],
+            {
+                a.name: changed.column(a.name)
+                .combine_chunks()
+                .take(order)
+                .cast(sorted_schema.field(a.name).type)
+                .cast(a.type)
+                for a in attributes
+                if a.name in changed.column_names
+            },
+        )
+    del overrides
+
+    def jobs(table: pa.Table):
+        """Render and pack jobs of consecutive rows, at most JOB_ROWS each and as
+        many for every worker, so the row group keeps them all busy."""
+        ids = table.column('__id').to_numpy()
+        row_levels = levels[ids - 1]
+        cx = table.column('__cx').to_numpy(zero_copy_only=False)
+        cy = table.column('__cy').to_numpy(zero_copy_only=False)
+        wkb = None
+        if shape_lods:
+            wkb = table.column(geometry).combine_chunks().cast(pa.large_binary())
+        attrs = {a.name: table.column(a.name).combine_chunks().cast(a.type) for a in attributes}
+        per_worker = -(-table.num_rows // (JOB_ROWS * workers))
+        step = -(-table.num_rows // (per_worker * workers))
+        for start in range(0, table.num_rows, step):
+            stop = min(start + step, table.num_rows)
+            part_ids = ids[start:stop]
+            overridden = {}
+            for name, (sorted_ids, values) in lod_overrides.items():
+                at = np.minimum(np.searchsorted(sorted_ids, part_ids), len(sorted_ids) - 1)
+                hit = sorted_ids[at] == part_ids
+                if hit.any():
+                    overridden[name] = (hit, {k: v.take(at[hit]) for k, v in values.items()})
+            spills = {}
+            for b in lod_plan:
+                spill = _spill_for_batch(
+                    b,
+                    part_ids,
+                    attributes,
+                    spill_entries,
+                    spill_store,
+                    spill_attr_values,
+                    file_pos,
+                    grids,
+                    src_ids,
+                )
+                if spill is not None:
+                    spills[b['name']] = spill
+            yield (
+                packing,
+                None if wkb is None else _binary_rows(wkb, start, stop),
+                cx[start:stop],
+                cy[start:stop],
+                row_levels[start:stop],
+                # a slice would carry its whole parent buffers to the worker
+                {k: pa.concat_arrays([v.slice(start, stop - start)]) for k, v in attrs.items()},
+                overridden,
+                spills,
+            )
 
     def flush(table: pa.Table, futs):
         nonlocal row_groups
-        levels = table.column('__levels').to_numpy(zero_copy_only=False).astype(np.int64)
-        cx = table.column('__cx').to_numpy(zero_copy_only=False)
-        cy = table.column('__cy').to_numpy(zero_copy_only=False)
-        # a row group's render jobs cover consecutive rows; their parts join per LOD
-        results = [f.result() for f in futs]
-        rendered = [_concat_parts([r[k] for r in results]) for k in range(len(shape_lods))]
-        ids = table.column('__id').to_numpy()
-        arrays = []
-        k = 0
-        for b in lod_plan:
-            mask = (levels >> lod_bit[b['name']]) & 1 == 1
-            z_index = lod_bit[b['name']]
-            source = (
-                _with_overrides(table, ids, overrides[z_index]) if z_index in overrides else table
-            )
-            attrs = {
-                a.name: source.column(a.name).combine_chunks().cast(a.type) for a in attributes
-            }
-            if b['geometry_type'] == 'Point':
-                parts = point_parts(np.nan_to_num(cx), np.nan_to_num(cy), *grids[b['name']])
-            else:
-                parts = rendered[k]
-                k += 1
-            spill = _spill_for_batch(
-                b,
-                ids,
-                attributes,
-                spill_entries,
-                spill_store,
-                spill_attr_values,
-                file_pos,
-                grids,
-                src_ids if len(spill_src) else None,
-            )
-            if spill is not None:
-                mask = mask | (spill[0] > 0)
-            blobs = pack(b['geometry_type'], parts, attributes, attrs, spill, dictionaries)
-            arrays.append(pc.if_else(pa.array(mask), blobs, pa.scalar(None, pa.binary())))
-        lod = pa.StructArray.from_arrays(arrays, [b['name'] for b in lod_plan])
+        # a row group's jobs cover consecutive rows; their packed values join per LOD
+        packed = zip(*(f.result() for f in futs), strict=True)
+        lod = pa.StructArray.from_arrays(
+            [pa.concat_arrays(chunks) for chunks in packed], [b['name'] for b in lod_plan]
+        )
         cols = {name: table.column(name) for name in table.column_names}
         out_table = pa.table(
             {
@@ -1169,41 +1254,13 @@ def _write_unindexed(
         # without geometry last. Equal keys keep source-id order, matching file_pos, so
         # a boundary copy points at its own source row.
         batches = pq.ParquetFile(sorted_path).iter_batches(batch_size=row_group_rows)
-        # enough render jobs in flight to keep the pool busy, and no more row groups held
-        # than those jobs need
+        # enough jobs in flight to keep the pool busy, and no more row groups held than
+        # those jobs need
         max_jobs = 2 * workers
         pending = []
         for table in _rebatch(batches, row_group_rows):
-            row_levels = levels[table.column('__id').to_numpy() - 1]
-            table = table.append_column('__levels', pa.array(row_levels))
-            futs = []
-            if shape_lods:
-                wkb = table.column(geometry).to_numpy(zero_copy_only=False)
-                cx = table.column('__cx').to_numpy(zero_copy_only=False)
-                cy = table.column('__cy').to_numpy(zero_copy_only=False)
-                for start in range(0, table.num_rows, RENDER_ROWS):
-                    part = slice(start, start + RENDER_ROWS)
-                    part_levels = row_levels[part]
-                    job = (
-                        wkb[part],
-                        cx[part],
-                        cy[part],
-                        [
-                            (
-                                *grids[b['name']],
-                                np.flatnonzero((part_levels >> lod_bit[b['name']]) & 1),
-                            )
-                            for b in shape_lods
-                        ],
-                        family,
-                        dot_cells,
-                    )
-                    futs.append(pool.submit(_render, job))
-            pending.append((table, futs))
-            # with no shapes to render (points) nothing is in flight, so write now
-            while len(pending) > 1 and (
-                not shape_lods or sum(len(f) for _, f in pending) > max_jobs
-            ):
+            pending.append((table, [pool.submit(_pack_rows, job) for job in jobs(table)]))
+            while len(pending) > 1 and sum(len(f) for _, f in pending) > max_jobs:
                 flush(*pending.pop(0))
         for t, f in pending:
             flush(t, f)

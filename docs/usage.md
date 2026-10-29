@@ -157,10 +157,12 @@ overview page target, 64 KiB by default. Writing a 155.6 million building
 national file (OCR's buildings, two carried attributes) took 51 minutes on a
 64 GB laptop with `workers=6` and `memory_limit='16GB'`; the main process
 peaked at 34 GB while the thinnings ran, and the build needs free disk of
-about twice the output for its intermediate files. Render workers each grow to
-about 1 GB, so `workers` (`--workers`, at most 8 by default) bounds that part
-of the memory; `memory_limit` (`--memory-limit`, 25% of RAM by default) caps
-DuckDB.
+about twice the output for its intermediate files. The main process sorts,
+thins and writes; worker processes quantize and pack the overviews, each row
+group split evenly among them in runs of at most 65,536 rows. Workers each
+grow to about 1 GB, so `workers` (`--workers`, at most 8 by default) bounds
+that part of the memory; `memory_limit` (`--memory-limit`, 25% of RAM by
+default) caps DuckDB.
 
 ### In a MapLibre app
 

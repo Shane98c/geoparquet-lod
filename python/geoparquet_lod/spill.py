@@ -82,33 +82,13 @@ def take_ragged(parts, picks: np.ndarray):
     """The ragged polygon arrays of the rows `picks` from a rendered store, in order."""
     geom_offsets, poly_offsets, ring_offsets, x, y = parts
     g0, g1 = geom_offsets[picks], geom_offsets[picks + 1]
-    p0, p1 = poly_offsets[g0], poly_offsets[g1]
-    r0, r1 = ring_offsets[p0], ring_offsets[p1]
-    polys_per = g1 - g0
-    rings_per_poly = (
-        np.concatenate([np.diff(poly_offsets[a : b + 1]) for a, b in zip(g0, g1, strict=True)])
-        if len(picks)
-        else np.zeros(0, np.int64)
-    )
-    coords_per_ring = (
-        np.concatenate([np.diff(ring_offsets[a : b + 1]) for a, b in zip(p0, p1, strict=True)])
-        if len(picks)
-        else np.zeros(0, np.int64)
-    )
-    xs = (
-        np.concatenate([x[a:b] for a, b in zip(r0, r1, strict=True)])
-        if len(picks)
-        else np.zeros(0, np.int32)
-    )
-    ys = (
-        np.concatenate([y[a:b] for a, b in zip(r0, r1, strict=True)])
-        if len(picks)
-        else np.zeros(0, np.int32)
-    )
+    polys = ranges(g0, g1)
+    rings = ranges(poly_offsets[g0], poly_offsets[g1])
+    coords = ranges(ring_offsets[poly_offsets[g0]], ring_offsets[poly_offsets[g1]])
     return (
-        np.concatenate([[0], np.cumsum(polys_per)]),
-        np.concatenate([[0], np.cumsum(rings_per_poly)]),
-        np.concatenate([[0], np.cumsum(coords_per_ring)]),
-        xs,
-        ys,
+        np.concatenate([[0], np.cumsum(g1 - g0)]),
+        np.concatenate([[0], np.cumsum(poly_offsets[polys + 1] - poly_offsets[polys])]),
+        np.concatenate([[0], np.cumsum(ring_offsets[rings + 1] - ring_offsets[rings])]),
+        x[coords],
+        y[coords],
     )

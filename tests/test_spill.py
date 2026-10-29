@@ -9,7 +9,8 @@ import pytest
 import shapely
 from geoparquet_lod import write
 from geoparquet_lod.key import KEY_DEPTH, hilbert_key, tile_x, tile_y
-from geoparquet_lod.spill import BUFFER, straddlers
+from geoparquet_lod.quantize import render_polygons
+from geoparquet_lod.spill import BUFFER, straddlers, take_ragged
 from unpacker import Unpacker
 
 
@@ -85,6 +86,29 @@ def test_every_other_tile_a_feature_reaches_gets_one_copy():
         expected += [(i, x * 2**zoom + y) for x, y in tiles_i if (x, y) != own]
     assert {(3, 1), (4, 1), (2, 2), (5, 3)} <= shapes
     assert sorted(zip(rows.tolist(), tiles.tolist(), strict=True)) == sorted(expected)
+
+
+def test_take_ragged_picks_whole_rows_in_order():
+    polys = [
+        shapely.MultiPolygon([shapely.box(i + j, 0, i + j + 0.5, 1) for j in range(i % 3 + 1)])
+        for i in range(40)
+    ]
+    polys[7] = shapely.box(0, 0, 4, 4).difference(shapely.box(1, 1, 2, 2))
+    zeros = np.zeros(len(polys))
+    store = render_polygons(shapely.to_wkb(polys), zeros, zeros, 1000.0, (0.0, 0.0))
+    picks = np.array([7, 3, 3, 39, 0])
+    geom, poly, ring, x, y = take_ragged(store, picks)
+    for i, p in enumerate(picks):
+        alone = render_polygons(
+            shapely.to_wkb([polys[p]]), zeros[:1], zeros[:1], 1000.0, (0.0, 0.0)
+        )
+        polygons = slice(geom[i], geom[i + 1] + 1)
+        assert np.array_equal(np.diff(poly[polygons]), np.diff(alone[1]))
+        rings = slice(poly[geom[i]], poly[geom[i + 1]] + 1)
+        assert np.array_equal(np.diff(ring[rings]), np.diff(alone[2]))
+        coords = slice(ring[poly[geom[i]]], ring[poly[geom[i + 1]]])
+        assert np.array_equal(x[coords], alone[3]) and np.array_equal(y[coords], alone[4])
+    assert [len(a) for a in take_ragged(store, np.zeros(0, np.int64))] == [1, 1, 1, 0, 0]
 
 
 @pytest.fixture
