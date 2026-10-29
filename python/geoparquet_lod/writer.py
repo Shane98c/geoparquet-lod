@@ -8,6 +8,7 @@ without changing table values. Ordinary readers use the standard Parquet footer.
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import tempfile
@@ -16,6 +17,7 @@ from collections.abc import Mapping
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import duckdb
 import numpy as np
@@ -584,9 +586,12 @@ def write(
 
     Rows use one global Hilbert order.
     ``thinning`` chooses displayed rows at each zoom. ``complete_from`` sets
-    the zoom where every feature is shown; 'auto' derives it from the data.
+    the zoom from which every feature is shown, whatever the thinning says,
+    and the base zoom a rate-based thinning counts from; 'auto' derives it
+    from the data and records which zooms the thinning leaves complete.
     ``carry`` embeds selected attributes in the overviews for fast styling.
-    ``compression_level`` applies to source and overview Zstd pages.
+    ``compression_level`` applies to source and overview Zstd pages; decoding
+    speed does not depend on it.
     ``placeholder_pixels`` is the width of the square a shape under a pixel
     draws as; when unset, the thinning's own ``placeholder_pixels`` decides.
     ``metadata`` is added to the file's key-value metadata.
@@ -600,6 +605,7 @@ def write(
     existing output until both phases succeed and cleans up intermediate files.
     Temporary build files live beside ``out``; ``temp_dir`` controls DuckDB spill.
     """
+    options = {name: value for name, value in locals().items() if name not in ('src', 'out')}
     from ._layout import finalize_layout
 
     if page_bytes < 1 or lod_page_bytes < 1:
@@ -608,28 +614,7 @@ def write(
     out.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.lod-build-', dir=out.parent) as tmp:
         packed = Path(tmp) / 'packed.parquet'
-        _write_unindexed(
-            src,
-            packed,
-            thinning=thinning,
-            columns=columns,
-            zooms=zooms,
-            complete_from=complete_from,
-            carry=carry,
-            geometry=geometry,
-            single_lod_bytes=single_lod_bytes,
-            row_group_rows=row_group_rows,
-            page_bytes=page_bytes,
-            page_rows=page_rows,
-            compression_level=compression_level,
-            batch_rows=batch_rows,
-            placeholder_pixels=placeholder_pixels,
-            metadata=metadata,
-            workers=workers,
-            memory_limit=memory_limit,
-            temp_dir=temp_dir,
-            log=log,
-        )
+        _write_unindexed(src, packed, **options)
         log('Finalizing tile-aligned pages and spatial index')
         finalize_layout(
             packed, out, page_bytes=lod_page_bytes, compression_level=compression_level, log=log
@@ -637,46 +622,30 @@ def write(
     return out
 
 
-def _write_unindexed(
-    src: str,
-    out: str | Path,
-    *,
-    thinning: Thin | None = None,
-    columns=(),
-    zooms='auto',
-    complete_from: int | None | str = 'auto',
-    carry=(),
-    geometry: str = 'geometry',
-    single_lod_bytes: int = 16 * 1024 * 1024,
-    row_group_rows: int = 1_048_576,
-    page_bytes: int = 16384,
-    page_rows: int = 2048,
-    compression_level: int = 9,
-    batch_rows: int | None = None,
-    placeholder_pixels: float | None = None,
-    metadata: Mapping[str, str] | None = None,
-    workers: int | None = None,
-    memory_limit: str | None = None,
-    temp_dir: str | None = None,
-    log=print,
-) -> Path:
+def _options(given: Mapping) -> SimpleNamespace:
+    """`write`'s options from keyword arguments, with its defaults for the rest."""
+    bound = inspect.signature(write).bind(None, None, **given)
+    bound.apply_defaults()
+    return SimpleNamespace(**{k: v for k, v in bound.arguments.items() if k not in ('src', 'out')})
+
+
+def _write_unindexed(src: str, out: str | Path, **options) -> Path:
     """Write `src` (any GeoParquet with a WKB geometry column) to `out` in the
-    GeoParquet LOD layout. `thinning` chooses the rows shown at every zoom;
-    `complete_from` is the zoom from which every feature is shown whatever the
-    thinning says, and the base zoom a rate-based thinning counts from; `'auto'`
-    guesses the base and records which zooms the thinning leaves complete.
-    `compression_level` is zstd's; decoding speed does not depend on it.
-    Overview columns are written at zstd level STAGED_LOD_LEVEL, since
+    GeoParquet LOD layout, without the tile-aligned pages and spatial
+    directory `write` adds after. Takes `write`'s options, with its defaults;
+    overview columns are written at zstd level STAGED_LOD_LEVEL, since
     `finalize_layout` encodes them again. Returns the output path."""
+    o = _options(options)
     src = str(src)
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
-    workers = workers or min(os.cpu_count() or 1, DEFAULT_WORKERS)
-    con = connect(memory_limit, temp_dir)
+    geometry, log = o.geometry, o.log
+    workers = o.workers or min(os.cpu_count() or 1, DEFAULT_WORKERS)
+    con = connect(o.memory_limit, o.temp_dir)
     _attach_source(con, src)
     source_schema = _read_schema(src)
-    attributes = infer_attributes(source_schema, carry)
+    attributes = infer_attributes(source_schema, o.carry)
     geo = json.loads(dict(source_schema.metadata or {}).get(b'geo', b'{}') or b'{}')
     column = geo.get('columns', {}).get(geometry, {})
     if not is_crs84(column):
@@ -707,7 +676,7 @@ def _write_unindexed(
         if name in source_schema.names:
             raise ValueError(f'source column {name!r} clashes with the output column of that name')
     bad = [a.name for a in attributes if a.name in THINNING_COLUMNS]
-    bad += [c for c in columns if c in THINNING_COLUMNS]
+    bad += [c for c in o.columns if c in THINNING_COLUMNS]
     if bad:
         raise ValueError(
             f'columns {bad} clash with the names thinnings see; rename them in the source'
@@ -722,15 +691,17 @@ def _write_unindexed(
     (mxmin, mxmax), (mymin, mymax) = (
         tuple(map(float, v)) for v in mercator([xmin, xmax], [ymin, ymax])
     )
+    thinning = o.thinning
     if thinning is None:
         thinning = default_thinning(family)
         log(f'  thinning: {describe(thinning)["name"]}')
     # placeholder squares are given in pixels; the grid is finer than a pixel
+    placeholder_pixels = o.placeholder_pixels
     if placeholder_pixels is None:
         placeholder_pixels = getattr(thinning, 'placeholder_pixels', DOT_CELLS / SUBPIXELS)
     dot_cells = float(placeholder_pixels) * SUBPIXELS
-    if zooms != 'auto':
-        _check_grid((mxmin, mymin, mxmax, mymax), max(zooms), dot_cells)
+    if o.zooms != 'auto':
+        _check_grid((mxmin, mymin, mxmax, mymax), max(o.zooms), dot_cells)
     # the key cell holds the bbox centre; its Hilbert index is computed in numpy and the
     # rows sorted by it
     cell_x, cell_y = sql_key_cell(
@@ -772,22 +743,22 @@ def _write_unindexed(
     key_ids = cells_table['__id'].astype(np.int64)
     keys = hilbert_key(cells_table['__kx'], cells_table['__ky'], KEY_DEPTH)
     del cells_table
-    _sort_by_key(unsorted_path, sorted_path, key_ids, keys, row_group_rows)
+    _sort_by_key(unsorted_path, sorted_path, key_ids, keys, o.row_group_rows)
     del key_ids, keys
     # a fresh connection returns the memory DuckDB held for the copy
     con.close()
-    con = connect(memory_limit, temp_dir)
+    con = connect(o.memory_limit, o.temp_dir)
     pa.default_memory_pool().release_unused()
     n_rows = con.execute(f"SELECT count(*) FROM '{sorted_path}'").fetchone()[0]
     log(f'  {n_rows:,} rows sorted, {time.time() - t0:.0f}s')
-    forced_complete = complete_from if isinstance(complete_from, int) else None
+    forced_complete = o.complete_from if isinstance(o.complete_from, int) else None
     zooms, complete_from = guess_zooms(
         con,
         sorted_path,
         geometry,
         family,
-        zooms,
-        complete_from,
+        o.zooms,
+        o.complete_from,
         (mxmin, mymin, mxmax, mymax),
         log,
     )
@@ -804,7 +775,7 @@ def _write_unindexed(
                 '__nv AS nv',
             ]
             + [a.name for a in attributes]
-            + list(columns)
+            + list(o.columns)
         )
     )
     # The sorted copy is already in (key, id) order; reading it in file order,
@@ -886,7 +857,7 @@ def _write_unindexed(
             _full_detail_bytes(
                 con, sorted_path, geometry, family, zooms[-1], (mxmin, mymin), n_rows
             )
-            <= single_lod_bytes
+            <= o.single_lod_bytes
         )
         if single:
             log('  full-detail shapes are small; one shape LOD serves every zoom')
@@ -996,12 +967,13 @@ def _write_unindexed(
     schema = schema.with_metadata(
         {
             **(source_schema.metadata or {}),
-            **{k.encode(): v.encode() for k, v in (metadata or {}).items()},
+            **{k.encode(): v.encode() for k, v in (o.metadata or {}).items()},
             b'geo': json.dumps(geo).encode(),
         }
     )
 
     # 4. page sizing: write batches small enough that dense coordinate pages land near page_bytes
+    batch_rows = o.batch_rows
     if batch_rows is None:
         # the first rows in file order, so the sample does not depend on scan threads
         sample = _first_rows(sorted_path, [geometry], '__cx', 2000)
@@ -1015,7 +987,7 @@ def _write_unindexed(
             avg = max(8.0, 8.0 * len(parts[3]) / len(wkb))
         else:
             avg = 8.0
-        batch_rows = int(min(1024, max(32, page_bytes // avg * 2)))
+        batch_rows = int(min(1024, max(32, o.page_bytes // avg * 2)))
     # Source scalars keep their statistics, so analytical filters such as a GEOID
     # prefix or a state skip row groups; in Hilbert order a row group is one region.
     source_stats = [
@@ -1025,7 +997,7 @@ def _write_unindexed(
         and not pa.types.is_binary(f.type)
         and not pa.types.is_large_binary(f.type)
     ]
-    compression_levels = {path: compression_level for path in _leaf_paths(schema)}
+    compression_levels = {path: o.compression_level for path in _leaf_paths(schema)}
     compression_levels.update({f'lod.{b["name"]}': STAGED_LOD_LEVEL for b in lod_plan})
     options = dict(
         compression='zstd',
@@ -1042,8 +1014,8 @@ def _write_unindexed(
         ],
         write_page_index=True,
         write_batch_size=batch_rows,
-        data_page_size=page_bytes,
-        max_rows_per_page=page_rows,
+        data_page_size=o.page_bytes,
+        max_rows_per_page=o.page_rows,
         data_page_version='1.0',
     )
     log(f'  {len(lod_plan)} LODs, batch {batch_rows} rows')
@@ -1246,12 +1218,12 @@ def _write_unindexed(
         # the sorted copy is already in output order: Hilbert key, then source id, rows
         # without geometry last. Equal keys keep source-id order, matching file_pos, so
         # a boundary copy points at its own source row.
-        batches = pq.ParquetFile(sorted_path).iter_batches(batch_size=row_group_rows)
+        batches = pq.ParquetFile(sorted_path).iter_batches(batch_size=o.row_group_rows)
         # enough jobs in flight to keep the pool busy, and no more row groups held than
         # those jobs need
         max_jobs = 2 * workers
         pending = []
-        for table in _rebatch(batches, row_group_rows):
+        for table in _rebatch(batches, o.row_group_rows):
             pending.append((table, [pool.submit(_pack_rows, job) for job in jobs(table)]))
             while len(pending) > 1 and sum(len(f) for _, f in pending) > max_jobs:
                 flush(*pending.pop(0))
