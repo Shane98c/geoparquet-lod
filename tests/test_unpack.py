@@ -17,13 +17,13 @@ def quiet(*_):
     pass
 
 
-def source(path, geometry, columns, types):
+def source(path, geometry, columns, types, name='geometry'):
     geo = {
         'version': '1.1.0',
-        'primary_column': 'geometry',
-        'columns': {'geometry': {'encoding': 'WKB', 'geometry_types': types}},
+        'primary_column': name,
+        'columns': {name: {'encoding': 'WKB', 'geometry_types': types}},
     }
-    table = pa.table({**columns, 'geometry': pa.array(shapely.to_wkb(geometry), pa.binary())})
+    table = pa.table({**columns, name: pa.array(shapely.to_wkb(geometry), pa.binary())})
     pq.write_table(table.replace_schema_metadata({b'geo': json.dumps(geo).encode()}), path)
     return path
 
@@ -183,6 +183,18 @@ def test_read_overview_in_batches(polygons, monkeypatch):
     assert batched['row'].num_chunks > whole['row'].num_chunks
     assert batched.schema.equals(whole.schema, check_metadata=True)
     assert same(batched.to_pylist(), whole.to_pylist())
+
+
+@pytest.mark.parametrize('name', ['row', 'geometry'])
+def test_read_overview_refuses_a_carried_attribute_named_like_its_columns(tmp_path, name):
+    x = -105 + np.arange(20) * 1e-3
+    shapes = shapely.box(x, 39.7, x + 5e-4, 39.7005)
+    columns = {name: pa.array(range(20), pa.int32())}
+    src = source(tmp_path / 'source.parquet', shapes, columns, ['Polygon'], name='geom')
+    out = write(src, tmp_path / 'out.parquet', geometry='geom', carry=[name], workers=1, log=quiet)
+    zoom = json.loads(pq.read_schema(out).metadata[b'geo'])['lod_columns']['zooms'][-1]
+    with pytest.raises(ValueError, match=f"carried attribute '{name}' collides"):
+        read_overview(out, zoom)
 
 
 def test_lines_and_points_agree(tmp_path):

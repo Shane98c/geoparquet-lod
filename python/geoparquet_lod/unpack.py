@@ -72,7 +72,8 @@ def read_overview(path: str | Path, zoom: int) -> pa.Table:
     """The rows shown at `zoom` with their overview geometry: `row`, the file
     row index; `geometry`, WKB in EPSG:3857 metres, the CRS stated in the
     field's GeoArrow metadata; and the carried attributes as that zoom's LOD
-    stores them. Boundary copies are left out, as each repeats a shown row."""
+    stores them. Boundary copies are left out, as each repeats a shown row. A
+    carried attribute named `row` or `geometry` is refused."""
     f = pq.ParquetFile(path)
     lod = json.loads((f.schema_arrow.metadata or {}).get(b'geo', b'{}')).get('lod_columns')
     if not lod or lod.get('pack_version') != PACK_VERSION:
@@ -82,6 +83,12 @@ def read_overview(path: str | Path, zoom: int) -> pa.Table:
         raise ValueError(f'zoom {zoom} is not one of the file zooms {lod["zooms"]}')
     child = lod['lods'][name]
     fields, dictionaries = carried(lod)
+    for a in fields:
+        if a.name in ('row', 'geometry'):
+            raise ValueError(
+                f'carried attribute {a.name!r} collides with the {a.name!r} column '
+                'read_overview returns'
+            )
     crs = {'crs': 'EPSG:3857', 'crs_type': 'authority_code'}
     wkb = {'ARROW:extension:name': 'geoarrow.wkb', 'ARROW:extension:metadata': json.dumps(crs)}
     schema = pa.schema(

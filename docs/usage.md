@@ -289,6 +289,10 @@ zoom's grid, its CRS stated in the field's GeoArrow (`geoarrow.wkb`) metadata;
 and the carried attributes as that zoom's LOD stores them. Boundary copies are
 left out, since each repeats a row the table already has.
 
+A file carrying an attribute named `row` or `geometry` raises `ValueError`,
+naming the attribute, since it would collide with those columns; rename it in
+the source and rewrite the file to read its overviews here.
+
 ```python
 import shapely
 from geoparquet_lod import read_overview
