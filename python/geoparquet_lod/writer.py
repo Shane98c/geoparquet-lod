@@ -82,6 +82,8 @@ SORT_FLUSH_ROWS = 65_536
 # Rows per render and pack job at most; a worker's memory follows the largest job it
 # has run.
 JOB_ROWS = 65_536
+# finalize_layout encodes the overview columns again, so they are first written fast
+STAGED_LOD_LEVEL = 1
 # The unsorted copy is only read in ways that ignore its order, so its row groups can be
 # small, which bounds what DuckDB buffers per thread while writing it.
 UNSORTED_ROW_GROUP_ROWS = 122_880
@@ -403,24 +405,12 @@ def _attach_source(con, src: str) -> None:
         con.execute('CREATE OR REPLACE SECRET (TYPE S3, PROVIDER credential_chain)')
 
 
-def _leaf_paths(schema: pa.Schema) -> list[list[str]]:
-    """Parquet leaf paths of an Arrow schema as pyarrow names them: every list
-    level is `list.element` whatever the Arrow child field is called."""
-    out = []
-
-    def walk(field: pa.Field, path: list[str]):
-        t = field.type
-        if pa.types.is_struct(t):
-            for i in range(t.num_fields):
-                walk(t.field(i), [*path, t.field(i).name])
-        elif pa.types.is_list(t) or pa.types.is_fixed_size_list(t):
-            walk(t.value_field, [*path, 'list', 'element'])
-        else:
-            out.append(path)
-
-    for f in schema:
-        walk(f, [f.name])
-    return out
+def _leaf_paths(schema: pa.Schema) -> list[str]:
+    """Dotted paths of the Parquet leaf columns pyarrow writes for `schema`."""
+    sink = pa.BufferOutputStream()
+    pq.write_table(schema.empty_table(), sink)
+    leaves = pq.ParquetFile(pa.BufferReader(sink.getvalue())).schema
+    return [leaves.column(i).path for i in range(len(leaves))]
 
 
 def _concat_parts(parts_list):
@@ -675,8 +665,9 @@ def _write_unindexed(
     `complete_from` is the zoom from which every feature is shown whatever the
     thinning says, and the base zoom a rate-based thinning counts from; `'auto'`
     guesses the base and records which zooms the thinning leaves complete.
-    `compression_level` is zstd's;
-    decoding speed does not depend on it. Returns the output path."""
+    `compression_level` is zstd's; decoding speed does not depend on it.
+    Overview columns are written at zstd level STAGED_LOD_LEVEL, since
+    `finalize_layout` encodes them again. Returns the output path."""
     src = str(src)
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -1034,9 +1025,11 @@ def _write_unindexed(
         and not pa.types.is_binary(f.type)
         and not pa.types.is_large_binary(f.type)
     ]
+    compression_levels = {path: compression_level for path in _leaf_paths(schema)}
+    compression_levels.update({f'lod.{b["name"]}': STAGED_LOD_LEVEL for b in lod_plan})
     options = dict(
         compression='zstd',
-        compression_level=compression_level,
+        compression_level=compression_levels,
         use_dictionary=False,
         column_encoding={KEY_COLUMN: 'DELTA_BINARY_PACKED'},
         write_statistics=[
