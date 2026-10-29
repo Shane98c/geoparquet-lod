@@ -2,7 +2,6 @@
 
 import gzip
 import json
-import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -24,9 +23,11 @@ from ._layout import (
 
 
 def check_index(path, parquet, lod):
-    """Return normally for a file without the spatial index; raise ValueError on corruption."""
+    """Return normally for a file without the spatial index; raise ValueError on
+    corruption. Holds the decoded directories, then one row group's keys and
+    one LOD column of it at a time."""
     size = Path(path).stat().st_size
-    with open(path, 'rb') as source, tempfile.TemporaryFile() as key_store:
+    with open(path, 'rb') as source:
         source.seek(-8, 2)
         footer_size = int.from_bytes(source.read(4), 'little')
         footer_start = size - 8 - footer_size
@@ -130,22 +131,6 @@ def check_index(path, parquet, lod):
         if not isinstance(depth, int) or not 0 <= depth <= 26:
             raise ValueError('invalid Hilbert depth')
         sentinel = 4**depth
-        keys = np.memmap(key_store, dtype=np.uint64, mode='w+', shape=(parquet.metadata.num_rows,))
-        last = 0
-        for g in range(len(groups)):
-            column = parquet.read_row_group(g, columns=[key['column']]).column(0)
-            if not pa.types.is_integer(column.type):
-                raise ValueError('Hilbert keys must be integers')
-            values = column.fill_null(sentinel).to_numpy()
-            if len(values) and (
-                (values < 0).any()
-                or (values > sentinel).any()
-                or values[0] < last
-                or (values[1:] < values[:-1]).any()
-            ):
-                raise ValueError('Hilbert keys out of range or unsorted')
-            keys[starts[g] : starts[g] + len(values)] = values
-            last = values[-1] if len(values) else last
 
         # Every node of every tree, by offset: a tree reaches each node once.
         reached = set()
@@ -175,13 +160,31 @@ def check_index(path, parquet, lod):
                 leaves += walk(child_level, child)
             return leaves
 
+        trees = {}
         for name, top in directories.items():
             level, entries = read_node(top)
             if level < 1:
                 raise ValueError('a directory tree must start above its leaves')
-            actual = _concat(walk(level, entries))
-            expected, zoom = [], grid_zoom(lod, name)
-            for g, (byte, length, bounds, cm) in enumerate(locations[name]):
+            trees[name] = _concat(walk(level, entries))
+        # Pages compare in tree order, which must be key and row order: each
+        # row group's pages follow the pages of the row groups before it.
+        checked = dict.fromkeys(trees, 0)
+        last = 0
+        for g in range(len(groups)):
+            column = parquet.read_row_group(g, columns=[key['column']]).column(0)
+            if not pa.types.is_integer(column.type):
+                raise ValueError('Hilbert keys must be integers')
+            keys = column.fill_null(sentinel).to_numpy()
+            if len(keys) and (
+                (keys < 0).any()
+                or (keys > sentinel).any()
+                or keys[0] < last
+                or (keys[1:] < keys[:-1]).any()
+            ):
+                raise ValueError('Hilbert keys out of range or unsorted')
+            last = keys[-1] if len(keys) else last
+            for name, actual in trees.items():
+                byte, length, bounds, cm = locations[name][g]
                 if root.get('codecs', {}).get(name) != CODECS[get(cm, 4)]:
                     raise ValueError('spatial root codec disagrees with footer')
                 _check_pages(read, cm, byte, length, np.diff(bounds))
@@ -192,26 +195,35 @@ def check_index(path, parquet, lod):
                     .field(name)
                 )
                 present = values.is_valid().to_numpy(zero_copy_only=False)
-                found = page_cells(
-                    keys[starts[g] : starts[g] + len(present)], bounds, present, depth, zoom
-                )
-                shown = found.pop('pages')
-                found['offset'], found['length'] = byte[shown], length[shown]
-                found['first'] += starts[g]
-                expected.append(found)
-            expected = _concat(expected)
-            # Pages compare in tree order, which must be key and row order.
-            if not np.array_equal(actual['offset'], expected['offset']):
-                raise ValueError('spatial directory omits, adds or reorders overview pages')
-            if not expected['valid'].all():
-                raise ValueError('a displayed row has a null Hilbert key')
-            for fields, message in (
-                (('length', 'first', 'count'), 'spatial leaf disagrees with Parquet page index'),
-                (('low', 'high', 'valid'), 'spatial leaf key bounds or valid-row count incorrect'),
-                (FENCE_FIELDS, 'spatial leaf fences disagree with source keys'),
-            ):
-                if any(not np.array_equal(actual[k], expected[k]) for k in fields):
-                    raise ValueError(message)
+                expected = page_cells(keys, bounds, present, depth, grid_zoom(lod, name))
+                shown = expected.pop('pages')
+                expected['offset'], expected['length'] = byte[shown], length[shown]
+                expected['first'] += starts[g]
+                _compare(actual, checked[name], expected)
+                checked[name] += len(shown)
+        if any(checked[name] != len(actual['low']) for name, actual in trees.items()):
+            raise ValueError('spatial directory omits, adds or reorders overview pages')
+
+
+def _compare(actual, start, expected):
+    """Check the directory pages `actual` from index `start` against the next
+    row group's `expected` pages, whose fences number its pages from zero."""
+    end = start + len(expected['low'])
+    if not np.array_equal(actual['offset'][start:end], expected['offset']):
+        raise ValueError('spatial directory omits, adds or reorders overview pages')
+    if not expected['valid'].all():
+        raise ValueError('a displayed row has a null Hilbert key')
+    first, last = np.searchsorted(actual['fence_page'], [start, end])
+    found = {k: actual[k][start:end] for k in PAGE_FIELDS}
+    found.update({k: actual[k][first:last] for k in FENCE_FIELDS})
+    found['fence_page'] = found['fence_page'] - start
+    for fields, message in (
+        (('length', 'first', 'count'), 'spatial leaf disagrees with Parquet page index'),
+        (('low', 'high', 'valid'), 'spatial leaf key bounds or valid-row count incorrect'),
+        (FENCE_FIELDS, 'spatial leaf fences disagree with source keys'),
+    ):
+        if any(not np.array_equal(found[k], expected[k]) for k in fields):
+            raise ValueError(message)
 
 
 def _concat(parts):

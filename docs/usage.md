@@ -276,9 +276,9 @@ and order, row spans, cell bounds, fences, and branch bounds. Files without a
 spatial directory get the packed-value and offset-index checks. This is a storage and reader contract check; it does not
 prove polygon topology or compare simplification accuracy with primary WKB. Full
 mode reads the complete data, holds one LOD column of one row group at a time,
-decoding it two megabytes of packed values at a time, and uses temporary disk
-space of eight bytes per source row for key verification. The returned `mode`
-and `checked_non_null` describe the work performed.
+decoding it two megabytes of packed values at a time, and checks the spatial
+directory, held in memory, against one row group's keys at a time. The returned
+`mode` and `checked_non_null` describe the work performed.
 
 ### Overviews in Python
 

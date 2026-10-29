@@ -187,11 +187,12 @@ class _Appended:
         _write_root(path, raw, root)
 
 
-@pytest.mark.parametrize('arrangement', ['branches', 'same_cell'])
+@pytest.mark.parametrize('arrangement', ['branches', 'same_cell', 'added', 'omitted'])
 def test_directory_lists_pages_in_key_order(leafy, tmp_path, arrangement):
     """Leaves copied into another order, under nodes whose bounds match their
-    first and last entries, still list every page once. A tile would lose
-    pages, or read a cell's pages out of row order."""
+    first and last entries, still list every page once, as do leaves with the
+    last one repeated or left out. A tile would lose pages, read a cell's
+    pages out of row order, or read a page twice."""
     raw, root = _root(leafy)
     name = max(root['directories'], key=lambda n: len(root['directories'][n][1]))
     level, entries = read_node(root['directories'][name])
@@ -214,9 +215,16 @@ def test_directory_lists_pages_in_key_order(leafy, tmp_path, arrangement):
         lows, highs = [low[p[0]] for p in parts], [high[p[-1]] for p in parts]
         root['directories'][name] = _node(2, lows, highs, *zip(*branches, strict=True))
         message = 'out of key order'
-    else:
+    elif arrangement == 'same_cell':
         root['directories'][name] = leaves([0, 2, 1, *range(3, n)])
         message = 'reorders'
+    elif arrangement == 'added':
+        # every row group matches its pages before the copy is reached
+        root['directories'][name] = leaves([*range(n), n - 1])
+        message = 'adds'
+    else:
+        root['directories'][name] = leaves(list(range(n - 1)))
+        message = 'omits'
     bad = tmp_path / 'reordered.parquet'
     store.write(bad, root)
     with pytest.raises(ValidationError, match=message):
