@@ -30,4 +30,15 @@ for (const { z, x, y, id, attribute = 'h' } of cases) {
   const mvt = await renderTile(reader, z, x, y)
   assert.ok(mvt.byteLength > 0)
 }
+// the layout requires key statistics: a row group without them fails the read
+const stripped = await LodReader.open(coalescing(source))
+const keyChunk = stripped.metadata.row_groups[0].columns.find(
+  (c) => c.meta_data.path_in_schema.join('.') === stripped.lod.key.column,
+)
+delete keyChunk.meta_data.statistics
+const [first] = cases
+await assert.rejects(
+  stripped.readLodByTile(stripped.lodForZoom(first.z), first.z, first.x, first.y),
+  /no statistics for key column/,
+)
 console.log(`spill tests passed, ${copies} copies found`)

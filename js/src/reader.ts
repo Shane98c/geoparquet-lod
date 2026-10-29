@@ -352,9 +352,8 @@ export class LodReader {
     if (s && s.min_value != null && s.max_value != null)
       return [unsigned(s.min_value), unsigned(s.max_value)]
     const nulls = s?.null_count
-    return nulls != null && Number(nulls) === Number(this.metadata.row_groups[g].num_rows)
-      ? null
-      : [-Infinity, Infinity]
+    if (nulls != null && Number(nulls) === Number(this.metadata.row_groups[g].num_rows)) return null
+    throw new Error(`row group ${g} has no statistics for key column ${column}`)
   }
 
   /**
@@ -937,6 +936,8 @@ export class LodReader {
   private offsetIndex(g: number, leaf: string): Promise<PageLocation[]> {
     return this.cached(`o:${g}:${leaf}`, async () => {
       const c = this.chunk(g, leaf)
+      if (c.offset_index_offset == null)
+        throw new Error(`column ${leaf} has no offset index in row group ${g}`)
       const buffer = await this.file.slice(
         Number(c.offset_index_offset),
         Number(c.offset_index_offset) + c.offset_index_length!,
@@ -956,6 +957,8 @@ export class LodReader {
   private columnIndex(g: number, leaf: string) {
     return this.cached(`c:${g}:${leaf}`, async () => {
       const c = this.chunk(g, leaf)
+      if (c.column_index_offset == null)
+        throw new Error(`column ${leaf} has no column index in row group ${g}`)
       const buffer = await this.file.slice(
         Number(c.column_index_offset),
         Number(c.column_index_offset) + c.column_index_length!,
