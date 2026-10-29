@@ -196,8 +196,4 @@ def inspect(path: str | Path) -> dict:
     }
 
 
-def summarize_sizes(sizes: dict, rows: int) -> list[tuple[str, float]]:
-    return [(k, v / max(rows, 1)) for k, v in sizes.items()]
-
-
 __all__ = ['ValidationError', 'inspect', 'validate']

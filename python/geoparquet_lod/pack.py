@@ -41,23 +41,33 @@ def unzigzag(v: int) -> int:
     return (v >> 1) ^ -(v & 1)
 
 
-def varint_bytes(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """LEB128 bytes of unsigned `values` in order, and each value's byte count."""
+def varint_bytes(values: np.ndarray, offsets: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """LEB128 bytes of unsigned `values` in order, and the byte offset of each
+    of `offsets`, which index `values`."""
     v = np.asarray(values, dtype=np.uint64)
-    cols = []
-    for j in range(10):
-        shifted = v >> np.uint64(7 * j)
-        more = (shifted >> np.uint64(7)) != 0
-        cols.append(
-            ((shifted & np.uint64(0x7F)) | (more.astype(np.uint64) << np.uint64(7))).astype(
-                np.uint8
-            )
-        )
-    matrix = np.stack(cols, axis=1)
-    valid = np.ones_like(matrix, dtype=bool)
-    for j in range(1, 10):
-        valid[:, j] = (v >> np.uint64(7 * j)) != 0
-    return matrix[valid], valid.sum(axis=1).astype(np.int64)
+    # most values take one byte; the rest are written a further byte at a time
+    big = np.flatnonzero(v > 0x7F)
+    levels = []
+    k, rest = np.arange(len(big)), v[big] >> 7
+    while len(k):
+        levels.append((k, rest))
+        more = rest > 0x7F
+        k, rest = k[more], rest[more] >> 7
+    extra = np.zeros(len(big), np.int64)
+    for k, _ in levels:
+        extra[k] += 1
+    before = np.concatenate([[0], np.cumsum(extra)])
+    out = np.empty(len(v) + int(before[-1]), np.uint8)
+    first = np.ones(len(out), bool)
+    for j, (k, rest) in enumerate(levels, 1):
+        at = big[k] + before[k] + j
+        first[at] = False
+        out[at] = (rest.astype(np.uint8) & 0x7F) | ((rest > 0x7F).view(np.uint8) << 7)
+    low = v.astype(np.uint8) & 0x7F
+    low[big] |= 0x80
+    out[first] = low
+    offsets = np.asarray(offsets, dtype=np.int64)
+    return out, offsets + before[np.searchsorted(big, offsets)]
 
 
 def _segment_values(parts, depth: int):
@@ -213,14 +223,8 @@ def pack(
     av, a_len, s_len, strings = _attr_values(fields, attrs, n, dictionaries)
     blocks = [(own, own_len), (av, a_len)]
     if spill is None:
-        spill = (
-            np.zeros(n, np.int64),
-            np.zeros(0, np.int64),
-            np.zeros(0, np.int64),
-            _empty_parts(family),
-            {f.name: pa.nulls(0, f.type) for f in fields},
-        )
-    if True:
+        blocks.append((np.zeros(n, np.uint64), np.ones(n, np.int64)))
+    else:
         counts, tile, ids, sparts, sattrs = spill
         m = len(tile)
         sown, sown_len = (
@@ -237,26 +241,15 @@ def pack(
         _scatter(ev, e_start[:-1] + 2 + sown_len, sav, sa_len)
         # per row: count, then its entries
         row_entry_start = np.concatenate([[0], np.cumsum(counts)])
-        sp_len = 1 + (_group_sum(e_len, row_entry_start) if m else np.zeros(n, np.int64)) * (
-            counts > 0
-        )
-        sp_len = np.where(counts > 0, sp_len, 1)
+        sp_len = 1 + _group_sum(e_len, row_entry_start)
         sp = np.zeros(int(sp_len.sum()), np.uint64)
         sp_start = np.concatenate([[0], np.cumsum(sp_len)])
         sp[sp_start[:-1]] = counts
-        if m:
-            entry_dest = np.repeat(sp_start[:-1] + 1, counts) + _within(e_len, row_entry_start)
-            _scatter(sp, entry_dest, ev, e_len)
+        entry_dest = np.repeat(sp_start[:-1] + 1, counts) + _within(e_len, row_entry_start)
+        _scatter(sp, entry_dest, ev, e_len)
         blocks.append((sp, sp_len))
-        s_len = s_len + (_group_sum(ss_len, row_entry_start) * (counts > 0) if m else 0)
-        strings = _merge_strings(
-            n,
-            strings,
-            s_len - (_group_sum(ss_len, row_entry_start) * (counts > 0) if m else 0),
-            sstrings,
-            ss_len,
-            counts,
-        )
+        if len(sstrings):
+            strings, s_len = _merge_strings(strings, s_len, sstrings, ss_len, row_entry_start)
     # concatenate blocks per row
     row_len = sum(b[1] for b in blocks)
     row_start = np.concatenate([[0], np.cumsum(row_len)])
@@ -265,24 +258,19 @@ def pack(
     for vals, lens in blocks:
         _scatter(values, row_start[:-1] + offset, vals, lens)
         offset += lens
-    vb, vcount = varint_bytes(values)
-    vbytes_per_row = _group_sum(vcount, row_start) if len(vcount) else np.zeros(n, np.int64)
-    vbytes_per_row = np.where(row_len > 0, vbytes_per_row, 0)
-    total = vbytes_per_row + s_len
-    out_off = np.concatenate([[0], np.cumsum(total)])
-    out = np.empty(int(out_off[-1]), np.uint8)
-    _scatter(out, out_off[:-1], vb, vbytes_per_row)
-    _scatter(out, out_off[:-1] + vbytes_per_row, strings, s_len)
+    vb, v_off = varint_bytes(values, row_start)
+    v_len = np.diff(v_off)
+    out_off = np.concatenate([[0], np.cumsum(v_len + s_len)])
+    out = vb
+    if len(strings):
+        # each row's varints, then its string bytes
+        is_string = np.repeat(np.tile([False, True], n), np.stack([v_len, s_len], 1).ravel())
+        out = np.empty(len(is_string), np.uint8)
+        out[~is_string] = vb
+        out[is_string] = strings
     return pa.BinaryArray.from_buffers(
         pa.binary(), n, [None, pa.py_buffer(out_off.astype(np.int32)), pa.py_buffer(out)]
     )
-
-
-def _empty_parts(family: str):
-    if family == 'Point':
-        return (np.zeros(0, np.int64), np.zeros(0, np.int64))
-    z = np.zeros(1, np.int64)
-    return (z, z, z, np.zeros(0, np.int32), np.zeros(0, np.int32))
 
 
 def _scatter(dest: np.ndarray, dest_start: np.ndarray, src: np.ndarray, lens: np.ndarray) -> None:
@@ -297,22 +285,15 @@ def _scatter(dest: np.ndarray, dest_start: np.ndarray, src: np.ndarray, lens: np
     dest[idx] = src[:total]
 
 
-def _merge_strings(n, own_strings, own_len, spill_strings, spill_len, counts):
-    """Each row's string bytes: its own, then its hosted copies' in order."""
-    if not len(spill_strings) and not len(own_strings):
-        return np.zeros(0, np.uint8)
-    row_entry_start = np.concatenate([[0], np.cumsum(counts)])
-    sp_row = (
-        _group_sum(spill_len, row_entry_start) if len(spill_len) else np.zeros(n, np.int64)
-    ) * (counts > 0)
-    total = own_len + sp_row
-    out = np.empty(int(total.sum()), np.uint8)
+def _merge_strings(own, own_len, copies, copy_len, row_entry_start):
+    """Each row's string bytes, its own then its hosted copies' in order, and their lengths."""
+    total = own_len + _group_sum(copy_len, row_entry_start)
     out_off = np.concatenate([[0], np.cumsum(total)])
-    _scatter(out, out_off[:-1], own_strings, own_len)
-    if len(spill_strings):
-        entry_dest = np.repeat(out_off[:-1] + own_len, counts) + _within(spill_len, row_entry_start)
-        _scatter(out, entry_dest, spill_strings, spill_len)
-    return out
+    out = np.empty(int(out_off[-1]), np.uint8)
+    _scatter(out, out_off[:-1], own, own_len)
+    dest = np.repeat(out_off[:-1] + own_len, np.diff(row_entry_start))
+    _scatter(out, dest + _within(copy_len, row_entry_start), copies, copy_len)
+    return out, total
 
 
 class Unpacker:
@@ -386,13 +367,12 @@ class Unpacker:
         geometry = self.geometry()
         attrs = self.attrs()
         spill = []
-        if True:
-            for _ in range(self.varint()):
-                tile = self.varint()
-                rid = self.varint()
-                spill.append(
-                    {'tile': tile, 'id': rid, 'geometry': self.geometry(), 'attrs': self.attrs()}
-                )
+        for _ in range(self.varint()):
+            tile = self.varint()
+            rid = self.varint()
+            spill.append(
+                {'tile': tile, 'id': rid, 'geometry': self.geometry(), 'attrs': self.attrs()}
+            )
         # string payloads follow, in order
         for record in [attrs, *[s['attrs'] for s in spill]]:
             for name, v in record.items():
