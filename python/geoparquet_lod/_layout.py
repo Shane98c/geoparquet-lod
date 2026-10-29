@@ -116,17 +116,20 @@ def _leaf(pages, start, end):
 def read_node(node):
     """A directory node's level and its entries as arrays: cell bounds, byte
     offsets and lengths, and for a leaf the page fields and fences that
-    `page_cells` returns."""
+    `page_cells` returns. Entries must be in key order, each starting at or
+    after the previous one's maximum cell."""
     if not isinstance(node, list) or len(node) < 5:
         raise ValueError('malformed directory node')
     level = node[0]
-    if not isinstance(level, int) or not 0 <= level <= 32:
+    if type(level) is not int or not 0 <= level <= 32:
         raise ValueError('invalid directory level')
     if len(node) != (5 if level else 9):
         raise ValueError('malformed directory node')
     cells, spans, gaps, length = (_column(values) for values in node[1:5])
     if not len(cells) == len(spans) == len(gaps) == len(length) or (spans < 0).any():
         raise ValueError('malformed directory node')
+    if len(cells) and (cells[0] < 0 or (cells[1:] < spans[:-1]).any()):
+        raise ValueError('directory entries out of key order')
     if (gaps < 0).any() or (length <= 0).any():
         raise ValueError('directory byte ranges overlap or are empty')
     low = np.cumsum(cells)
@@ -165,7 +168,7 @@ def read_node(node):
 
 def _column(values):
     array = np.asarray(values)
-    if not isinstance(values, list) or (array.size and array.dtype.kind != 'i'):
+    if not isinstance(values, list) or array.ndim != 1 or (array.size and array.dtype.kind != 'i'):
         raise ValueError('directory columns hold integers')
     return array.astype(np.int64)
 

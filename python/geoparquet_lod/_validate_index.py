@@ -135,20 +135,29 @@ def check_index(path, parquet, lod):
             keys[starts[g] : starts[g] + len(values)] = values
             last = values[-1] if len(values) else last
 
+        # Every node of every tree, by offset: a tree reaches each node once.
+        reached = set()
+
         def walk(level, entries):
-            """The leaf entries under one node, in order."""
+            """The leaf entries under one node, in tree order."""
             if not level:
                 return [entries]
             leaves = []
             within(entries['offset'], entries['length'])
             for i in range(len(entries['low'])):
-                raw = read(int(entries['offset'][i]), int(entries['length'][i]))
+                offset, low, high = (int(entries[k][i]) for k in ('offset', 'low', 'high'))
+                if offset in reached:
+                    raise ValueError('a directory node is referenced twice')
+                reached.add(offset)
+                raw = read(offset, int(entries['length'][i]))
                 child_level, child = read_node(json.loads(gzip.decompress(raw)))
                 if child_level != level - 1:
                     raise ValueError('inconsistent directory depth')
-                if not len(child['low']) or (child['low'][0], child['high'][-1]) != (
-                    entries['low'][i],
-                    entries['high'][i],
+                if (
+                    not len(child['low'])
+                    or (child['low'][0], child['high'][-1]) != (low, high)
+                    or (child['low'] < low).any()
+                    or (child['high'] > high).any()
                 ):
                     raise ValueError('directory bounds do not cover children exactly')
                 leaves += walk(child_level, child)
@@ -159,10 +168,6 @@ def check_index(path, parquet, lod):
             if level < 1:
                 raise ValueError('a directory tree must start above its leaves')
             actual = _concat(walk(level, entries))
-            order = np.argsort(actual['first'], kind='stable')
-            position = np.empty_like(order)
-            position[order] = np.arange(len(order))
-            actual = {k: actual[k][order] for k in PAGE_FIELDS} | _fences(actual, position)
             expected, zoom = [], grid_zoom(lod, name)
             for g, (byte, length, bounds, codec) in enumerate(locations[name]):
                 if root.get('codecs', {}).get(name) != codec:
@@ -182,10 +187,9 @@ def check_index(path, parquet, lod):
                 found['first'] += starts[g]
                 expected.append(found)
             expected = _concat(expected)
-            if len(actual['low']) != len(expected['low']) or not np.array_equal(
-                actual['offset'], expected['offset']
-            ):
-                raise ValueError('spatial directory omits or adds overview pages')
+            # Pages compare in tree order, which must be key and row order.
+            if not np.array_equal(actual['offset'], expected['offset']):
+                raise ValueError('spatial directory omits, adds or reorders overview pages')
             if not expected['valid'].all():
                 raise ValueError('a displayed row has a null Hilbert key')
             for fields, message in (
@@ -209,14 +213,3 @@ def _concat(parts):
             + [p[k] + (counts[i] if k == 'fence_page' else 0) for i, p in enumerate(parts)]
         )
     return pages
-
-
-def _fences(pages, position):
-    """Fences renumbered for pages moved to `position`, in page and row order."""
-    page = position[pages['fence_page']]
-    order = np.lexsort((pages['fence_row'], page))
-    return {
-        'fence_page': page[order],
-        'fence_row': pages['fence_row'][order],
-        'fence_cell': pages['fence_cell'][order],
-    }

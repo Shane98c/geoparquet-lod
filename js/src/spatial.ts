@@ -23,13 +23,11 @@ import {
 export const BOOTSTRAP_BYTES = 16384
 const MAGIC = 'LODIDX01'
 const VERSION = 2
+const MAX_LEVEL = 32
 // [minimum key, maximum key, offset, length, first global row, row count, fences, valid key rows]
 type Page = [number, number, number, number, number, number, number[], number?]
 // [minimum key, maximum key, offset, length, level of the node located]
 type Shard = [number, number, number, number, number]
-/** A stored directory node: its level, then one column per field with a value
- * per entry. Leaves, at level 0, add the page columns. */
-type StoredNode = [number, number[], number[], number[], number[], ...unknown[]]
 /** A node's entries: pages in a leaf, else the nodes one level down. */
 type DirectoryNode = { level: 0; entries: Page[] } | { level: number; entries: Shard[] }
 interface SpatialRoot {
@@ -44,28 +42,46 @@ interface SpatialRoot {
   primary: string
   codecs: Record<string, string>
   /** The top node of each LOD's directory tree, at level one or above */
-  directories: Record<string, StoredNode>
+  directories: Record<string, unknown>
 }
 
+const integers = (values: unknown): values is number[] =>
+  Array.isArray(values) && values.every(Number.isSafeInteger)
+
 /**
- * Decode a directory node. Its columns hold, per entry: minimum cell minus the
- * previous entry's, cell span, byte gap after the previous entry's end, and
- * length; a leaf adds the row gap after the previous page's end, row count,
+ * Decode a stored directory node: its level, then one column per field with a
+ * value per entry. Every entry holds its minimum cell minus the previous
+ * entry's, cell span, byte gap after the previous entry's end, and length; a
+ * leaf, at level 0, adds the row gap after the previous page's end, row count,
  * fences after the implied [minimum cell, 0] as pairs minus the pair before,
- * and trailing null-key rows. The first entry counts from zero. Bounds widen
- * to whole cells of `span` keys, which select the same entries for any tile
- * interval made of whole cells.
+ * and trailing null-key rows. The first entry counts from zero, and each
+ * starts at or after the previous one's maximum cell. Bounds widen to whole
+ * cells of `span` keys, which select the same entries for any tile interval
+ * made of whole cells.
  */
-function decodeNode(node: StoredNode, span: number): DirectoryNode {
-  const [level, cells, spans, gaps, lengths] = node
-  const [rows, counts, fences, nulls] = node.slice(5) as [number[], number[], number[][], number[]]
+function decodeNode(stored: unknown, span: number): DirectoryNode {
+  const node: unknown[] = Array.isArray(stored) ? stored : []
+  const [level, cells, spans, gaps, lengths, rows, counts, fences, nulls] = node as [
+    number,
+    number[],
+    number[],
+    number[],
+    number[],
+    number[],
+    number[],
+    number[][],
+    number[],
+  ]
   if (
-    !Number.isInteger(level) ||
+    !Number.isSafeInteger(level) ||
     level < 0 ||
+    level > MAX_LEVEL ||
     node.length !== (level ? 5 : 9) ||
-    [cells, spans, gaps, lengths, ...(level ? [] : [rows, counts, fences, nulls])].some(
-      (column) => !Array.isArray(column) || column.length !== cells.length,
-    )
+    ![cells, spans, gaps, lengths, ...(level ? [] : [rows, counts, fences, nulls])].every(
+      (column) => Array.isArray(column) && column.length === cells.length,
+    ) ||
+    ![cells, spans, gaps, lengths, ...(level ? [] : [rows, counts, nulls])].every(integers) ||
+    (!level && !fences.every((f) => integers(f) && f.length % 2 === 0))
   )
     throw new Error('malformed spatial directory node')
   const pages: Page[] = [],
@@ -74,6 +90,15 @@ function decodeNode(node: StoredNode, span: number): DirectoryNode {
     end = 0,
     row = 0
   for (let i = 0; i < cells.length; i++) {
+    if (
+      spans[i] < 0 ||
+      gaps[i] < 0 ||
+      lengths[i] <= 0 ||
+      (!level && (rows[i] < 0 || counts[i] <= 0 || nulls[i] < 0 || nulls[i] >= counts[i]))
+    )
+      throw new Error('malformed spatial directory node')
+    if (cells[i] < (i ? spans[i - 1] : 0))
+      throw new Error('spatial directory entries out of key order')
     cell += cells[i]
     const offset = end + gaps[i]
     end = offset + lengths[i]
@@ -174,7 +199,11 @@ export class SpatialReader implements TileReader {
   readonly finestZoom: number
   private readonly fields: AttributeField[]
   private readonly trees: Record<string, DirectoryNode>
-  private readonly directories = new Map<number, SharedLoad<DirectoryNode>>()
+  /** Loaded directory nodes by offset, with the length they were read at */
+  private readonly directories = new Map<
+    number,
+    { length: number; node: SharedLoad<DirectoryNode> }
+  >()
   private readonly pages = new Map<number, { size: number; data: SharedLoad<ArrayBuffer> }>()
   private pageBytes = 0
   private fallback?: SharedLoad<LodReader>
@@ -197,9 +226,11 @@ export class SpatialReader implements TileReader {
         : { name: a.name, kind: attributeKind(a.type) },
     )
     this.trees = Object.fromEntries(
-      Object.entries(root.directories).map(([name, node]) => {
+      Object.entries(root.directories ?? {}).map(([name, node]) => {
         if (!this.lods[name]) throw new Error(`spatial directory for unknown LOD ${name}`)
-        return [name, decodeNode(node, this.cellSpan(this.lods[name]))]
+        const top = decodeNode(node, this.cellSpan(this.lods[name]))
+        if (!top.level) throw new Error(`spatial directory for ${name} must start above its leaves`)
+        return [name, top]
       }),
     )
   }
@@ -269,39 +300,61 @@ export class SpatialReader implements TileReader {
     return (await this.analytical(signal)).readPrimary(bbox, attributes, signal)
   }
 
-  private directory(shard: Shard, span: number, signal?: AbortSignal): Promise<DirectoryNode> {
-    const [, , offset, length, level] = shard
-    let result = this.directories.get(offset)
-    if (!result || result.abandoned) {
-      result = new SharedLoad(async (signal) => {
-        const bytes = await this.file.slice(offset, offset + length, signal)
-        const node = decodeNode(await gunzipJson<StoredNode>(bytes), span)
-        if (node.level !== level) throw new Error('inconsistent spatial directory level')
-        return node
-      })
+  /** The node a parent's entry locates, which must match that entry's
+   * length, level and cell bounds, from cache or loaded. */
+  private async directory(
+    shard: Shard,
+    span: number,
+    signal?: AbortSignal,
+  ): Promise<DirectoryNode> {
+    const [low, high, offset, length, level] = shard
+    let cached = this.directories.get(offset)
+    if (!cached || cached.node.abandoned) {
+      const current = {
+        length,
+        node: new SharedLoad(async (signal) =>
+          decodeNode(
+            await gunzipJson(await this.file.slice(offset, offset + length, signal)),
+            span,
+          ),
+        ),
+      }
       while (this.directories.size >= 128)
         this.directories.delete(this.directories.keys().next().value!)
-      this.directories.set(offset, result)
-      const current = result
-      result.promise.catch(() => {
+      this.directories.set(offset, current)
+      current.node.promise.catch(() => {
         if (this.directories.get(offset) === current) this.directories.delete(offset)
       })
+      cached = current
     } else {
       this.directories.delete(offset)
-      this.directories.set(offset, result)
+      this.directories.set(offset, cached)
     }
-    return result.get(signal)
+    const mismatch = () => new Error('spatial directory node disagrees with its parent entry')
+    if (cached.length !== length) throw mismatch()
+    const node = await cached.node.get(signal)
+    const entries: (Page | Shard)[] = node.entries
+    if (
+      node.level !== level ||
+      !entries.length ||
+      entries[0][0] !== low ||
+      entries.at(-1)![1] !== high
+    )
+      throw mismatch()
+    return node
   }
 
   /** The pages under `node` holding keys in [start, end), plus, when
    * `hosted`, the first page whose maximum key reaches `start`, or the last
-   * page if none does, in key order. */
+   * page if none does, in key order. `reached` holds the offsets of the nodes
+   * already descended into; a tree reaches each node once. */
   private async lookup(
     node: DirectoryNode,
     start: number,
     end: number,
     hosted: boolean,
     span: number,
+    reached: Set<number>,
     signal?: AbortSignal,
   ): Promise<Page[]> {
     const entries: (Page | Shard)[] = node.entries
@@ -311,7 +364,9 @@ export class SpatialReader implements TileReader {
     const selected = await Promise.all(
       (hits as Shard[]).map(async (shard) => {
         const child = await this.directory(shard, span, signal)
-        return this.lookup(child, start, end, shard === host, span, signal)
+        if (reached.has(shard[2])) throw new Error('spatial directory node referenced twice')
+        reached.add(shard[2])
+        return this.lookup(child, start, end, shard === host, span, reached, signal)
       }),
     )
     return selected.flat()
@@ -401,7 +456,7 @@ export class SpatialReader implements TileReader {
     const tree = this.trees[lod.name]
     if (!tree) throw new Error(`missing spatial directory for ${lod.name}`)
     const span = this.cellSpan(lod)
-    const pages = await this.lookup(tree, start, end, true, span, signal)
+    const pages = await this.lookup(tree, start, end, true, span, new Set(), signal)
     signal?.throwIfAborted()
     const firstCell = start / span,
       endCell = end / span

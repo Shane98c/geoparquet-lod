@@ -11,8 +11,9 @@ import pyarrow.parquet as pq
 import pytest
 import shapely
 from click.testing import CliRunner
-from geoparquet_lod import validate, write
+from geoparquet_lod import _validate_index, validate, write
 from geoparquet_lod._compact import dumps, get, loads, set_value
+from geoparquet_lod._layout import _node, finalize_layout, read_node
 from geoparquet_lod.cli import cli
 from geoparquet_lod.validate import ValidationError
 
@@ -156,6 +157,96 @@ def _write_root(path, raw, root):
         + bytes(16384 - 16 - len(encoded))
         + raw[16384:]
     )
+
+
+@pytest.fixture(scope='module')
+def leafy(indexed, tmp_path_factory):
+    """`indexed` laid out again with one page per leaf."""
+    out = tmp_path_factory.mktemp('leafy') / 'leafy.parquet'
+    return finalize_layout(indexed, out, leaf_pages=1, log=lambda *_: None)
+
+
+class _Appended:
+    """Directory nodes added before a file's unchanged footer."""
+
+    def __init__(self, raw):
+        self.raw = raw
+        self.footer = len(raw) - 8 - int.from_bytes(raw[-8:-4], 'little')
+        self.added = bytearray()
+
+    def __call__(self, node):
+        """Store `node`, gzip bytes or JSON, and return its offset and length."""
+        if not isinstance(node, bytes):
+            node = gzip.compress(json.dumps(node).encode(), mtime=0)
+        self.added.extend(node)
+        return self.footer + len(self.added) - len(node), len(node)
+
+    def write(self, path, root):
+        raw = self.raw[: self.footer] + bytes(self.added) + self.raw[self.footer :]
+        root['file_bytes'] = len(raw)
+        _write_root(path, raw, root)
+
+
+@pytest.mark.parametrize('arrangement', ['branches', 'same_cell'])
+def test_directory_lists_pages_in_key_order(leafy, tmp_path, arrangement):
+    """Leaves copied into another order, under nodes whose bounds match their
+    first and last entries, still list every page once. A tile would lose
+    pages, or read a cell's pages out of row order."""
+    raw, root = _root(leafy)
+    name = max(root['directories'], key=lambda n: len(root['directories'][n][1]))
+    level, entries = read_node(root['directories'][name])
+    low, high = entries['low'], entries['high']
+    n = len(low)
+    assert level == 1 and n > 4 and (low == high).all() and low[1] == low[2] < low[-1]
+    store = _Appended(raw)
+
+    def leaves(order):
+        """A level-one node over copies of the leaves in `order`."""
+        copies = [
+            store(raw[entries['offset'][i] : entries['offset'][i] + entries['length'][i]])
+            for i in order
+        ]
+        return _node(1, low[order], high[order], *zip(*copies, strict=True))
+
+    if arrangement == 'branches':
+        parts = [[0, n - 1, 1], list(range(2, n - 1))]
+        branches = [store(leaves(part)) for part in parts]
+        lows, highs = [low[p[0]] for p in parts], [high[p[-1]] for p in parts]
+        root['directories'][name] = _node(2, lows, highs, *zip(*branches, strict=True))
+        message = 'out of key order'
+    else:
+        root['directories'][name] = leaves([0, 2, 1, *range(3, n)])
+        message = 'reorders'
+    bad = tmp_path / 'reordered.parquet'
+    store.write(bad, root)
+    with pytest.raises(ValidationError, match=message):
+        validate(bad, full=True)
+
+
+def test_directory_nodes_are_reached_once(leafy, tmp_path, monkeypatch):
+    """A node shared by two parents fails before its subtree is read again,
+    however deep the sharing goes."""
+    raw, root = _root(leafy)
+    name, top = next(iter(root['directories'].items()))
+    _, entries = read_node(top)
+    cell = int(entries['low'][0])
+    assert entries['high'][0] == cell, 'equal one-cell entries are in key order'
+    start, length = int(entries['offset'][0]), int(entries['length'][0])
+    store = _Appended(raw)
+    node = raw[start : start + length]
+    for level in range(1, 13):
+        # two copies of the node below, both referring to its children
+        node = _node(level, [cell] * 2, [cell] * 2, *zip(store(node), store(node), strict=True))
+    root['directories'][name] = node
+    bad = tmp_path / 'shared.parquet'
+    store.write(bad, root)
+    decoded = []
+    monkeypatch.setattr(
+        _validate_index, 'read_node', lambda node: decoded.append(node) or read_node(node)
+    )
+    with pytest.raises(ValidationError, match='referenced twice'):
+        validate(bad, full=True)
+    assert len(decoded) < 20
 
 
 @pytest.mark.parametrize(

@@ -69,8 +69,8 @@ level and parallel columns with one value per entry:
 ```
 
 A leaf's entries are pages; the entries of a node at level `L > 0` are nodes
-at level `L - 1`. Positions are delta coded against the previous entry, and
-the first entry's against zero:
+at level `L - 1`, and no level exceeds 32. Positions are delta coded against
+the previous entry, and the first entry's against zero:
 
 - `cells`: the entry's minimum cell minus the previous entry's.
 - `spans`: its maximum cell minus its minimum cell.
@@ -85,12 +85,14 @@ the first entry's against zero:
 
 Cells are Hilbert cells at `z = min(key.depth, finest zoom of the LOD)`: key
 `k` lies in cell `floor(k / 4^(key.depth - z))`, and a null key counts as cell
-`4^z`, past every other. A node's minimum and maximum cell are its first
-entry's minimum and its last entry's maximum. An entry with cells `lo..hi`
-stands for the keys from `lo * 4^(key.depth - z)` to
-`(hi + 1) * 4^(key.depth - z) - 1`. Every tile served from the LOD, at its
-zooms or coarser, is a whole number of cells, so these bounds select the same
-entries exact key bounds would.
+`4^z`, past every other. Entries are in key order: each entry's minimum cell
+is at least the previous entry's maximum. A node's minimum and maximum cell
+are its first entry's minimum and its last entry's maximum, and every node
+below the top is located by exactly one entry, which gives its byte range and
+those two cells. An entry with cells `lo..hi` stands for the keys from
+`lo * 4^(key.depth - z)` to `(hi + 1) * 4^(key.depth - z) - 1`. Every tile
+served from the LOD, at its zooms or coarser, is a whole number of cells, so
+these bounds select the same entries exact key bounds would.
 
 Page fences enforce exact tile membership without fetching the key column;
 tile-aligned pages have only the implied fence. Rows past `counts - nulls`
