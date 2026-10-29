@@ -78,6 +78,32 @@ const half = (bits: number): number => {
   return sign * (exponent ? 0x400 + fraction : fraction) * 2 ** ((exponent || 1) - 25)
 }
 
+/** The half-precision value nearest `v`, ties to even, as a number: what
+ * a cast to float16 makes of it. */
+export const toHalf = (v: number): number => {
+  const magnitude = Math.abs(v)
+  if (!(magnitude > 0) || magnitude === Infinity) return v
+  // past the largest half, 65504, by half its step or more
+  if (magnitude >= 65520) return Math.sign(v) * Infinity
+  f32.setFloat64(0, magnitude, true)
+  const exponent = Math.max(-14, ((f32.getUint32(4, true) >>> 20) & 0x7ff) - 1023)
+  const step = 2 ** (exponent - 10)
+  const steps = magnitude / step
+  let rounded = Math.round(steps)
+  if (rounded - steps === 0.5 && rounded % 2) rounded--
+  return Math.sign(v) * rounded * step
+}
+
+/** A source value of a carried attribute of `kind` as the attribute packs
+ * it: a float in its declared precision, anything else as it is. */
+export const asCarried = (value: unknown, kind: AttributeKind): unknown => {
+  if (value == null) return value
+  if (kind === 'float16') return toHalf(Number(value))
+  if (kind === 'float32') return Math.fround(Number(value))
+  if (kind === 'float64') return Number(value)
+  return value
+}
+
 /** Attribute values with string slots left as byte lengths, filled from the trailing payload later. */
 const attributes = (
   c: Cursor,

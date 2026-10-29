@@ -1,3 +1,4 @@
+import { asCarried, attributeKind } from './decode.js'
 import { MVT_BUFFER, MVT_EXTENT, toMvt } from './mvt.js'
 import { geometryColumnFromWkb } from '@cogp/reader'
 import type { LodGeometry } from './geometry.js'
@@ -58,9 +59,15 @@ export const renderTile = async (
   const pointFamily = lod.geometry_type === 'Point'
   const layer = (pointFamily ? options.pointLayer : undefined) ?? options.layer ?? 'features'
   if (z > reader.finestZoom) {
-    // finer than any LOD: the exact primary geometry of the rows in the tile
+    // finer than any LOD: the exact primary geometry of the rows in the tile,
+    // with carried attributes as the LODs pack them, so a feature's properties
+    // are the same on both sides of the finest zoom
     const { rows, wkb, columns } = await reader.readPrimary(bbox, names, signal)
     signal?.throwIfAborted()
+    for (const { name, type } of reader.lod.attributes) {
+      const kind = attributeKind(type)
+      if (columns[name]) columns[name] = columns[name].map((value) => asCarried(value, kind))
+    }
     return toMvt(
       { geometry: geometryColumnFromWkb(wkb), rowIndex: rows, columns },
       { z, x, y, layer, signal },

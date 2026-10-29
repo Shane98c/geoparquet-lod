@@ -424,6 +424,97 @@ def test_float16_overviews_hold_the_source_rounded(buildings, tmp_path):
     assert np.array_equal(table['risk'].to_numpy(), rounded[table['row'].to_numpy()])
 
 
+def test_js_rounds_to_float16_as_numpy_does(tmp_path):
+    """Exact tiles round a carried float16 in JS, which has no Float16Array
+    everywhere: every half value, the ties between neighbours and the values
+    either side of them, subnormals, overflow and NaN round as numpy's cast."""
+    import subprocess
+
+    with np.errstate(invalid='ignore'):
+        halves = np.arange(1 << 16).astype(np.uint16).view(np.float16).astype(np.float64)
+    finite = np.unique(halves[np.isfinite(halves)])
+    ties = (finite[1:] + finite[:-1]) / 2
+    rng = np.random.default_rng(16)
+    values = np.concatenate(
+        [
+            halves,
+            ties,
+            np.nextafter(ties, np.inf),
+            np.nextafter(ties, -np.inf),
+            [65504, 65519.99, 65520, 65520.01, 1e6, 1e308, 2**-24, 2**-25, 2**-26, 5e-324],
+            *(rng.normal(0, scale, 20_000) for scale in (1e-7, 1e-4, 1e-2, 1, 1e3, 7e4)),
+            rng.random(20_000).astype(np.float32),
+        ]
+    )
+    values = np.concatenate([values, -values])
+    with np.errstate(over='ignore'):
+        rounded = values.astype(np.float16).astype(np.float64)
+    paths = [tmp_path / 'values.f64', tmp_path / 'rounded.f64']
+    for path, array in zip(paths, (values, rounded), strict=True):
+        path.write_bytes(array.astype('<f8').tobytes())
+    script = Path(__file__).resolve().parents[1] / 'js' / 'test' / 'half.test.mjs'
+    result = subprocess.run(
+        ['node', str(script), *map(str, paths)], capture_output=True, text=True, check=True
+    )
+    assert f'{len(values)} values round as numpy' in result.stdout
+
+
+def test_exact_tiles_carry_their_finest_lods_values(buildings, tmp_path):
+    """Past the finest LOD a tile reads carried attributes from their source
+    columns and packs them as the LODs do, so a feature shows the same
+    float16 value on both sides of the finest zoom; exact reads keep the
+    source's precision."""
+    import subprocess
+
+    out = write(
+        buildings,
+        tmp_path / 'half.parquet',
+        carry=[('risk', 'halffloat'), 'floors'],
+        workers=1,
+        log=lambda *_: None,
+    )
+    finest = max(json.loads(pq.read_schema(out).metadata[b'geo'])['lod_columns']['zooms'])
+    t = pq.read_table(out, columns=['bbox', 'risk', 'floors', 'geometry'])
+    xmin, ymin, xmax, ymax = shapely.bounds(shapely.from_wkb(t['geometry'].to_numpy())).T
+    x = ((xmin + xmax) / 2 + 180) / 360
+    phi = np.radians((ymin + ymax) / 2)
+    y = (1 - np.log(np.tan(phi) + 1 / np.cos(phi)) / np.pi) / 2
+    risk = t['risk'].to_numpy()
+    floors = t['floors'].to_pylist()
+    cases = []
+    zooms = np.array([finest, finest + 1])
+    for row in range(t.num_rows):
+        scaled = np.outer(2.0**zooms, [x[row], y[row]])
+        # a centre well inside its tile at both zooms
+        if (np.abs(scaled % 1 - 0.5) > 0.48).any():
+            continue
+        tiles = [[int(z), *map(int, np.floor(xy))] for z, xy in zip(zooms, scaled, strict=True)]
+        carried = {'risk': float(risk[row].astype(np.float16))}
+        if floors[row] is not None:
+            carried['floors'] = floors[row]
+        cases.append(
+            {
+                'row': row,
+                'bbox': list(t['bbox'][row].as_py().values()),
+                'tiles': tiles,
+                'source': {'risk': float(risk[row])},
+                'carried': carried,
+            }
+        )
+        if len(cases) == 30:
+            break
+    assert any(c['source']['risk'] != c['carried']['risk'] for c in cases)
+    (tmp_path / 'cases.json').write_text(json.dumps(cases))
+    script = Path(__file__).resolve().parents[1] / 'js' / 'test' / 'exact-carried.test.mjs'
+    result = subprocess.run(
+        ['node', str(script), str(out), str(tmp_path / 'cases.json')],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert f'exact tiles: {len(cases)} features carry' in result.stdout
+
+
 def test_points_importance_and_cluster(points, tmp_path):
     out = write(
         points,

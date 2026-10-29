@@ -83,15 +83,15 @@ above 2^63 - 1 with an error naming the column and the value.
 A float column can be carried at half precision, as
 `carry=[('rps_2011', 'halffloat')]` or `--carry rps_2011:halffloat`. The
 source column keeps its full precision for analysis and row reads, while
-tiles get each value rounded to the nearest float16, about three significant
-digits, packed in at most two bytes from 0 up to 2 and three otherwise, where
-a typical float32 takes five. A style threshold compares with the rounded
-value, so a value that close to a threshold can land on its other side, and
-a magnitude under about 3e-8 rounds to 0. Rounding is to nearest, ties to
-even, so magnitudes from 65504 up to 65520 round to 65504, the largest
-float16; the writer refuses a finite value that would round to infinity with
-an error naming the column and the value, and packs NaN and the infinities as
-they are.
+tiles, those past the finest zoom too, get each value rounded to the nearest
+float16, about three significant digits, packed in at most two bytes from 0
+up to 2 and three otherwise, where a typical float32 takes five. A style
+threshold compares with the rounded value, so a value that close to a
+threshold can land on its other side, and a magnitude under about 3e-8 rounds
+to 0. Rounding is to nearest, ties to even, so magnitudes from 65504 up to
+65520 round to 65504, the largest float16; the writer refuses a finite value
+that would round to infinity with an error naming the column and the value,
+and packs NaN and the infinities as they are.
 
 ## Geometry
 
@@ -115,7 +115,10 @@ own pages, routed by key as the overview directories are, sends a tile to the
 leaf holding it, which lists every WKB page with a row whose box reaches the
 leaf's tiles, cut into boxed runs where the curve jumps. The tile reads the
 pages whose runs reach it, together, and the pages of the carried attributes'
-source columns over the same rows, one read per attribute alongside. WKB pages
+source columns over the same rows, one read per attribute alongside, and
+rounds each value to its carried type as the LODs pack it, so a feature's tile
+properties match on both sides of the finest zoom; `readPrimary`, primary
+`readFeatures` and row reads return the source values. WKB pages
 hold a few hundred features at full precision, about 45 KB each for OCR
 buildings, and features reaching in from a neighbouring tile are often in
 another page, so these tiles cost more than overview tiles. A tile reads the

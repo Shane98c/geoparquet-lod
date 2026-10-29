@@ -327,7 +327,7 @@ const exactRows = exact.map((_, i) => 2 ** 40 + i)
 const columns = { name: exact.map((_, i) => `feature-${i}`) }
 const geometry = geometryColumnFromWkb(exact)
 const reader = {
-  lod: { attributes: [{ name: 'name' }] },
+  lod: { attributes: [{ name: 'name', type: 'string' }] },
   finestZoom: 0,
   lodForZoom: () => ({ geometry_type: 'MultiPolygon' }),
   readPrimary: async () => ({ rows: exactRows, wkb: exact, columns }),
