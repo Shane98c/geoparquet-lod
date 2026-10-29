@@ -54,16 +54,14 @@ The compressed root is bounded by the first 16 KiB and contains:
   than the primary geometry, including the key column, so a map can
   initialize without another reader open.
 - `codecs`: LOD name to its Parquet compression codec.
-- `streams`: LOD name to a list of directory series, each a directory node at
-  level one or above. The reference writer emits one series per LOD; readers
-  search every series for a tile's own pages and take its copy host from the
-  last non-empty one.
+- `directories`: LOD name to the top node of its directory, at level one or
+  above.
 
 ## Directory nodes
 
-Each series is the top node of a tree over its LOD's pages in key order. The
-root holds the series; the nodes below are gzip JSON. Every node is a JSON
-array of its level and parallel columns with one value per entry:
+Each LOD's directory is a tree over its pages in key order. The root holds the
+top node; the nodes below are gzip JSON. Every node is a JSON array of its
+level and parallel columns with one value per entry:
 
 ```text
 [level, cells, spans, gaps, lengths]                                level > 0
@@ -98,21 +96,21 @@ Page fences enforce exact tile membership without fetching the key column;
 tile-aligned pages have only the implied fence. Rows past `counts - nulls`
 have null keys: they remain in the analytical table and have null LODs. The
 reference writer puts 1,024 pages in a leaf and, while the root would exceed
-the bootstrap, adds a level of branches of 64 entries to each series.
+the bootstrap, adds a level of branches of 64 entries to each tree.
 
 ## Lookup
 
-To read a tile, descend from each series: in every node, take the entries
-whose bounds intersect the tile's key interval, plus the first entry whose
-maximum reaches the interval start, or the final entry if none does. Among the
-pages, that first page contains the tile's copy host when any copies exist.
-Read consecutive pages together. Decode the standard Parquet page with the
-root's codec and the required-struct/nullable-binary schema. Use the fences to
-retain own rows inside the tile interval, and the host row for its copies
-tagged with the requested tile. Global row indices are the feature ids. A reader can scan
-definition-level runs in v1 PLAIN pages directly and skip null rows, falling
-back to a general decoder for other encodings. The directory stores no
-geometry or styling payload and is not an MVT archive.
+To read a tile, descend from the LOD's top node: in every node, take the
+entries whose bounds intersect the tile's key interval, plus the first entry
+whose maximum reaches the interval start, or the final entry if none does.
+Among the pages, that first page contains the tile's copy host when any copies
+exist. Read consecutive pages together. Decode the standard Parquet page with
+the root's codec and the required-struct/nullable-binary schema. Use the
+fences to retain own rows inside the tile interval, and the host row for its
+copies tagged with the requested tile. Global row indices are the feature ids.
+A reader can scan definition-level runs in v1 PLAIN pages directly and skip
+null rows, falling back to a general decoder for other encodings. The
+directory stores no geometry or styling payload and is not an MVT archive.
 
 ## Analytical access and publishing
 

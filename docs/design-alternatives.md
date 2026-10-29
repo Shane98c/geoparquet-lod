@@ -47,10 +47,11 @@ With one order QGIS fills the map region by region along the curve; with the
 prefix the coarse selection covers the whole extent within the first
 second, because GDAL delivers row groups in file order and the selection is
 the first group. The layout keeps one order for now; the prefix is the lever
-if sequential readers matter more than a request per tile, and the spatial
-index works either way. `benchmarks/standard-overviews/write-tokyo.py` builds
-both Tokyo files, the prefix from the writer at `0a06e75^`, which has the
-option, and `qgis-progressive.py` beside it reproduces the measurement.
+if sequential readers matter more than a request per tile. The spatial index
+lists each LOD's pages in one key order, so a prefix would also need a
+directory tree per section. `benchmarks/standard-overviews/write-tokyo.py`
+builds both Tokyo files, the prefix from the writer at `0a06e75^`, which has
+the option, and `qgis-progressive.py` beside it reproduces the measurement.
 
 Without the index, removing the prefix initially doubled the coarse Tokyo
 tile's bytes, because a coarse overview is sparse and a fixed row cap left

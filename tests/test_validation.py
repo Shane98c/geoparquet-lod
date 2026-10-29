@@ -195,8 +195,8 @@ def test_spatial_index_corruption(indexed, tmp_path, mutation):
         root['row_metadata'] = [footer, len(encoded)]
         root['file_bytes'] = len(raw)
     elif mutation in ('root_bounds', 'level'):
-        # [level, cells, spans, gaps, lengths] of one LOD's series
-        node = next(node for nodes in root['streams'].values() for node in nodes if node[1])
+        # [level, cells, spans, gaps, lengths] of one LOD's top node
+        node = next(node for node in root['directories'].values() if node[1])
         if mutation == 'root_bounds':
             node[1][0] += 1000000
         else:
@@ -205,8 +205,8 @@ def test_spatial_index_corruption(indexed, tmp_path, mutation):
         raw = raw[:4] + bytes(8) + raw[12:]
     else:
         # Append one mutated leaf before the unchanged footer and point the last
-        # entry of a level-one series at it; all page offsets stay valid.
-        node = next(n for nodes in root['streams'].values() for n in nodes if n[0] == 1 and n[1])
+        # entry of a level-one top node at it; all page offsets stay valid.
+        node = next(n for n in root['directories'].values() if n[0] == 1 and n[1])
         start = sum(node[3]) + sum(node[4][:-1])
         leaf = json.loads(gzip.decompress(raw[start : start + node[4][-1]]))
         if mutation == 'leaf_rows':

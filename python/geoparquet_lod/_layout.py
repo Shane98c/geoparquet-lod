@@ -480,11 +480,11 @@ def finalize_layout(src, out, *, leaf_pages=1024, page_bytes=65536, compression_
                     set_value(chunk, length_field, len(raw))
                     target.write(raw)
                 directory_start = target.tell()
-                # Each LOD's series starts as one level of leaves. Keep the first
+                # Each LOD's tree starts as one level of leaves. Keep the first
                 # request bounded even for very large datasets: while the root is
-                # too large, group a series' nodes under a new level of branches,
-                # fetched lazily and then shared by a pan.
-                series = {}
+                # too large, group a tree's top entries under a new level of
+                # branches, fetched lazily and then shared by a pan.
+                trees = {}
                 for name, parts in pages.items():
                     table = {k: np.concatenate([part[k] for part in parts]) for k in parts[0]}
                     shards = {k: [] for k in ('low', 'high', 'offset', 'length')}
@@ -496,15 +496,15 @@ def finalize_layout(src, out, *, leaf_pages=1024, page_bytes=65536, compression_
                         shards['offset'].append(target.tell())
                         shards['length'].append(len(raw))
                         target.write(raw)
-                    series[name] = (1, shards)
+                    trees[name] = (1, shards)
                 while True:
-                    root['streams'] = {
-                        name: [_node(level, **shards)] for name, (level, shards) in series.items()
+                    root['directories'] = {
+                        name: _node(level, **shards) for name, (level, shards) in trees.items()
                     }
                     if len(_json(root)) <= _ROOT_TARGET_BYTES:
                         break
                     reduced = False
-                    for name, (level, shards) in series.items():
+                    for name, (level, shards) in trees.items():
                         if len(shards['low']) <= 1:
                             continue
                         parents = {k: [] for k in shards}
@@ -518,7 +518,7 @@ def finalize_layout(src, out, *, leaf_pages=1024, page_bytes=65536, compression_
                             parents['offset'].append(target.tell())
                             parents['length'].append(len(raw))
                             target.write(raw)
-                        series[name] = (level + 1, parents)
+                        trees[name] = (level + 1, parents)
                         reduced = True
                     if not reduced:
                         raise ValueError('LOD metadata exceeds the 16 KiB bootstrap')

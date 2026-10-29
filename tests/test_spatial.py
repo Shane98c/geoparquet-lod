@@ -117,12 +117,12 @@ def test_spatial_roundtrip(tmp_path, monkeypatch, family, sparse, leaf_pages, pa
         finalize_layout(old, new, leaf_pages=leaf_pages, page_bytes=page_bytes, log=lambda *_: None)
     raw = new.read_bytes()
     root = _root(raw)
-    leaves = [leaf for nodes in root['streams'].values() for n in nodes for leaf in _leaves(raw, n)]
+    leaves = [leaf for top in root['directories'].values() for leaf in _leaves(raw, top)]
     if sparse:
         largest = max(leaf['count'].max() for leaf in leaves if len(leaf['count']))
         assert largest > 2048, 'exercise sparse pages spanning many analytical rows'
     if leaf_pages == 1:
-        assert any(node[0] > 1 for nodes in root['streams'].values() for node in nodes), (
+        assert any(top[0] > 1 for top in root['directories'].values()), (
             'fixture exercises directory branches'
         )
     assert old.read_bytes() == before, 'source is immutable'

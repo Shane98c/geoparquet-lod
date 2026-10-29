@@ -43,8 +43,8 @@ interface SpatialRoot {
   lod: LodMetadata
   primary: string
   codecs: Record<string, string>
-  /** One or more directory series per LOD; the reference writer emits one. */
-  streams: Record<string, StoredNode[]>
+  /** The top node of each LOD's directory tree, at level one or above */
+  directories: Record<string, StoredNode>
 }
 
 /**
@@ -173,7 +173,7 @@ export class SpatialReader implements TileReader {
   readonly primary: string
   readonly finestZoom: number
   private readonly fields: AttributeField[]
-  private readonly series: Record<string, DirectoryNode[]>
+  private readonly trees: Record<string, DirectoryNode>
   private readonly directories = new Map<number, SharedLoad<DirectoryNode>>()
   private readonly pages = new Map<number, { size: number; data: SharedLoad<ArrayBuffer> }>()
   private pageBytes = 0
@@ -196,10 +196,10 @@ export class SpatialReader implements TileReader {
         ? { name: a.name, kind: 'enum', values: a.values }
         : { name: a.name, kind: attributeKind(a.type) },
     )
-    this.series = Object.fromEntries(
-      Object.entries(root.streams).map(([name, nodes]) => {
+    this.trees = Object.fromEntries(
+      Object.entries(root.directories).map(([name, node]) => {
         if (!this.lods[name]) throw new Error(`spatial directory for unknown LOD ${name}`)
-        return [name, nodes.map((node) => decodeNode(node, this.cellSpan(this.lods[name])))]
+        return [name, decodeNode(node, this.cellSpan(this.lods[name]))]
       }),
     )
   }
@@ -293,26 +293,25 @@ export class SpatialReader implements TileReader {
     return result.get(signal)
   }
 
-  /** The pages under `node` holding keys in [start, end) when `own`, plus,
-   * when `hosted`, the first page whose maximum key reaches `start`, or the
-   * last page if none does. */
+  /** The pages under `node` holding keys in [start, end), plus, when
+   * `hosted`, the first page whose maximum key reaches `start`, or the last
+   * page if none does, in key order. */
   private async lookup(
     node: DirectoryNode,
     start: number,
     end: number,
-    own: boolean,
     hosted: boolean,
     span: number,
     signal?: AbortSignal,
   ): Promise<Page[]> {
     const entries: (Page | Shard)[] = node.entries
     const host = hosted ? (entries.find((e) => e[1] >= start) ?? entries.at(-1)) : undefined
-    const hits = entries.filter((e) => (own && e[0] < end && e[1] >= start) || e === host)
+    const hits = entries.filter((e) => (e[0] < end && e[1] >= start) || e === host)
     if (!node.level) return hits as Page[]
     const selected = await Promise.all(
       (hits as Shard[]).map(async (shard) => {
         const child = await this.directory(shard, span, signal)
-        return this.lookup(child, start, end, own, shard === host, span, signal)
+        return this.lookup(child, start, end, shard === host, span, signal)
       }),
     )
     return selected.flat()
@@ -399,25 +398,14 @@ export class SpatialReader implements TileReader {
     // they are exact only for tiles made of whole cells.
     if (z > Math.max(...lod.zooms)) throw new Error(`zoom ${z} is finer than ${lod.name}`)
     const [start, end] = tileInterval(this.lod.key!.depth, z, x, y)
-    const series = this.series[lod.name]
-    if (!series) throw new Error(`missing spatial directory for ${lod.name}`)
-    // Copies are hosted in the last series; every series may hold a tile's own rows.
-    let hostSection = 0
-    series.forEach((node, section) => {
-      if (node.entries.length) hostSection = section
-    })
+    const tree = this.trees[lod.name]
+    if (!tree) throw new Error(`missing spatial directory for ${lod.name}`)
     const span = this.cellSpan(lod)
-    const selected = await Promise.all(
-      series.map((node, section) =>
-        this.lookup(node, start, end, true, section === hostSection, span, signal),
-      ),
-    )
+    const pages = await this.lookup(tree, start, end, true, span, signal)
     signal?.throwIfAborted()
-    const pages = selected.flat().sort((a, b) => a[4] - b[4])
     const firstCell = start / span,
       endCell = end / span
-    const hostPage =
-      selected[hostSection].find((p) => p[1] >= start) ?? selected[hostSection].at(-1)
+    const hostPage = pages.find((p) => p[1] >= start) ?? pages.at(-1)
     let hostRow = -1
     if (hostPage) {
       const fences = hostPage[6]

@@ -110,8 +110,9 @@ def check_index(path, parquet, lod):
             flat = [f.name for f in parquet.schema_arrow if not pa.types.is_nested(f.type)]
             if gzip.decompress(read(offset, length)) != dumps(row_metadata(metadata, flat)):
                 raise ValueError('row metadata disagrees with footer')
-        if set(root.get('streams', {})) != set(lod['lods']):
-            raise ValueError('spatial streams disagree with declared LODs')
+        directories = root.get('directories')
+        if not isinstance(directories, dict) or set(directories) != set(lod['lods']):
+            raise ValueError('spatial directories disagree with declared LODs')
         key = lod['key']
         depth = key['depth']
         if not isinstance(depth, int) or not 0 <= depth <= 26:
@@ -153,14 +154,11 @@ def check_index(path, parquet, lod):
                 leaves += walk(child_level, child)
             return leaves
 
-        for name, series in root['streams'].items():
-            if not isinstance(series, list) or not series:
-                raise ValueError('missing directory series')
-            tops = [read_node(node) for node in series]
-            if any(level < 1 for level, _ in tops):
-                raise ValueError('a directory series must be above the leaves')
-            leaves = [leaf for top in tops for leaf in walk(*top)]
-            actual = _concat(leaves)
+        for name, top in directories.items():
+            level, entries = read_node(top)
+            if level < 1:
+                raise ValueError('a directory tree must start above its leaves')
+            actual = _concat(walk(level, entries))
             order = np.argsort(actual['first'], kind='stable')
             position = np.empty_like(order)
             position[order] = np.arange(len(order))
