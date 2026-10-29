@@ -34,18 +34,30 @@ def check_index(path, parquet, lod):
         metadata = loads(source.read(footer_size))
 
         def within(start, length):
+            """Raise unless every `[start, start + length)` of these arrays is
+            a nonempty range between the leading magic and the footer."""
             start, length = np.asarray(start), np.asarray(length)
-            if (
-                start.dtype.kind not in 'iu'
-                or length.dtype.kind not in 'iu'
-                or (start < 4).any()
-                or (length <= 0).any()
-                or (start + length > footer_start).any()
-            ):
+            # Bound each value on its own first: an int64 sum could wrap.
+            for value in (start, length):
+                if (
+                    value.dtype.kind not in 'iu'
+                    or (value < 0).any()
+                    or (value > footer_start).any()
+                ):
+                    raise ValueError('index byte range outside data region')
+            start, length = start.astype(np.int64), length.astype(np.int64)
+            if (start < 4).any() or (length <= 0).any() or (length > footer_start - start).any():
                 raise ValueError('index byte range outside data region')
 
         def read(start, length):
-            within(start, length)
+            # the same bounds for Python integers, which cannot wrap
+            if not (
+                type(start) is int
+                and type(length) is int
+                and 4 <= start
+                and 0 < length <= footer_start - start
+            ):
+                raise ValueError('index byte range outside data region')
             source.seek(start)
             raw = source.read(length)
             if len(raw) != length:
@@ -70,7 +82,7 @@ def check_index(path, parquet, lod):
                 bounds = np.r_[row, count]
                 if (
                     bounds[0] != 0
-                    or (np.diff(bounds) < 0).any()
+                    or (bounds[1:] < bounds[:-1]).any()
                     or (byte[1:] < (byte + length)[:-1]).any()
                 ):
                     raise ValueError(f'row group {g}: invalid offset-index page ordering')

@@ -13,7 +13,7 @@ import shapely
 from click.testing import CliRunner
 from geoparquet_lod import _validate_index, validate, write
 from geoparquet_lod._compact import dumps, get, loads, set_value
-from geoparquet_lod._layout import _node, finalize_layout, read_node
+from geoparquet_lod._layout import _node, finalize_layout, read_node, row_metadata
 from geoparquet_lod.cli import cli
 from geoparquet_lod.validate import ValidationError
 
@@ -247,6 +247,46 @@ def test_directory_nodes_are_reached_once(leafy, tmp_path, monkeypatch):
     with pytest.raises(ValidationError, match='referenced twice'):
         validate(bad, full=True)
     assert len(decoded) < 20
+
+
+@pytest.mark.parametrize(
+    'field, values, message',
+    [
+        # the first page starts at the int64 maximum, so its end wraps negative
+        (1, [2**63 - 1], 'outside data region'),
+        # first rows whose differences wrap to nondecreasing values
+        (3, [0, 2**63 - 1, -5], 'page ordering'),
+    ],
+)
+def test_offset_index_sums_cannot_wrap(indexed, tmp_path, field, values, message):
+    """Offset index values near the int64 limit fail validation, however
+    their sums wrap."""
+    raw, root = _root(indexed)
+    footer = len(raw) - 8 - int.from_bytes(raw[-8:-4], 'little')
+    metadata = loads(raw[footer:-8])
+    chunk = next(
+        c for c in get(get(metadata, 4)[1][0], 1)[1] if get(get(c, 3), 3)[1] == [b'geometry']
+    )
+    start = get(chunk, 4)
+    index = loads(raw[start : start + get(chunk, 5)])
+    pages = get(index, 1)[1]
+    assert len(pages) > len(values)
+    for i, value in enumerate(values):
+        set_value(pages[i], field, value)
+    moved = dumps(index)
+    set_value(chunk, 4, footer)
+    set_value(chunk, 5, len(moved))
+    flat = [f.name for f in pq.ParquetFile(indexed).schema_arrow if not pa.types.is_nested(f.type)]
+    rows = gzip.compress(dumps(row_metadata(metadata, flat)), mtime=0)
+    root['row_metadata'] = [footer + len(moved), len(rows)]
+    encoded = dumps(metadata)
+    root['footer_bytes'] = len(encoded)
+    raw = raw[:footer] + moved + rows + encoded + struct.pack('<I', len(encoded)) + b'PAR1'
+    root['file_bytes'] = len(raw)
+    bad = tmp_path / 'wrapped.parquet'
+    _write_root(bad, raw, root)
+    with pytest.raises(ValidationError, match=message):
+        validate(bad, full=True)
 
 
 def test_overview_pages_are_v1_plain(indexed, tmp_path, monkeypatch):
