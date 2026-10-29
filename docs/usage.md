@@ -113,17 +113,20 @@ zoom the reader draws the exact primary geometry, so full detail is always
 reachable and costs nothing to store. A box tree over the primary geometry's
 own pages finds the WKB pages whose boxes reach the tile, read together, and
 the pages of the carried attributes' source columns over the same rows, one
-read per attribute alongside; the tree's top sits in the 16 KiB root, and a
-national file adds one leaf request. WKB pages hold a few hundred features at
-full precision, about 45 KB each for OCR buildings, so these tiles cost more
-than overview tiles: for OCR buildings in Delaware past a z15 finest LOD, a
-cold z16 tile reads about 200 KB in four requests (190 KB in two without
-attributes) and the next tile east about 30 KB, where a cold z15 tile reads
-13 KB in two. Ending the zooms one earlier leaves out the finest LOD, 13% of
-the Delaware file, but its z15 tiles then read about 350 KB each. The reader
-keeps the pages it fetched (16 MiB by default), so zooming further in over
-the same place, or across tiles of one large feature, reuses them instead of
-fetching them again. To overzoom instead, as PMTiles does, set the MapLibre
+read per attribute alongside. WKB pages hold a few hundred features at full
+precision, about 45 KB each for OCR buildings, so these tiles cost more than
+overview tiles. A state the size of Delaware fits its whole tree in the 16 KiB
+root: past a z15 finest LOD, a cold z16 OCR building tile there reads about
+150 KB in four requests (two without attributes) and the next tile east about
+20 KB, where a cold z15 tile reads 13 KB in two. Larger files keep the tree's
+leaves below the root, and a tile reads every leaf whose box reaches it; the
+boxes of neighbouring stretches of the curve overlap, so in California a cold
+z16 tile reads three leaves on average, about 250 KB in six requests (four
+without attributes). Ending the zooms one earlier leaves out the finest LOD,
+13% of the Delaware file, but its z15 tiles then read about 350 KB each. The
+reader keeps the pages it fetched (16 MiB by default), so zooming further in
+over the same place, or across tiles of one large feature, reuses them instead
+of fetching them again. To overzoom instead, as PMTiles does, set the MapLibre
 source's `maxzoom` to the finest zoom in the file's `lod_columns` metadata.
 
 ## Install
