@@ -241,7 +241,7 @@ def test_spatial_index_corruption(indexed, tmp_path, mutation):
         validate(bad, full=True)
 
 
-def test_corrupt_packed_row_beyond_sample(indexed, tmp_path):
+def test_corrupt_packed_row_beyond_sample(indexed, tmp_path, monkeypatch):
     table = pq.read_table(indexed)
     lod = table['lod'].combine_chunks()
     name = lod.type[0].name
@@ -261,6 +261,11 @@ def test_corrupt_packed_row_beyond_sample(indexed, tmp_path):
     pq.write_table(table, bad, row_group_size=64, write_page_index=True)
     validate(bad, sample_rows=3)
     with pytest.raises(ValidationError, match='trailing bytes'):
+        validate(bad, full=True)
+    # batches of a few values each; the row still counts from the row group's first
+    monkeypatch.setattr('geoparquet_lod.unpack.BATCH_BYTES', 64)
+    where = f'row group {target // 64}, row {target % 64}, lod {name}: invalid packed row'
+    with pytest.raises(ValidationError, match=where):
         validate(bad, full=True)
     assert name in validate(indexed, full=True)['lods']
 
@@ -284,7 +289,7 @@ def varints(*values):
         (varints(1, 1, 3, 2**33, 0, 2, 0, 0, 2, 0, 0), 'a grid coordinate outside int32'),
     ],
 )
-def test_invalid_geometry_names_its_row(indexed, tmp_path, value, message):
+def test_invalid_geometry_names_its_row(indexed, tmp_path, monkeypatch, value, message):
     table = pq.read_table(indexed)
     lod = table['lod'].combine_chunks()
     children = [lod.field(i).to_pylist() for i in range(lod.type.num_fields)]
@@ -303,6 +308,9 @@ def test_invalid_geometry_names_its_row(indexed, tmp_path, value, message):
     pq.write_table(table, bad, row_group_size=64, write_page_index=True)
     validate(bad, sample_rows=3)
     where = f'row group {target // 64}, row {target % 64}, lod {lod.type[0].name}: {message}'
+    with pytest.raises(ValidationError, match=where):
+        validate(bad, full=True)
+    monkeypatch.setattr('geoparquet_lod.unpack.BATCH_BYTES', 64)
     with pytest.raises(ValidationError, match=where):
         validate(bad, full=True)
 

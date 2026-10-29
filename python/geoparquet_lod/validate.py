@@ -12,7 +12,7 @@ import pyarrow.parquet as pq
 
 from .encoding import ENCODING, INT32, PACK_VERSION
 from .pack import FAMILY_DEPTH
-from .unpack import Unpacked, UnpackError, carried, unpack
+from .unpack import Unpacked, UnpackError, carried, lod_values, unpack_batches
 from .writer import LOD_KEY, LOD_VERSION
 
 
@@ -23,7 +23,8 @@ class ValidationError(Exception):
 def validate(path: str | Path, sample_rows: int = 2000, *, full: bool = False) -> dict:
     """Check metadata and a quick sample, or every packed row and index with full=True.
 
-    Full mode streams one row group at a time. sample_rows bounds quick mode only.
+    Full mode streams one LOD column of one row group at a time and decodes it
+    in batches. sample_rows bounds quick mode only.
     """
     if not isinstance(sample_rows, int) or sample_rows < 0:
         raise ValueError('sample_rows must be a nonnegative integer')
@@ -103,23 +104,22 @@ def validate(path: str | Path, sample_rows: int = 2000, *, full: bool = False) -
     checked = dict.fromkeys(lods, 0)
     groups = range(md.num_row_groups) if full else range(1)
     for group in groups:
-        head = f.read_row_group(group, columns=[column])
-        if not full:
-            head = head.slice(0, sample_rows)
         for name, child in lods.items():
-            values = head.column(column).combine_chunks().field(name)
+            values = lod_values(f, group, column, name)
+            if not full:
+                values = values.slice(0, sample_rows)
             try:
-                decoded = unpack(values, child['geometry_type'], fields, dictionaries)
+                for decoded in unpack_batches(values, child['geometry_type'], fields, dictionaries):
+                    problem = _check_records(decoded, child, md.num_rows)
+                    if problem:
+                        record, message = problem
+                        raise ValidationError(
+                            f'row group {group}, row {decoded.row[record]}, lod {name}: {message}'
+                        )
             except UnpackError as exc:
                 raise ValidationError(
                     f'row group {group}, row {exc.row}, lod {name}: invalid packed row: {exc}'
                 ) from exc
-            problem = _check_records(decoded, child, md.num_rows)
-            if problem:
-                record, message = problem
-                raise ValidationError(
-                    f'row group {group}, row {decoded.row[record]}, lod {name}: {message}'
-                )
             checked[name] += len(values) - values.null_count
     if full:
         _check_spatial_index(path, f, lod)

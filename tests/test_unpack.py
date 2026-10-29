@@ -10,7 +10,7 @@ import pytest
 import shapely
 from geoparquet_lod import read_overview, write
 from geoparquet_lod.pack import Unpacker
-from geoparquet_lod.unpack import UnpackError, carried, unpack
+from geoparquet_lod.unpack import UnpackError, carried, lod_values, unpack, unpack_batches
 
 
 def quiet(*_):
@@ -124,6 +124,25 @@ def test_polygons_agree(polygons):
     assert assert_agrees(polygons) > 0, 'the fixture has boundary copies'
 
 
+@pytest.mark.parametrize('batch_bytes', [1, 300])
+def test_batches_decode_as_one(polygons, batch_bytes):
+    f = pq.ParquetFile(polygons)
+    lod = json.loads(f.schema_arrow.metadata[b'geo'])['lod_columns']
+    fields, dictionaries = carried(lod)
+    batches = 0
+    for group in range(f.metadata.num_row_groups):
+        for name, child in lod['lods'].items():
+            family = child['geometry_type']
+            values = lod_values(f, group, 'lod', name)
+            whole = as_rows(unpack(values.combine_chunks(), family, fields, dictionaries), family)
+            rows = {}
+            for u in unpack_batches(values, family, fields, dictionaries, batch_bytes):
+                rows.update(as_rows(u, family))
+                batches += 1
+            assert same(rows, whole), (group, name)
+    assert batches > 3 * f.metadata.num_row_groups * len(lod['lods'])
+
+
 def test_read_overview(polygons):
     f = pq.ParquetFile(polygons)
     assert f.metadata.num_row_groups > 1, 'row indexes continue across row groups'
@@ -154,6 +173,16 @@ def test_read_overview(polygons):
     assert json.loads(metadata[b'ARROW:extension:metadata'])['crs'] == 'EPSG:3857'
     with pytest.raises(ValueError, match='not one of'):
         read_overview(polygons, lod['zooms'][-1] + 1)
+
+
+def test_read_overview_in_batches(polygons, monkeypatch):
+    zoom = json.loads(pq.read_schema(polygons).metadata[b'geo'])['lod_columns']['zooms'][-1]
+    whole = read_overview(polygons, zoom)
+    monkeypatch.setattr('geoparquet_lod.unpack.BATCH_BYTES', 500)
+    batched = read_overview(polygons, zoom)
+    assert batched['row'].num_chunks > whole['row'].num_chunks
+    assert batched.schema.equals(whole.schema, check_metadata=True)
+    assert same(batched.to_pylist(), whole.to_pylist())
 
 
 def test_lines_and_points_agree(tmp_path):
@@ -197,3 +226,7 @@ def test_malformed_values_name_their_row(value, message):
     with pytest.raises(UnpackError, match=message) as error:
         unpack(values, 'MultiPolygon', fields, zones)
     assert error.value.row == 3
+    chunks = pa.chunked_array([values.slice(0, 2), values.slice(2)])
+    with pytest.raises(UnpackError, match=message) as error:
+        list(unpack_batches(chunks, 'MultiPolygon', fields, zones, batch_bytes=1))
+    assert error.value.row == 3, 'rows count from the first chunk'

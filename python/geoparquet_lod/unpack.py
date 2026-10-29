@@ -1,16 +1,19 @@
-"""Packed LOD values decoded a column at a time.
+"""Packed LOD values decoded many at a time.
 
-`unpack` reverses `pack` for every value of a column at once: all the bytes
+`unpack` reverses `pack` for every value of an array at once: all the bytes
 are split into varints together, then every value's structure is walked in
 step, one nesting level at a time, so the work is a few array passes per
 level rather than Python per byte. A value that does not decode raises
-`UnpackError` with its index. `read_overview` uses it to read one zoom of a
-file as an ordinary table.
+`UnpackError` with its index. Its arrays peak at about fifty bytes per
+packed byte, so `unpack_batches` decodes a column two megabytes of packed
+values at a time. `read_overview` uses it to read one zoom of a file as an
+ordinary table.
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,6 +27,7 @@ from .pack import FAMILY_DEPTH
 
 # larger than any real count; counts are clipped to it so positions stay in int64
 COUNT_LIMIT = 1 << 40
+BATCH_BYTES = 2 << 20
 
 
 class UnpackError(ValueError):
@@ -59,6 +63,11 @@ def carried(lod: dict) -> tuple[list[pa.Field], dict[str, list]]:
     return fields, {a['name']: a['values'] for a in attributes if 'values' in a}
 
 
+def lod_values(parquet: pq.ParquetFile, group: int, column: str, name: str) -> pa.ChunkedArray:
+    """The packed values of LOD `name` in one row group."""
+    return parquet.read_row_group(group, columns=[f'{column}.{name}']).column(0).flatten()[0]
+
+
 def read_overview(path: str | Path, zoom: int) -> pa.Table:
     """The rows shown at `zoom` with their overview geometry: `row`, the file
     row index; `geometry`, WKB in EPSG:3857 metres, the CRS stated in the
@@ -80,14 +89,13 @@ def read_overview(path: str | Path, zoom: int) -> pa.Table:
     )
     tables, first = [], 0
     for group in range(f.metadata.num_row_groups):
-        column = f.read_row_group(group, columns=[f'{lod["column"]}.{name}']).column(0)
-        u = unpack(
-            column.combine_chunks().field(name), child['geometry_type'], fields, dictionaries
-        )
-        shapes = _geometries(u, child)
-        own = np.flatnonzero(~u.copy & ~shapely.is_empty(shapes))
-        attrs = [u.attrs[a.name].take(own) for a in fields]
-        tables.append(pa.table([first + u.row[own], shapely.to_wkb(shapes[own]), *attrs], schema))
+        values = lod_values(f, group, lod['column'], name)
+        for u in unpack_batches(values, child['geometry_type'], fields, dictionaries):
+            shapes = _geometries(u, child)
+            own = np.flatnonzero(~u.copy & ~shapely.is_empty(shapes))
+            attrs = [u.attrs[a.name].take(own) for a in fields]
+            rows = first + u.row[own]
+            tables.append(pa.table([rows, shapely.to_wkb(shapes[own]), *attrs], schema))
         first += f.metadata.row_group(group).num_rows
     return pa.concat_tables(tables) if tables else schema.empty_table()
 
@@ -139,6 +147,10 @@ def unpack(
         walk.fail(broken, 'a varint is cut short or wider than 64 bits')
     if walk.error:
         raise UnpackError(int(index[walk.error[0]]), walk.error[1])
+    # each value's string bytes follow its varints, in the order of their lengths
+    string_start = last[pos - 1] + 1
+    # per-varint arrays nothing below reads, freed before geometry decodes
+    del bad, last
 
     # records in packed order: each value's own, then its copies
     copies = _sorted(walk.copies)
@@ -152,8 +164,6 @@ def unpack(
     ids[copy] = walk.counts[copies + 1]
 
     attrs, lengths = _attributes(tok, _sorted(walk.bitmaps), index[value], fields, dictionaries)
-    # each value's string bytes follow its varints, in the order of their lengths
-    string_start = last[pos - 1] + 1
     attrs.update(_strings(data, walk.counts, lengths, value, string_start, hi, index))
     attrs = {f.name: attrs[f.name] for f in fields}
     if depth == 0:
@@ -161,6 +171,48 @@ def unpack(
     else:
         geometry = _shapes(tok, walk, record_start)
     return Unpacked(index[value], copy, tile, ids, geometry, attrs)
+
+
+def unpack_batches(
+    values: pa.Array | pa.ChunkedArray,
+    family: str,
+    fields: list[pa.Field],
+    dictionaries: dict | None = None,
+    batch_bytes: int | None = None,
+) -> Iterator[Unpacked]:
+    """`unpack` over consecutive runs of `values` of about `batch_bytes`
+    (`BATCH_BYTES` unless given) packed bytes each, so decoding holds one
+    run's arrays at a time. Records' `row` and an `UnpackError`'s index
+    `values` as a whole."""
+    budget = batch_bytes or BATCH_BYTES
+    first = 0
+    for chunk in values.chunks if isinstance(values, pa.ChunkedArray) else [values]:
+        for start, stop in _runs(chunk, budget):
+            try:
+                u = unpack(chunk.slice(start, stop - start), family, fields, dictionaries)
+            except UnpackError as exc:
+                exc.row += first + start
+                raise
+            u.row += first + start
+            yield u
+        first += len(chunk)
+
+
+def _runs(values: pa.Array, budget: int) -> Iterator[tuple[int, int]]:
+    """Start and stop of runs of consecutive values, each of at most `budget`
+    bytes or a single value."""
+    if not len(values):
+        return
+    width = np.int64 if pa.types.is_large_binary(values.type) else np.int32
+    offsets = np.frombuffer(values.buffers()[1], width)[
+        values.offset : values.offset + len(values) + 1
+    ].astype(np.int64)
+    start = 0
+    while start < len(values):
+        stop = int(np.searchsorted(offsets, offsets[start] + budget, side='right')) - 1
+        stop = max(stop, start + 1)
+        yield start, stop
+        start = stop
 
 
 def _varints(data: np.ndarray, value_ends: np.ndarray):
