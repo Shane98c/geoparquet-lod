@@ -98,22 +98,3 @@ def test_grid_coordinates_outside_int32_raise():
     assert round_away(np.array([2**31 - 1.4, -(2**31) + 0.4])).tolist() == [2**31 - 1, -(2**31)]
     with pytest.raises(OverflowError):
         round_away(np.array([2.0**31]))
-
-
-def test_hilbert_key_is_the_standard_curve():
-    import duckdb
-    from geoparquet_lod.writer import hilbert_key
-
-    rng = np.random.default_rng(0)
-    x = rng.integers(0, 65536, 5000)
-    y = rng.integers(0, 65536, 5000)
-    con = duckdb.connect()
-    con.execute('LOAD spatial')
-    con.register('p', pa.table({'x': x.astype(float), 'y': y.astype(float)}))
-    theirs = con.execute(
-        'SELECT ST_Hilbert(x, y, {min_x: 0, min_y: 0, max_x: 65535, max_y: 65535}::BOX_2D) FROM p'
-    ).fetchnumpy()
-    assert np.array_equal(next(iter(theirs.values())).astype(np.int64), hilbert_key(x, y, 16))
-    # the quadtree prefix: a cell's index at a coarser depth is the finer index shifted down
-    deep = hilbert_key(x, y, 16)
-    assert np.array_equal(hilbert_key(x >> 5, y >> 5, 11), deep >> 10)

@@ -14,28 +14,10 @@ import numpy as np
 import shapely
 
 from .encoding import round_away
+from .key import mercator, resolution
 
-EARTH_RADIUS = 6378137.0
-HALF_WORLD = np.pi * EARTH_RADIUS
 SUBPIXELS = 4
 DOT_CELLS = 2
-MAX_LATITUDE = 85.0511287798066
-
-
-def mercator_y(lat) -> np.ndarray:
-    """EPSG:3857 northing in metres of latitude degrees, clamped to the Mercator limit."""
-    lat = np.clip(np.asarray(lat, dtype=np.float64), -MAX_LATITUDE, MAX_LATITUDE)
-    return EARTH_RADIUS * np.log(np.tan(np.pi / 4 + np.radians(lat) / 2))
-
-
-def mercator(lon, lat) -> tuple[np.ndarray, np.ndarray]:
-    """EPSG:3857 metres of longitude and latitude degrees."""
-    return EARTH_RADIUS * np.radians(np.asarray(lon, dtype=np.float64)), mercator_y(lat)
-
-
-def resolution(zoom: int, tile_size: int = 512) -> float:
-    """Web Mercator metres per pixel at `zoom`."""
-    return 2 * HALF_WORLD / (tile_size * 2**zoom)
 
 
 def grid(zoom: int, tile_size: int = 512) -> float:

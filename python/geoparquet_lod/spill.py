@@ -10,18 +10,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from .quantize import MAX_LATITUDE
+from .key import hilbert_key, tile_x, tile_y
 
 BUFFER = 64 / 4096  # the tile encoder's buffer as a share of the tile
-
-
-def _tile_x(lon: np.ndarray, zoom: int) -> np.ndarray:
-    return (lon + 180) / 360 * 2**zoom
-
-
-def _tile_y(lat: np.ndarray, zoom: int) -> np.ndarray:
-    lat = np.radians(np.clip(lat, -MAX_LATITUDE, MAX_LATITUDE))
-    return (1 - np.log(np.tan(lat) + 1 / np.cos(lat)) / np.pi) / 2 * 2**zoom
 
 
 def straddlers(
@@ -35,14 +26,14 @@ def straddlers(
     index of each such feature and the tile (x * 2^zoom + y) it reaches into,
     one pair per foreign tile, taking the encoder's buffer into account."""
     n = 2**zoom
-    cx = _tile_x((xmin + xmax) / 2, zoom)
-    cy = _tile_y((ymin + ymax) / 2, zoom)
+    cx = tile_x((xmin + xmax) / 2, zoom)
+    cy = tile_y((ymin + ymax) / 2, zoom)
     own_x = np.clip(np.floor(cx), 0, n - 1).astype(np.int64)
     own_y = np.clip(np.floor(cy), 0, n - 1).astype(np.int64)
-    x0 = np.clip(np.floor(_tile_x(xmin, zoom) - BUFFER), 0, n - 1).astype(np.int64)
-    x1 = np.clip(np.floor(_tile_x(xmax, zoom) + BUFFER), 0, n - 1).astype(np.int64)
-    y0 = np.clip(np.floor(_tile_y(ymax, zoom) - BUFFER), 0, n - 1).astype(np.int64)
-    y1 = np.clip(np.floor(_tile_y(ymin, zoom) + BUFFER), 0, n - 1).astype(np.int64)
+    x0 = np.clip(np.floor(tile_x(xmin, zoom) - BUFFER), 0, n - 1).astype(np.int64)
+    x1 = np.clip(np.floor(tile_x(xmax, zoom) + BUFFER), 0, n - 1).astype(np.int64)
+    y0 = np.clip(np.floor(tile_y(ymax, zoom) - BUFFER), 0, n - 1).astype(np.int64)
+    y1 = np.clip(np.floor(tile_y(ymin, zoom) + BUFFER), 0, n - 1).astype(np.int64)
     spans = (x1 - x0 + 1) * (y1 - y0 + 1)
     own = own_x * n + own_y
     out_rows, out_tiles = [], []
@@ -74,8 +65,6 @@ def hosts(
     at or past the start of the tile's interval, or the last row when none is,
     so an empty tile still has a host a reader finds right after its interval.
     `keys_sorted` are a section's keys in file order and `key_index` their rows."""
-    from .writer import hilbert_key
-
     n = 2**zoom
     span = 4 ** (depth - zoom)
     starts = hilbert_key(tiles // n, tiles % n, zoom) * span

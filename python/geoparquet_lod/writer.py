@@ -31,46 +31,26 @@ from .encoding import (
     lod_type,
     point_parts,
 )
-from .pack import pack
-from .quantize import (
-    DOT_CELLS,
+from .key import (
     EARTH_RADIUS,
-    MAX_LATITUDE,
-    SUBPIXELS,
-    grid,
+    KEY_DEPTH,
+    hilbert_key,
     mercator,
     mercator_y,
-    render_lines,
-    render_polygons,
     resolution,
+    sql_key_cell,
+    sql_mercator_x,
+    sql_mercator_y,
 )
+from .pack import pack
+from .quantize import DOT_CELLS, SUBPIXELS, grid, render_lines, render_polygons
 from .spill import hosts, straddlers, take_ragged
 from .thinning import Context, Thin, default_thinning, describe
 
 LOD_KEY = 'lod_columns'
 KEY_COLUMN = 'hilbert'
-KEY_DEPTH = 24
 DICTIONARY_MAX = 256
 KEY_FIELD = pa.field(KEY_COLUMN, pa.int64(), nullable=True)
-
-
-def hilbert_key(x: np.ndarray, y: np.ndarray, depth: int) -> np.ndarray:
-    """Standard Hilbert index (xy2d) of cells (x, y) on a 2^depth grid."""
-    x = np.asarray(x, dtype=np.int64).copy()
-    y = np.asarray(y, dtype=np.int64).copy()
-    n = 1 << depth
-    d = np.zeros(len(x), dtype=np.int64)
-    s = n >> 1
-    while s > 0:
-        rx = (x & s) > 0
-        ry = (y & s) > 0
-        d += s * s * ((3 * rx.astype(np.int64)) ^ ry.astype(np.int64))
-        flip = ~ry & rx
-        x = np.where(flip, n - 1 - x, x)
-        y = np.where(flip, n - 1 - y, y)
-        x, y = np.where(~ry, y, x), np.where(~ry, x, y)
-        s >>= 1
-    return d
 
 
 # columns the writer computes carry a prefix no source column uses; thinnings see them unprefixed
@@ -317,11 +297,9 @@ def guess_zooms(con, sorted_path, geometry, family, zooms, complete_from, extent
 
     import shapely
 
-    from .quantize import resolution as res
-
     def zoom_where(size: float) -> int:
         # first zoom whose pixel is no larger than `size`
-        return max(0, min(22, math.ceil(math.log2(res(0) / max(size, 1e-12)))))
+        return max(0, min(22, math.ceil(math.log2(resolution(0) / max(size, 1e-12)))))
 
     auto_zooms = zooms == 'auto'
     auto_from = complete_from == 'auto'
@@ -718,27 +696,18 @@ def _write_unindexed(
     dot_cells = float(placeholder_pixels) * SUBPIXELS
     if zooms != 'auto':
         _check_grid((mxmin, mymin, mxmax, mymax), max(zooms), dot_cells)
-    # the Web Mercator cell at depth KEY_DEPTH holding the bbox centre, cells numbered as XYZ
-    # tiles are; the Hilbert index of that cell is computed in numpy and the rows sorted by it
-    cells = 1 << KEY_DEPTH
-    lon = f'(ST_XMin({geometry}) + ST_XMax({geometry})) / 2'
-    lat = f'radians(greatest(-{MAX_LATITUDE}, least({MAX_LATITUDE}, (ST_YMin({geometry}) + ST_YMax({geometry})) / 2)))'
-    cell_x = f'least({cells - 1}, greatest(0, floor(({lon} + 180) / 360 * {cells})))::BIGINT'
-    cell_y = f'least({cells - 1}, greatest(0, floor((1 - ln(tan({lat}) + 1 / cos({lat})) / pi()) / 2 * {cells})))::BIGINT'
-
+    # the key cell holds the bbox centre; its Hilbert index is computed in numpy and the
+    # rows sorted by it
+    cell_x, cell_y = sql_key_cell(
+        f'(ST_XMin({geometry}) + ST_XMax({geometry})) / 2',
+        f'(ST_YMin({geometry}) + ST_YMax({geometry})) / 2',
+    )
     # thinnings and grids work in Web Mercator metres; the covering stays in degrees
-    def mx(lon: str) -> str:
-        return f'({EARTH_RADIUS} * radians({lon}))'
-
-    def phi(lat: str) -> str:
-        return f'radians(greatest(-{MAX_LATITUDE}, least({MAX_LATITUDE}, {lat})))'
-
-    def my(lat: str) -> str:
-        return f'({EARTH_RADIUS} * ln(tan(pi() / 4 + {phi(lat)} / 2)))'
-
     centroid = f'ST_Centroid({geometry})'
-    width = f'({mx(f"ST_XMax({geometry})")} - {mx(f"ST_XMin({geometry})")})'
-    height = f'({my(f"ST_YMax({geometry})")} - {my(f"ST_YMin({geometry})")})'
+    width = f'({sql_mercator_x(f"ST_XMax({geometry})")} - {sql_mercator_x(f"ST_XMin({geometry})")})'
+    height = (
+        f'({sql_mercator_y(f"ST_YMax({geometry})")} - {sql_mercator_y(f"ST_YMin({geometry})")})'
+    )
     # the source is lon/lat; DuckDB 2 requires the axis order to be stated
     area = f"ST_Area(ST_Transform({geometry}, 'OGC:CRS84', 'EPSG:3857', true))"
     sorted_path = out.with_suffix('.sorted.parquet')
@@ -749,8 +718,8 @@ def _write_unindexed(
         f"""
         COPY (
             SELECT row_number() OVER () AS __id,
-                CASE WHEN {valid} THEN {mx(f'ST_X({centroid})')}::DOUBLE END AS __cx,
-                CASE WHEN {valid} THEN {my(f'ST_Y({centroid})')}::DOUBLE END AS __cy,
+                CASE WHEN {valid} THEN {sql_mercator_x(f'ST_X({centroid})')}::DOUBLE END AS __cx,
+                CASE WHEN {valid} THEN {sql_mercator_y(f'ST_Y({centroid})')}::DOUBLE END AS __cy,
                 CASE WHEN {valid} THEN sqrt({width} ^ 2 + {height} ^ 2) END AS __diag,
                 CASE WHEN {valid} THEN {area} END AS __area,
                 CASE WHEN {valid} THEN ST_NPoints({geometry}) END AS __nv,

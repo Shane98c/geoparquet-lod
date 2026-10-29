@@ -15,7 +15,7 @@ import sys
 
 import numpy as np
 import pyarrow.parquet as pq
-from geoparquet_lod.writer import hilbert_key
+from geoparquet_lod.key import hilbert_key
 
 MAX_GAP, MIN_GAP, GAP_RATIO, MAX_RUN = 32 * 1024, 4 * 1024, 0.5, 4 * 1024 * 1024
 SHARD = 1024

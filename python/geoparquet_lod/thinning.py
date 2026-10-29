@@ -30,7 +30,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 
-from .quantize import HALF_WORLD, resolution
+from .key import HALF_WORLD, resolution, tile_id
 
 Thin = Callable[[pa.Table, int, 'Context'], pa.Table]
 RESERVED = ('id', 'cx', 'cy', 'diag', 'nv', 'u')
@@ -53,12 +53,7 @@ class Context:
 
     def tile_of(self, rows: pa.Table, zoom: int) -> np.ndarray:
         """Web Mercator tile id (x * 2^zoom + y) of each row's centroid."""
-        n = 2**zoom
-        cx = rows.column('cx').to_numpy()
-        cy = rows.column('cy').to_numpy()
-        tx = np.clip(np.floor((cx + HALF_WORLD) / (2 * HALF_WORLD) * n), 0, n - 1)
-        ty = np.clip(np.floor((HALF_WORLD - cy) / (2 * HALF_WORLD) * n), 0, n - 1)
-        return (tx * n + ty).astype(np.int64)
+        return tile_id(rows.column('cx').to_numpy(), rows.column('cy').to_numpy(), zoom)
 
     def pixel_unit(self, rows: pa.Table, zoom: int) -> np.ndarray:
         """Area of one screen pixel at `zoom`, per row."""
