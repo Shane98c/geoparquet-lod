@@ -9,10 +9,11 @@ how to install and run the packages, and what the reader APIs return.
 Rows are sorted once along a Hilbert curve over the Web Mercator world
 square in large row groups, so a tile's rows are one contiguous run and a
 city tile touches one or two row groups. A float32 bbox covering with page
-statistics lets a reader pick pages without reading geometry. Each LOD is a
-nullable binary child of the required `lod` struct. Present values pack whole
-quantized geometry, carried attributes, and boundary copies; the spatial index
-selects these pages directly.
+statistics, null for a null or empty geometry, lets a reader pick pages
+without reading geometry. Each LOD is a nullable binary child of the required
+`lod` struct. Present values pack whole quantized geometry, carried
+attributes, and boundary copies; the spatial index selects these pages
+directly.
 
 Which rows appear at which zoom is a _thinning function_, one shape:
 

@@ -778,16 +778,15 @@ export class LodReader {
     return values
   }
 
+  /** The covering's extent in row group `g`, from its statistics; a box that
+   * intersects nothing when they have no bounds, as for a group whose
+   * geometries are all null or empty. */
   private rowGroupBbox(g: number): Bbox {
-    if (!Number(this.metadata.row_groups[g].num_rows)) return [1, 1, 0, 0]
-    const stat = (leaf: string) => this.chunk(g, leaf).meta_data!.statistics
-    if (!stat('bbox.xmin')) return [1, 1, 0, 0]
-    return [
-      stat('bbox.xmin')!.min_value as unknown as number,
-      stat('bbox.ymin')!.min_value as unknown as number,
-      stat('bbox.xmax')!.max_value as unknown as number,
-      stat('bbox.ymax')!.max_value as unknown as number,
-    ]
+    const box = BBOX_LEAVES.map((leaf, i) => {
+      const stat = this.chunk(g, leaf).meta_data!.statistics
+      return i < 2 ? stat?.min_value : stat?.max_value
+    })
+    return box.every(Number.isFinite) ? (box as Bbox) : [Infinity, Infinity, -Infinity, -Infinity]
   }
 
   private chunk(g: number, leaf: string): ColumnChunk {
@@ -798,7 +797,8 @@ export class LodReader {
     return chunk
   }
 
-  /** Row ranges admitted by all four bbox column indexes. */
+  /** Row ranges admitted by all four bbox column indexes; a page whose
+   * coverings are all null admits none. */
   private async candidateRows(
     g: number,
     bbox: Bbox,
@@ -817,6 +817,7 @@ export class LodReader {
       index.min_values.forEach((minValue, p) => {
         const min = minValue as unknown as number
         const max = index.max_values[p] as unknown as number
+        if (index.null_pages[p] || !Number.isFinite(min) || !Number.isFinite(max)) return
         const tests = [min <= bbox[2], min <= bbox[3], max >= bbox[0], max >= bbox[1]]
         if (tests[i]) ranges.push([pages[p].rowStart, pages[p].rowEnd])
       })
@@ -839,10 +840,10 @@ export class LodReader {
     const hits: [number, number][] = []
     for (const [a, b] of ranges) {
       for (let row = a; row < b; row++) {
-        const xmin = columns[0].get(row) as number
-        const ymin = columns[1].get(row) as number
-        const xmax = columns[2].get(row) as number
-        const ymax = columns[3].get(row) as number
+        const box = columns.map((values) => unwrap(values.get(row)))
+        // a null covering, as for null or empty geometry, matches nothing
+        if (!box.every(Number.isFinite)) continue
+        const [xmin, ymin, xmax, ymax] = box as number[]
         if (xmin > bbox[2] || xmax < bbox[0] || ymin > bbox[3] || ymax < bbox[1]) continue
         const last = hits[hits.length - 1]
         if (last && last[1] === row) last[1] = row + 1
@@ -992,11 +993,10 @@ const isString = (element: SchemaTree['element']) =>
 const ABSENT = Symbol('absent')
 
 /**
- * hyparquet assembles a leaf below the nullable LOD struct as one array per
- * row, empty when the struct is null, so a geometry leaf is `[value]` for a
- * shown row. A flat leaf (an attribute) comes back as the scalar itself, null
- * both for a null value and for a row not shown; rows are therefore taken
- * from the geometry leaves and attributes only looked up.
+ * hyparquet assembles a leaf below a struct, when its path has a nullable
+ * level, as one array per row, empty when null: an LOD value or a covering
+ * bound is `[value]` when present. A top-level leaf comes back as the scalar
+ * itself, null when null.
  */
 const unwrap = (v: unknown): unknown => {
   if (!Array.isArray(v)) return v === null || v === undefined ? ABSENT : v

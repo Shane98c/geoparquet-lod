@@ -45,6 +45,19 @@ for (const { z, x, y, id, attribute = 'h' } of cases) {
     assert.deepEqual(new Uint8Array(await renderTile(spatial, z, x, y)), new Uint8Array(mvt))
   }
 }
+// rows with a key, which come first, have geometry; the rest have a null covering,
+// which no bbox matches, so the primary path reads exactly the keyed rows
+const keyed = reader.metadata.row_groups.reduce((n, group) => {
+  const key = group.columns.find(
+    (c) => c.meta_data.path_in_schema.join('.') === reader.lod.key.column,
+  )
+  return n + Number(group.num_rows) - Number(key.meta_data.statistics.null_count)
+}, 0)
+const world = [-180, -90, 180, 90]
+for (const r of spatial ? [reader, spatial] : [reader]) {
+  const { rows } = await r.readPrimary(world)
+  assert.deepEqual(rows, [...Array(keyed).keys()], 'a world query reads every row with geometry')
+}
 // the layout requires key statistics: a row group without them fails the read
 const stripped = await LodReader.open(coalescing(source))
 const keyChunk = stripped.metadata.row_groups[0].columns.find(

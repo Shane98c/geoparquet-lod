@@ -11,6 +11,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 import shapely
+from geoparquet_lod import validate
 from geoparquet_lod._layout import finalize_layout
 from geoparquet_lod.writer import _write_unindexed as write
 from geoparquet_lod.writer import hilbert_key
@@ -22,9 +23,11 @@ ROOT = Path(__file__).resolve().parents[1]
 @pytest.mark.parametrize('nulls', [10, 300])
 def test_copies_past_every_key_reach_their_tile(tmp_path, nulls):
     """A tile later on the curve than every key has its copies on the last
-    keyed row, ahead of the null-geometry rows that sort last, whether or not
-    those fill the final row groups. The spatial reader takes them from the
-    last page of the LOD's directory."""
+    keyed row, ahead of the rows with null or empty geometry that sort last,
+    whether or not those fill the final row groups. The spatial reader takes
+    them from the last page of the LOD's directory. Those rows have a null
+    covering, so the pages they fill keep their column index and no bbox
+    query reads them."""
     z, n = 14, 2**14
     tx = int((-104.99 + 180) / 360 * n)
     ty = int((1 - math.asinh(math.tan(math.radians(39.7))) / math.pi) / 2 * n)
@@ -48,7 +51,7 @@ def test_copies_past_every_key_reach_their_tile(tmp_path, nulls):
     corners = 0.2 + np.random.default_rng(1).random((600, 2)) * 0.6
     small = [box(tx + ex + a, ty + ey + b, 0.01) for a, b in corners]
     big = box(tx + 0.3 + dx * 0.4, ty + 0.3 + dy * 0.4, 0.4)
-    geometry = np.array([*small, big, *[None] * nulls], dtype=object)
+    geometry = np.array([*small, big, *[None, shapely.Polygon()] * (nulls // 2)], dtype=object)
     geo = {
         'version': '1.1.0',
         'primary_column': 'geometry',
@@ -93,7 +96,10 @@ def test_copies_past_every_key_reach_their_tile(tmp_path, nulls):
                     )
     assert cases, 'the fixture puts copies on tiles past every key'
     (tmp_path / 'cases.json').write_text(json.dumps(cases))
+    assert t.column('bbox').null_count == nulls
+    validate(out, full=True)
     laid_out = finalize_layout(out, tmp_path / 'laid-out.parquet', log=lambda *_: None)
+    validate(laid_out, full=True)
     result = subprocess.run(
         [
             'node',

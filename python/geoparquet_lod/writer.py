@@ -65,7 +65,7 @@ BBOX_FIELD = pa.field(
     pa.struct(
         [pa.field(k, pa.float32(), nullable=False) for k in ('xmin', 'ymin', 'xmax', 'ymax')]
     ),
-    nullable=False,
+    nullable=True,
 )
 
 
@@ -278,9 +278,8 @@ def lods(
 
 
 def _bbox_float32(column: pa.ChunkedArray) -> pa.Array:
-    """Covering bbox in float32, rounded outward so it still contains the geometry."""
-    import pyarrow.compute as pc
-
+    """Covering bbox in float32, rounded outward so it still contains the
+    geometry, and null where the geometry is null or empty."""
     parts = []
     for name, outward in (('xmin', -1), ('ymin', -1), ('xmax', 1), ('ymax', 1)):
         exact = pc.struct_field(column, name).to_numpy(zero_copy_only=False).astype(np.float64)
@@ -288,7 +287,9 @@ def _bbox_float32(column: pa.ChunkedArray) -> pa.Array:
         tight = (v > exact) if outward < 0 else (v < exact)
         v[tight] = np.nextafter(v[tight], np.float32(outward * np.inf))
         parts.append(pa.array(v, pa.float32()))
-    return pa.StructArray.from_arrays(parts, fields=list(BBOX_FIELD.type))
+    return pa.StructArray.from_arrays(
+        parts, fields=list(BBOX_FIELD.type), mask=pc.is_null(column).combine_chunks()
+    )
 
 
 def guess_zooms(con, sorted_path, geometry, family, zooms, complete_from, extent, log):

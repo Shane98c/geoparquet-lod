@@ -71,10 +71,12 @@ A conforming file MUST satisfy:
    and keeps the copies whose `tile` is the tile's. The per-row
    uniform `u` the reference writer hands thinnings is a hash of the
    geometry bytes, so it does not depend on sort order.
-2. **Covering.** A `bbox` struct column of four float32 values with the
-   GeoParquet 1.1 covering declaration, column statistics on every row
-   group, and a column index (page statistics) and offset index on each of
-   its four leaves. Values are rounded outward.
+2. **Covering.** A nullable `bbox` struct column of four required float32
+   values with the GeoParquet 1.1 covering declaration, column statistics on
+   every row group, and a column index (page statistics) and offset index on
+   each of its four leaves. Values are rounded outward. A row whose primary
+   geometry is null or empty has a null covering, so statistics hold only
+   real bounds and a page of such rows is a null page of the column index.
 3. **Page indexes.** Every column has an offset index.
 4. **LOD columns.** A top-level required struct column named by `column`
    with one nullable binary child per LOD, named by the LOD. The child is
@@ -164,7 +166,7 @@ and the physical schema, with the source attributes and `geometry` as the
 source had them:
 
 ```
-bbox: struct<xmin: float, ymin: float, xmax: float, ymax: float> not null
+bbox: struct<xmin: float not null, ymin: float not null, xmax: float not null, ymax: float not null>
 hilbert: int64
 lod: struct<
   f8: binary,
@@ -250,7 +252,8 @@ reader serves files without the index and how it reaches analytical rows.
 2. For a tile at zoom z choose the LOD containing z, clamping to the
    coarsest LOD below `zooms`. Finer than the finest zoom, read the primary
    geometry instead: every row is shown at the finest LOD, so the bbox pages
-   alone choose the rows, and their exact WKB is small at those zooms.
+   alone choose the rows, skipping null pages and null coverings, and their
+   exact WKB is small at those zooms.
 3. The tile's key interval, see Layout 1. Candidate row groups: those whose
    key statistics intersect it, plus the host group, the first group whose
    maximum key is at or past the interval start, or the last group with
