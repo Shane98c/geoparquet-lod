@@ -2,11 +2,13 @@
 
 import gzip
 import json
+import re
 import struct
 import subprocess
 from pathlib import Path
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import pytest
 import shapely
@@ -15,7 +17,7 @@ from geoparquet_lod import _validate_index, validate, write
 from geoparquet_lod._compact import dumps, get, loads, set_value
 from geoparquet_lod._layout import _node, finalize_layout, read_node, row_metadata
 from geoparquet_lod.cli import cli
-from geoparquet_lod.validate import ValidationError
+from geoparquet_lod.validate import BOUNDS, ValidationError
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -505,4 +507,142 @@ def test_invalid_spill_identifiers(indexed, tmp_path, mutation):
     pq.write_table(table, bad, row_group_size=64, write_page_index=True)
     validate(bad, sample_rows=3)
     with pytest.raises(ValidationError, match='spill'):
+        validate(bad, full=True)
+
+
+def _rewritten(indexed, path, change):
+    """`indexed` with `change(table, geo)` applied to its rows and geo
+    metadata, written without its spatial index."""
+    table = pq.read_table(indexed)
+    metadata = dict(table.schema.metadata)
+    geo = json.loads(metadata[b'geo'])
+    table = change(table, geo)
+    metadata[b'geo'] = json.dumps(geo).encode()
+    metadata.pop(b'lod_spatial_index', None)
+    table = table.replace_schema_metadata(metadata)
+    pq.write_table(table, path, row_group_size=64, write_page_index=True)
+    return path
+
+
+def _replace(table, name, column, nullable=True):
+    field = pa.field(name, column.type, nullable=nullable)
+    return table.set_column(table.schema.get_field_index(name), field, column)
+
+
+def _null_at(column, row):
+    """`column` with `row` null. A struct's required children keep their
+    values under it, as Arrow's Parquet writer requires."""
+    column = column.combine_chunks()
+    mask = column.is_null().to_numpy(zero_copy_only=False)
+    mask[row] = True
+    if pa.types.is_struct(column.type):
+        children = [column.field(i) for i in range(column.type.num_fields)]
+        return pa.StructArray.from_arrays(children, fields=list(column.type), mask=pa.array(mask))
+    return pc.if_else(pa.array(mask), pa.scalar(None, column.type), column)
+
+
+@pytest.mark.parametrize(
+    'mutation, message',
+    [
+        ('struct', 'bbox must be a struct column, not float'),
+        ('required', 'bbox must be nullable'),
+        ('names', 'bbox fields must be xmin, ymin, xmax and ymax, not minx, ymin, xmax, ymax'),
+        ('double', 'bbox.xmin must be float32, not double'),
+        ('nullable', 'bbox.ymin must be required, not nullable'),
+        (
+            'path',
+            'geo.columns.geometry.covering.bbox.xmax must be ["bbox", "xmax"], not ["bbox", "maxx"]',
+        ),
+        ('declared', 'geo.columns.geometry.covering.bbox must declare xmin, ymin, xmax and ymax'),
+        ('geometry', 'primary geometry column geometry missing'),
+        ('wkt', 'primary geometry column geometry must be WKB binary, not string'),
+        ('key', 'key column hilbert missing'),
+    ],
+)
+def test_covering_geometry_and_key_columns_are_checked(indexed, tmp_path, mutation, message):
+    """The covering is a nullable struct of four required float32 bounds
+    declared at their own paths, beside a WKB primary geometry and the key
+    column. The footer shows each, so a sample of no rows finds them."""
+
+    def change(table, geo):
+        bbox = table['bbox'].combine_chunks()
+        fields = [pa.field(bound, pa.float32(), nullable=False) for bound in BOUNDS]
+        declared = geo['columns']['geometry']['covering']['bbox']
+        if mutation == 'struct':
+            return _replace(table, 'bbox', bbox.field('xmin'))
+        if mutation == 'required':
+            return _replace(table, 'bbox', bbox, nullable=False)
+        if mutation == 'names':
+            fields[0] = fields[0].with_name('minx')
+        elif mutation == 'double':
+            fields[0] = fields[0].with_type(pa.float64())
+        elif mutation == 'nullable':
+            fields[1] = fields[1].with_nullable(True)
+        elif mutation == 'path':
+            declared['xmax'] = ['bbox', 'maxx']
+        elif mutation == 'declared':
+            del declared['ymax']
+        elif mutation == 'wkt':
+            wkt = shapely.to_wkt(shapely.from_wkb(table['geometry'].to_numpy()))
+            return _replace(table, 'geometry', pa.array(wkt, pa.string()))
+        elif mutation == 'geometry':
+            return table.drop_columns(['geometry'])
+        else:
+            return table.drop_columns(['hilbert'])
+        bounds = [bbox.field(i).cast(f.type) for i, f in enumerate(fields)]
+        return _replace(table, 'bbox', pa.StructArray.from_arrays(bounds, fields=fields))
+
+    bad = _rewritten(indexed, tmp_path / f'{mutation}.parquet', change)
+    with pytest.raises(ValidationError, match=re.escape(message)):
+        validate(bad, sample_rows=0)
+
+
+@pytest.mark.parametrize(
+    'mutation, message',
+    [
+        ('covering', 'null bbox covering on a non-empty geometry'),
+        ('null', 'bbox covering on a null geometry'),
+        ('empty', 'bbox covering on an empty geometry'),
+        ('invalid', 'primary geometry is not valid WKB'),
+    ],
+)
+def test_sampled_coverings_follow_their_geometry(indexed, tmp_path, mutation, message):
+    """A sampled row's covering is null exactly where its primary geometry is
+    null or empty, in either mode; a row past the sample is not checked."""
+    row = 1
+
+    def change(table, geo):
+        if mutation == 'covering':
+            return _replace(table, 'bbox', _null_at(table['bbox'], row))
+        wkb = table['geometry'].to_pylist()
+        wkb[row] = {'null': None, 'empty': shapely.to_wkb(shapely.Polygon())}.get(
+            mutation, b'\x01\x03\x00'
+        )
+        return _replace(table, 'geometry', pa.array(wkb, pa.binary()))
+
+    bad = _rewritten(indexed, tmp_path / f'{mutation}.parquet', change)
+    validate(bad, sample_rows=row)
+    for full in (False, True):
+        with pytest.raises(ValidationError, match=f'row group 0, row {row}: {message}'):
+            validate(bad, sample_rows=row + 1, full=full)
+
+
+@pytest.mark.parametrize(
+    'column, message',
+    [
+        ('bbox', 'null bbox covering on a row with a Hilbert key'),
+        ('hilbert', 'bbox covering on a row with a null Hilbert key'),
+    ],
+)
+def test_coverings_follow_the_key_in_every_row_group(indexed, tmp_path, column, message):
+    """Full mode checks in every row group that the covering and the Hilbert
+    key are null on the same rows; quick mode samples the first row group only."""
+    group, row = 2, 5
+
+    def change(table, geo):
+        return _replace(table, column, _null_at(table[column], group * 64 + row))
+
+    bad = _rewritten(indexed, tmp_path / f'{column}.parquet', change)
+    validate(bad)
+    with pytest.raises(ValidationError, match=f'row group {group}, row {row}: {message}'):
         validate(bad, full=True)

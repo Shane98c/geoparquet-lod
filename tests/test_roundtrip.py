@@ -358,7 +358,8 @@ def test_null_geometry_and_source_columns(buildings, tmp_path):
     t = t.append_column('area', pa.array(np.full(t.num_rows, 7.0)))
     src = geoparquet(tmp_path / 'nulls.parquet', t, ['Polygon'])
     out = write(src, tmp_path / 'nulls.lod.parquet', carry=['risk'], workers=1, log=lambda *_: None)
-    validate(out)
+    # a sample of every row reaches the null and empty geometry, which sorts last
+    validate(out, sample_rows=t.num_rows, full=True)
     f = pq.ParquetFile(out)
     names = f.schema_arrow.names
     assert 'id' in names and 'area' in names and 'risk' in names

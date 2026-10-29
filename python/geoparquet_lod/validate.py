@@ -9,11 +9,14 @@ from pathlib import Path
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
+import shapely
 
 from .encoding import ENCODING, INT32, PACK_VERSION
 from .pack import FAMILY_DEPTH
 from .unpack import Unpacked, UnpackError, carried, lod_values, unpack_batches
 from .writer import LOD_KEY, LOD_VERSION
+
+BOUNDS = ('xmin', 'ymin', 'xmax', 'ymax')
 
 
 class ValidationError(Exception):
@@ -23,8 +26,12 @@ class ValidationError(Exception):
 def validate(path: str | Path, sample_rows: int = 2000, *, full: bool = False) -> dict:
     """Check metadata and a quick sample, or every packed row and index with full=True.
 
-    Full mode streams one LOD column of one row group at a time and decodes it
-    in batches. sample_rows bounds quick mode only.
+    The sample is the first sample_rows rows of the first row group: quick
+    mode decodes their packed values, and both modes check that their
+    covering is null exactly where their primary geometry is null or empty.
+    Full mode streams one LOD column of one row group at a time, decoding it
+    in batches, and checks a row group at a time that the covering and the
+    Hilbert key are null on the same rows.
     """
     if not isinstance(sample_rows, int) or sample_rows < 0:
         raise ValueError('sample_rows must be a nonnegative integer')
@@ -48,11 +55,22 @@ def validate(path: str | Path, sample_rows: int = 2000, *, full: bool = False) -
     names = f.schema_arrow.names
     if column not in names:
         raise ValidationError(f'LOD column {column} missing')
+    geometry = geo.get('primary_column', 'geometry')
+    if geometry not in names:
+        raise ValidationError(f'primary geometry column {geometry} missing')
+    wkb = f.schema_arrow.field(geometry).type
+    if not (pa.types.is_binary(wkb) or pa.types.is_large_binary(wkb)):
+        raise ValidationError(f'primary geometry column {geometry} must be WKB binary, not {wkb}')
     if 'bbox' not in names:
         raise ValidationError('bbox covering column missing')
-    covering = geo.get('columns', {}).get(geo.get('primary_column', 'geometry'), {}).get('covering')
+    covering = geo.get('columns', {}).get(geometry, {}).get('covering')
     if not covering:
-        raise ValidationError('geo.columns.<geometry>.covering missing')
+        raise ValidationError(f'geo.columns.{geometry}.covering missing')
+    _check_covering(f.schema_arrow.field('bbox'), covering, geometry)
+    key = lod.get('key')
+    key_column = key.get('column') if isinstance(key, dict) else None
+    if key_column not in names:
+        raise ValidationError(f'key column {key_column} missing')
     lods = lod.get('lods') or {}
     if not lods:
         raise ValidationError('no lods declared')
@@ -99,11 +117,14 @@ def validate(path: str | Path, sample_rows: int = 2000, *, full: bool = False) -
                     raise ValidationError(f'row group {g}: {c.path_in_schema} has no column index')
             if not c.has_offset_index:
                 raise ValidationError(f'row group {g}: {c.path_in_schema} has no offset index')
+    _check_sample_covering(f, geometry, sample_rows)
     # every LOD's packed rows: non-empty parts, rings of three or more vertices, valid copies
     fields, dictionaries = carried(lod)
     checked = dict.fromkeys(lods, 0)
     groups = range(md.num_row_groups) if full else range(1)
     for group in groups:
+        if full:
+            _check_key_covering(f, group, key_column)
         for name, child in lods.items():
             values = lod_values(f, group, column, name)
             if not full:
@@ -131,6 +152,78 @@ def validate(path: str | Path, sample_rows: int = 2000, *, full: bool = False) -
         'mode': 'full' if full else 'quick',
         'checked_non_null': checked,
     }
+
+
+def _check_covering(field: pa.Field, covering, geometry: str) -> None:
+    """Raise unless `field` is a nullable struct of four required float32
+    bounds and the geometry's `covering` declares each at its own path."""
+    if not pa.types.is_struct(field.type):
+        raise ValidationError(f'bbox must be a struct column, not {field.type}')
+    if not field.nullable:
+        raise ValidationError('bbox must be nullable: null or empty geometry has a null covering')
+    names = [child.name for child in field.type]
+    if sorted(names) != sorted(BOUNDS):
+        raise ValidationError(
+            f'bbox fields must be xmin, ymin, xmax and ymax, not {", ".join(names)}'
+        )
+    for child in field.type:
+        if child.type != pa.float32():
+            raise ValidationError(f'bbox.{child.name} must be float32, not {child.type}')
+        if child.nullable:
+            raise ValidationError(f'bbox.{child.name} must be required, not nullable')
+    where = f'geo.columns.{geometry}.covering.bbox'
+    declared = covering.get('bbox') if isinstance(covering, dict) else None
+    if not isinstance(declared, dict) or sorted(declared) != sorted(BOUNDS):
+        raise ValidationError(
+            f'{where} must declare xmin, ymin, xmax and ymax, not {json.dumps(declared)}'
+        )
+    for bound in BOUNDS:
+        if declared[bound] != ['bbox', bound]:
+            raise ValidationError(
+                f'{where}.{bound} must be ["bbox", "{bound}"], not {json.dumps(declared[bound])}'
+            )
+
+
+def _check_sample_covering(parquet: pq.ParquetFile, geometry: str, rows: int) -> None:
+    """Raise unless, in the first `rows` rows of the first row group, the
+    covering is null exactly where the primary geometry is null or empty."""
+    if not rows:
+        return
+    batch = next(parquet.iter_batches(rows, row_groups=[0], columns=['bbox', geometry]), None)
+    if batch is None:
+        return
+    wkb = batch.column(geometry)
+    null = wkb.is_null().to_numpy(zero_copy_only=False)
+    shapes = shapely.from_wkb(wkb.to_numpy(zero_copy_only=False), on_invalid='ignore')
+    invalid = np.flatnonzero(shapely.is_missing(shapes) & ~null)
+    if len(invalid):
+        raise ValidationError(f'row group 0, row {invalid[0]}: primary geometry is not valid WKB')
+    present = ~null & ~shapely.is_empty(shapes)
+    covered = batch.column('bbox').is_valid().to_numpy(zero_copy_only=False)
+    wrong = np.flatnonzero(covered != present)
+    if len(wrong):
+        row = wrong[0]
+        if present[row]:
+            message = 'null bbox covering on a non-empty geometry'
+        else:
+            message = f'bbox covering on {"a null" if null[row] else "an empty"} geometry'
+        raise ValidationError(f'row group 0, row {row}: {message}')
+
+
+def _check_key_covering(parquet: pq.ParquetFile, group: int, key_column: str) -> None:
+    """Raise unless, in row group `group`, the covering and the Hilbert key
+    are null on the same rows: those of null or empty geometry."""
+    table = parquet.read_row_group(group, columns=['bbox', key_column])
+    covered = table.column('bbox').is_valid().to_numpy()
+    keyed = table.column(key_column).is_valid().to_numpy()
+    wrong = np.flatnonzero(covered != keyed)
+    if len(wrong):
+        row = wrong[0]
+        if keyed[row]:
+            message = 'null bbox covering on a row with a Hilbert key'
+        else:
+            message = 'bbox covering on a row with a null Hilbert key'
+        raise ValidationError(f'row group {group}, row {row}: {message}')
 
 
 def _check_spatial_index(path, parquet, lod):
