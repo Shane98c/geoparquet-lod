@@ -96,7 +96,7 @@ def validate(path: str | Path, sample_rows: int = 2000, *, full: bool = False) -
                     raise ValidationError(f'row group {g}: {c.path_in_schema} has no column index')
             if not c.has_offset_index:
                 raise ValidationError(f'row group {g}: {c.path_in_schema} has no offset index')
-    # every LOD's packed rows: non-empty parts, closed rings, valid copies
+    # every LOD's packed rows: non-empty parts, rings of three or more vertices, valid copies
     fields = [pa.field(a['name'], pa.type_for_alias(a['type'])) for a in lod.get('attributes', [])]
     dictionaries = {a['name']: a['values'] for a in lod.get('attributes', []) if 'values' in a}
     checked = dict.fromkeys(lods, 0)
@@ -165,12 +165,13 @@ def _check_geometry(name: str, gtype: str, g, hosts: bool = False) -> None:
         if not rings:
             raise ValidationError(f'lod {name}: empty polygon')
         for ring in rings:
+            # polygon rings decode closed: three stored vertices and the repeated first
+            if gtype == 'MultiPolygon' and len(ring) < 4:
+                raise ValidationError(f'lod {name}: polygon ring with fewer than three vertices')
             if len(ring) < 2:
-                raise ValidationError(f'lod {name}: ring with fewer than two vertices')
+                raise ValidationError(f'lod {name}: line with fewer than two vertices')
             if any(len(v) != 2 for v in ring):
                 raise ValidationError(f'lod {name}: a vertex is not an [x, y] pair')
-            if gtype == 'MultiPolygon' and ring[0] != ring[-1]:
-                raise ValidationError(f'lod {name}: unclosed ring')
 
 
 def inspect(path: str | Path) -> dict:

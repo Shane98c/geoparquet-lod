@@ -218,20 +218,21 @@ function geometryInto(c: Cursor, type: GeometryType, builder?: GeometryBuilder):
     for (let i = 0; i < parts; i++) {
       builder?.startPolygon()
       const rings = c.varint()
-      for (let j = 0; j < rings; j++) ringInto(c, builder)
+      for (let j = 0; j < rings; j++) ringInto(c, builder, true)
     }
   }
   return parts > 0
 }
 
-function ringInto(c: Cursor, builder?: GeometryBuilder) {
+/** A polygon ring is stored without its closing vertex; `closed` repeats the first. */
+function ringInto(c: Cursor, builder?: GeometryBuilder, closed = false) {
   const n = c.varint()
   if (!builder) {
     for (let i = 0; i < n * 2; i++) c.varint()
     return
   }
   builder.startRing()
-  const start = builder.reserveCoordinates(n)
+  const start = builder.reserveCoordinates(closed && n ? n + 1 : n)
   let x = 0,
     y = 0
   for (let i = start; i < start + n; i++) {
@@ -239,6 +240,10 @@ function ringInto(c: Cursor, builder?: GeometryBuilder) {
     y += unzigzag(c.varint())
     builder.x[i] = x
     builder.y[i] = y
+  }
+  if (closed && n) {
+    builder.x[start + n] = builder.x[start]
+    builder.y[start + n] = builder.y[start]
   }
 }
 

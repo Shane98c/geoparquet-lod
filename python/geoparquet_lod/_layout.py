@@ -20,6 +20,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from ._compact import dumps, get, loads, set_value
+from .encoding import PACK_VERSION
 
 BOOTSTRAP_BYTES = 16384
 # reserve room for file_bytes, footer_bytes, row_metadata and the header
@@ -230,8 +231,8 @@ def finalize_layout(
     parquet = pq.ParquetFile(src)
     geo = json.loads(parquet.schema_arrow.metadata[b'geo'])
     lod = geo['lod_columns']
-    if lod.get('encoding') != 'packed' or lod.get('pack_version') != 1:
-        raise ValueError('layout finalization requires packed LOD version 1')
+    if lod.get('encoding') != 'packed' or lod.get('pack_version') != PACK_VERSION:
+        raise ValueError(f'layout finalization requires packed LOD version {PACK_VERSION}')
     key_column = lod['key']['column']
     if not 0 <= lod['key']['depth'] <= 26:
         raise ValueError('Hilbert depth must fit exact JavaScript integers (0..26)')

@@ -9,7 +9,8 @@ varints knowing the structure and then takes string payloads in turn.
     row     := varints(own) varints(attrs) varints(spill) strings...
     own     := polygons: n, per polygon: rings, per ring: vertices, then
                zigzag(dx) zigzag(dy) per vertex, deltas within the ring and
-               the first vertex from the origin
+               the first vertex from the origin; a ring's closing vertex,
+               which repeats its first, is not stored
                lines: n parts, per part: vertices, deltas
                point: zigzag(x) zigzag(y)
     attrs   := presence bitmap (one varint, bit i for attribute i), then each
@@ -75,6 +76,8 @@ def _segment_values(parts, depth: int):
     number of values per row. `parts` are (geom offsets, poly offsets, ring
     offsets, x, y) as quantize.render_* returns them."""
     geom_offsets, poly_offsets, ring_offsets, x, y = (np.asarray(p) for p in parts)
+    if depth == 3:
+        ring_offsets, x, y = _open_rings(ring_offsets, x, y)
     n_rings = len(ring_offsets) - 1
     verts_per_ring = np.diff(ring_offsets)
     ring_len = 1 + 2 * verts_per_ring
@@ -112,6 +115,19 @@ def _segment_values(parts, depth: int):
     out[vpos] = zigzag(dx)
     out[vpos + 1] = zigzag(dy)
     return out, row_len
+
+
+def _open_rings(ring_offsets, x, y):
+    """Closed polygon rings, as shapely gives them, without their closing vertex."""
+    count = np.diff(ring_offsets)
+    first, last = ring_offsets[:-1], ring_offsets[1:] - 1
+    if count.min(initial=4) < 4 or ((x[last] != x[first]) | (y[last] != y[first])).any():
+        raise ValueError(
+            'a polygon ring must be closed and have three vertices besides the closing one'
+        )
+    keep = np.ones(len(x), bool)
+    keep[last] = False
+    return ring_offsets - np.arange(len(ring_offsets)), x[keep], y[keep]
 
 
 def _group_sum(values: np.ndarray, offsets: np.ndarray) -> np.ndarray:
@@ -324,19 +340,22 @@ class Unpacker:
         out = []
         if self.family == 'MultiPolygon':
             for _ in range(self.varint()):
-                out.append([self.ring() for _ in range(self.varint())])
+                out.append([self.ring(closed=True) for _ in range(self.varint())])
         else:
             for _ in range(self.varint()):
                 out.append(self.ring())
         return out
 
-    def ring(self):
+    def ring(self, closed=False):
+        """A ring's vertices; a polygon ring is stored open and closed again here."""
         n = self.varint()
         ring, x, y = [], 0, 0
         for _ in range(n):
             x += unzigzag(self.varint())
             y += unzigzag(self.varint())
             ring.append((x, y))
+        if closed and ring:
+            ring.append(ring[0])
         return ring
 
     def attrs(self):

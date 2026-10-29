@@ -11,6 +11,7 @@ import { GeometryBuilder } from './geometry.js'
 import { tileInterval } from './key.js'
 import {
   LodReader,
+  PACK_VERSION,
   isCompatibleVersion,
   type Bbox,
   type Lod,
@@ -102,7 +103,7 @@ export async function openReader(file: RangeSource): Promise<TileReader> {
   if (
     !isCompatibleVersion(root.lod.version) ||
     root.lod.encoding !== 'packed' ||
-    root.lod.pack_version !== 1 ||
+    root.lod.pack_version !== PACK_VERSION ||
     !root.lod.key
   )
     throw new Error('unsupported spatial LOD encoding')

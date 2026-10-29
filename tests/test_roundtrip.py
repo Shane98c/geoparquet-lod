@@ -100,7 +100,7 @@ def test_polygons_roundtrip(buildings, tmp_path):
     summary = validate(out)
     assert summary['rows'] == 3000
     meta = json.loads(pq.read_schema(out).metadata[b'geo'])['lod_columns']
-    assert meta['encoding'] == 'packed' and meta['pack_version'] == 1
+    assert meta['encoding'] == 'packed' and meta['pack_version'] == 2
     finest = max(meta['zooms'])
     shape = next(n for n, lod in meta['lods'].items() if finest in lod['zooms'])
     assert meta['lods'][shape]['geometry_type'] == 'MultiPolygon'
@@ -132,6 +132,25 @@ def test_polygons_roundtrip(buildings, tmp_path):
     assert all(len(g[0][0]) == 5 for g in coarse), 'collapsed buildings are squares'
     assert counts == sorted(counts)
     assert counts[-1] <= 3000 * 0.8 + 50, 'rows with risk <= 0.2 never appear at point zooms'
+
+
+def test_polygon_rings_are_stored_open():
+    """A ring's closing vertex is not stored; decoding repeats the first vertex."""
+    from geoparquet_lod.pack import pack
+
+    square = [(0, 0), (2, 0), (2, 2), (0, 2), (0, 0)]
+    x, y = (np.array(c, np.int32) for c in zip(*square, strict=True))
+    parts = (np.array([0, 1]), np.array([0, 1]), np.array([0, 5]), x, y)
+    blob = pack('MultiPolygon', parts, [], {}).to_pylist()[0]
+    # one polygon of one ring of four vertices: the first from the origin, then three steps
+    assert blob == bytes([1, 1, 4, 0, 0, 4, 0, 0, 4, 3, 0, 0, 0])
+    assert Unpacker(blob, 'MultiPolygon', []).row()['geometry'] == [[square]]
+    lines = pack('MultiLineString', parts, [], {}).to_pylist()[0]
+    assert Unpacker(lines, 'MultiLineString', []).row()['geometry'] == [square]
+    for ring in ([(0, 0), (2, 0), (2, 2), (0, 2)], [(0, 0), (2, 0), (0, 0)]):
+        x, y = (np.array(c, np.int32) for c in zip(*ring, strict=True))
+        with pytest.raises(ValueError, match='closed'):
+            pack('MultiPolygon', (*parts[:2], np.array([0, len(ring)]), x, y), [], {})
 
 
 def test_points_importance_and_cluster(points, tmp_path):

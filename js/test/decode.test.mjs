@@ -57,11 +57,12 @@ const varint = (v) => {
   out.push(v)
   return out
 }
+// a polygon ring is stored without its closing vertex, which repeats the first
 const ringBytes = (pts) => {
-  const out = varint(pts.length)
+  const out = varint(pts.length - 1)
   let x = 0
   let y = 0
-  for (const [px, py] of pts) {
+  for (const [px, py] of pts.slice(0, -1)) {
     out.push(...varint(zz(px - x)), ...varint(zz(py - y)))
     x = px
     y = py

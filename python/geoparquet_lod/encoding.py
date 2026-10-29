@@ -11,7 +11,7 @@ import numpy as np
 import pyarrow as pa
 
 ENCODING = 'packed'
-PACK_VERSION = 1
+PACK_VERSION = 2
 GEOMETRY_TYPES = {'point': 'Point', 'line': 'MultiLineString', 'polygon': 'MultiPolygon'}
 
 

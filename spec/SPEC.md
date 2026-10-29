@@ -118,7 +118,7 @@ Under the `geo` key, a `lod_columns` object:
 | `zooms`        | int[]    | every zoom the file serves, ascending                                                                                                                                                                                       |
 | `tile_size`    | int      | pixels per tile the zooms assume (512)                                                                                                                                                                                      |
 | `encoding`     | string   | `packed`, see Geometry                                                                                                                                                                                                      |
-| `pack_version` | int      | `1`, the packed row format version                                                                                                                                                                                          |
+| `pack_version` | int      | `2`, the packed row format version; readers reject any other value                                                                                                                                                          |
 | `attributes`   | object[] | `{name, type, values?}` of carried attributes; `type` is the Arrow type name used to decode packed values; optional `values` is a string dictionary                                                                         |
 | `thinning`     | object   | description of the rule used; informational                                                                                                                                                                                 |
 | `lods`         | object   | LOD name to `{zooms, geometry_type, scale, offset, placeholder}`; `scale` and `offset` are `[x, y]` pairs in EPSG:3857 metres, `placeholder` the width in grid cells of the square drawn for a shape too small for the grid |
@@ -149,7 +149,7 @@ the `geo` key beside the usual GeoParquet fields (only two LOD entries shown):
   "zooms": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
   "tile_size": 512,
   "encoding": "packed",
-  "pack_version": 1,
+  "pack_version": 2,
   "attributes": [{ "name": "height", "type": "float" }, { "name": "class", "type": "string" }],
   "thinning": { "name": "combine(size_threshold(4), drop_rate(2.5))" },
   "lods": {
@@ -188,7 +188,7 @@ row    := geometry attrs spill strings...
 geometry :=
   MultiPolygon:    n, per polygon: rings, per ring: vertices, then per vertex
                    zigzag(dx) zigzag(dy), steps within the ring and the first
-                   vertex from the origin
+                   vertex from the origin; the closing vertex is not stored
   MultiLineString: n parts, per part: vertices, steps as above
   Point:           zigzag(x) zigzag(y)
 attrs  := presence bitmap (one varint, bit i for attribute i in metadata
@@ -204,11 +204,14 @@ spill  := count, per copy: tile (zoom << 48 | x * 2^zoom + y), file row
 `offset + scale * integer` in EPSG:3857 metres, with `scale` and `offset` per
 LOD: the transform of COGP's `quantized_geoarrow`, applied in Web Mercator
 rather than the primary geometry's CRS, in one private byte format a COGP
-reader cannot decode. Grid coordinates MUST fit in a signed 32-bit integer. Every ring is closed, every part has
-at least two vertices, and a row shown only to host copies has zero
-polygons; empty geometry is otherwise never written. Ring steps make a
-building a handful of one-byte varints: a placeholder square packs to 15 to
-20 bytes before compression, a footprint to about two bytes per vertex.
+reader cannot decode. Grid coordinates MUST fit in a signed 32-bit integer.
+A polygon ring is stored without its closing vertex and has at least three
+stored vertices; a reader closes it by repeating its first vertex, so decoded
+rings are closed as WKB and GeoArrow expect. Every line part has at least two
+vertices, and a row shown only to host copies has zero polygons; empty
+geometry is otherwise never written. Ring steps make a building a handful of
+one-byte varints: a placeholder square packs to 13 to 18 bytes before
+compression, a footprint to about two bytes per vertex.
 The reference writer projects the primary geometry to Web Mercator, with
 latitude clamped to the Mercator limit, and uses a quarter of the LOD's
 finest zoom pixel as `scale` and the dataset's minimum corner as the origin.

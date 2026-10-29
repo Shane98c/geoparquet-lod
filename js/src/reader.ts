@@ -30,7 +30,7 @@ export type Bbox = [number, number, number, number]
 export const LOD_KEY = 'lod_columns'
 export const LOD_VERSION = '0.1.0'
 export const ENCODING = 'packed'
-export const PACK_VERSION = 1
+export const PACK_VERSION = 2
 
 /** Same major version, and the same minor while the major is 0. */
 export function isCompatibleVersion(version: string): boolean {
