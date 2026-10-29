@@ -32,7 +32,7 @@
   },
   "dependencies": {
     "@cogp/reader": "^2.1.4",
-    "hyparquet": "^1.27.1",
+    "hyparquet": "1.31.3",
     "hyparquet-compressors": "^1.1.1",
     "lineclip": "^2.0.0",
     "zstddec": "^0.3.4"
