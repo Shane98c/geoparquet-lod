@@ -14,7 +14,7 @@ import shapely
 from .encoding import ENCODING, INT32, PACK_VERSION, is_carried_type
 from .pack import FAMILY_DEPTH
 from .unpack import Unpacked, UnpackError, carried, lod_values, unpack_batches
-from .writer import LOD_KEY, LOD_VERSION
+from .writer import COVERING_SINCE, LOD_KEY, LOD_VERSION, geoparquet_version
 
 BOUNDS = ('xmin', 'ymin', 'xmax', 'ymax')
 # rows of covering and primary geometry parsed at a time
@@ -70,6 +70,10 @@ def validate(path: str | Path, sample_rows: int = 2000, *, full: bool = False) -
     covering = geo.get('columns', {}).get(geometry, {}).get('covering')
     if not covering:
         raise ValidationError(f'geo.columns.{geometry}.covering missing')
+    if geoparquet_version(geo.get('version')) < COVERING_SINCE:
+        raise ValidationError(
+            f'geo version {geo.get("version")!r} predates the bbox covering, which needs 1.1.0'
+        )
     _check_covering(f.schema_arrow.field('bbox'), covering, geometry)
     key = lod.get('key')
     key_column = key.get('column') if isinstance(key, dict) else None

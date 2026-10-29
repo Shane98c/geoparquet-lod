@@ -78,8 +78,9 @@ A conforming file MUST satisfy:
    geometry bytes, so it does not depend on sort order.
 2. **Covering.** A nullable `bbox` struct column of four required float32
    values, `xmin`, `ymin`, `xmax` and `ymax`, declared as the primary
-   geometry's GeoParquet 1.1 bbox covering at the paths `["bbox", "xmin"]`
-   and so on, with column statistics on
+   geometry's GeoParquet bbox covering at the paths `["bbox", "xmin"]`
+   and so on, in `geo` metadata of version 1.1.0 or later, with column
+   statistics on
    every row group, and a column index (page statistics) and offset index on
    each of its four leaves. A geometry's bounds are the least and greatest x
    and y of its coordinates with NaN values left out, and are finite when
@@ -104,7 +105,7 @@ A conforming file MUST satisfy:
    primary geometry has no finite bounds is shown at no LOD.
 
 The validator checks the version, encoding and per-LOD metadata, the schema
-shapes and covering declaration, covering statistics, page indexes, and a
+shapes, the covering declaration and its GeoParquet version, covering statistics, page indexes, and a
 sample from the first row group: every LOD's values there decode, and each
 row's covering is its primary geometry's bounds rounded outward, null on
 exactly the rows whose geometry has no finite bounds. In full mode it decodes

@@ -12,6 +12,7 @@ import contextlib
 import inspect
 import json
 import os
+import re
 import tempfile
 import time
 from collections.abc import Iterable, Mapping
@@ -62,6 +63,8 @@ KEY_FIELD = pa.field(KEY_COLUMN, pa.int64(), nullable=True)
 # columns the writer computes carry a prefix no source column uses; thinnings see them unprefixed
 THINNING_COLUMNS = ('id', 'cx', 'cy', 'diag', 'area', 'nv', 'u')
 LOD_VERSION = '0.1.0'
+# the first GeoParquet version with a bbox covering
+COVERING_SINCE = (1, 1)
 BBOX_FIELD = pa.field(
     'bbox',
     pa.struct(
@@ -92,6 +95,11 @@ STAGED_LOD_LEVEL = 1
 # The unsorted copy is only read in ways that ignore its order, so its row groups can be
 # small, which bounds what DuckDB buffers per thread while writing it.
 UNSORTED_ROW_GROUP_ROWS = 122_880
+
+
+def geoparquet_version(version: object) -> tuple[int, ...]:
+    """Major and minor of a GeoParquet version string, empty when it has neither."""
+    return tuple(int(part) for part in re.findall(r'\d+', str(version or ''))[:2])
 
 
 def _sort_by_key(
@@ -1023,7 +1031,8 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
     )
     rest = [f for f in source_schema if f.name not in ('bbox', geometry)]
     schema = pa.schema([BBOX_FIELD, KEY_FIELD, lod_field, *rest, source_schema.field(geometry)])
-    geo.setdefault('version', '1.1.0')
+    if geoparquet_version(geo.get('version')) < COVERING_SINCE:
+        geo['version'] = '1.1.0'
     geo.setdefault('primary_column', geometry)
     geo.setdefault('columns', {}).setdefault(geometry, {'encoding': 'WKB', 'geometry_types': []})
     geo['columns'][geometry]['covering'] = {

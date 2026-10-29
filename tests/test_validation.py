@@ -792,6 +792,7 @@ def _null_at(column, row):
             'geo.columns.geometry.covering.bbox.xmax must be ["bbox", "xmax"], not ["bbox", "maxx"]',
         ),
         ('declared', 'geo.columns.geometry.covering.bbox must declare xmin, ymin, xmax and ymax'),
+        ('version', "geo version '1.0.0' predates the bbox covering, which needs 1.1.0"),
         ('geometry', 'primary geometry column geometry missing'),
         ('wkt', 'primary geometry column geometry must be WKB binary, not string'),
         ('key', 'key column hilbert missing'),
@@ -806,6 +807,9 @@ def test_covering_geometry_and_key_columns_are_checked(indexed, tmp_path, mutati
         bbox = table['bbox'].combine_chunks()
         fields = [pa.field(bound, pa.float32(), nullable=False) for bound in BOUNDS]
         declared = geo['columns']['geometry']['covering']['bbox']
+        if mutation == 'version':
+            geo['version'] = '1.0.0'
+            return table
         if mutation == 'struct':
             return _replace(table, 'bbox', bbox.field('xmin'))
         if mutation == 'required':

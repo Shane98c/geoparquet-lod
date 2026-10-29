@@ -12,6 +12,7 @@ import shapely
 from click.testing import CliRunner
 from geoparquet_lod import _layout, write, writer
 from geoparquet_lod.cli import cli
+from geoparquet_lod.validate import validate
 
 
 def test_cli_build(tmp_path):
@@ -50,6 +51,27 @@ def test_cli_build(tmp_path):
     assert pq.read_table(output, columns=['id', 'geometry']).sort_by('id').equals(table)
     assert set(tmp_path.iterdir()) == {source, output}
     assert set(cli.commands) == {'write', 'inspect', 'validate'}
+
+
+@pytest.mark.parametrize(
+    'declared, written', [('1.0.0', '1.1.0'), ('1.1.0', '1.1.0'), ('1.2.0', '1.2.0')]
+)
+def test_covering_raises_an_older_geoparquet_version(tmp_path, declared, written):
+    """The covering needs GeoParquet 1.1, so a source declaring an older
+    version comes out as 1.1.0 and a newer one keeps its version."""
+    source, output = tmp_path / 'source.parquet', tmp_path / 'output.parquet'
+    geo = {
+        'version': declared,
+        'primary_column': 'geometry',
+        'columns': {'geometry': {'encoding': 'WKB', 'geometry_types': ['Point']}},
+    }
+    table = pa.table(
+        {'id': [1, 2], 'geometry': shapely.to_wkb(shapely.points([-105, -104.99], [39.7, 39.71]))}
+    ).replace_schema_metadata({b'geo': json.dumps(geo).encode()})
+    pq.write_table(table, source)
+    write(str(source), str(output), zooms=[10, 11, 12], complete_from=12, workers=1)
+    assert json.loads(pq.read_schema(output).metadata[b'geo'])['version'] == written
+    validate(output)
 
 
 @pytest.mark.parametrize('phase', ['overview', 'layout'])
