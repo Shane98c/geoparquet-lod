@@ -265,8 +265,9 @@ indexes, and up to 2,000 rows of the first row group. Use `--sample-rows N` to
 change that quick sample. Use `geoparquet-lod validate file.parquet --full`
 (Python: `validate(path, full=True)`) to decode every overview value in every
 row group, including boundary copies. Full mode checks that polygon rings store
-at least three vertices (the closing one is implicit), packed byte consumption,
-copy source ids and tile tags, finite transforms,
+at least three vertices (the closing one is implicit), that grid coordinates fit
+int32 and carried values their declared types, packed byte consumption, copy
+source ids and tile tags, finite transforms,
 standard page ranges, and the complete spatial directory against the footer and
 source keys: metadata, codecs, page membership, row spans, key bounds, fences,
 and branch bounds. Files without a spatial directory get the packed-value and

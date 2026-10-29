@@ -313,7 +313,7 @@ def _merge_strings(own, own_len, copies, copy_len, row_entry_start):
 
 
 class Unpacker:
-    """Decoder of one packed row, for validation and tests."""
+    """Decoder of one packed row, for tests; `unpack.unpack` decodes a whole column."""
 
     def __init__(self, blob: bytes, family: str, fields: list[pa.Field], dictionaries=None):
         self.b = blob

@@ -6,11 +6,13 @@ import json
 import math
 from pathlib import Path
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from .encoding import ENCODING, PACK_VERSION
-from .pack import FAMILY_DEPTH, Unpacker
+from .encoding import ENCODING, INT32, PACK_VERSION
+from .pack import FAMILY_DEPTH
+from .unpack import Unpacked, UnpackError, carried, unpack
 from .writer import LOD_KEY, LOD_VERSION
 
 
@@ -97,8 +99,7 @@ def validate(path: str | Path, sample_rows: int = 2000, *, full: bool = False) -
             if not c.has_offset_index:
                 raise ValidationError(f'row group {g}: {c.path_in_schema} has no offset index')
     # every LOD's packed rows: non-empty parts, rings of three or more vertices, valid copies
-    fields = [pa.field(a['name'], pa.type_for_alias(a['type'])) for a in lod.get('attributes', [])]
-    dictionaries = {a['name']: a['values'] for a in lod.get('attributes', []) if 'values' in a}
+    fields, dictionaries = carried(lod)
     checked = dict.fromkeys(lods, 0)
     groups = range(md.num_row_groups) if full else range(1)
     for group in groups:
@@ -107,28 +108,19 @@ def validate(path: str | Path, sample_rows: int = 2000, *, full: bool = False) -
             head = head.slice(0, sample_rows)
         for name, child in lods.items():
             values = head.column(column).combine_chunks().field(name)
-            shown = values.filter(values.is_valid())
-            for index, blob in enumerate(values.to_pylist()):
-                if blob is None:
-                    continue
-                try:
-                    u = Unpacker(blob, child['geometry_type'], fields, dictionaries)
-                    row = u.row()
-                except Exception as exc:
-                    raise ValidationError(
-                        f'row group {group}, row {index}, lod {name}: invalid packed row: {exc}'
-                    ) from exc
-                if u.pos != len(blob):
-                    raise ValidationError(f'lod {name}: a packed row has trailing bytes')
-                _check_geometry(name, child['geometry_type'], row['geometry'], bool(row['spill']))
-                for copy in row['spill']:
-                    zoom, cell = divmod(copy['tile'], 1 << 48)
-                    if zoom not in child['zooms'] or not 0 <= cell < 4**zoom:
-                        raise ValidationError(f'lod {name}: invalid spill tile tag')
-                    if not 0 <= copy['id'] < md.num_rows:
-                        raise ValidationError(f'lod {name}: spill row id out of range')
-                    _check_geometry(name, child['geometry_type'], copy['geometry'])
-            checked[name] += len(shown)
+            try:
+                decoded = unpack(values, child['geometry_type'], fields, dictionaries)
+            except UnpackError as exc:
+                raise ValidationError(
+                    f'row group {group}, row {exc.row}, lod {name}: invalid packed row: {exc}'
+                ) from exc
+            problem = _check_records(decoded, child, md.num_rows)
+            if problem:
+                record, message = problem
+                raise ValidationError(
+                    f'row group {group}, row {decoded.row[record]}, lod {name}: {message}'
+                )
+            checked[name] += len(values) - values.null_count
     if full:
         _check_spatial_index(path, f, lod)
     return {
@@ -150,28 +142,63 @@ def _check_spatial_index(path, parquet, lod):
         raise ValidationError(f'spatial index: {exc}') from exc
 
 
-def _check_geometry(name: str, gtype: str, g, hosts: bool = False) -> None:
-    if gtype == 'Point':
-        if len(g) != 2:
-            raise ValidationError(f'lod {name}: a point is not an [x, y] pair')
-        return
-    if not g:
-        # a row shown only to host straddler copies has no geometry of its own
-        if hosts:
-            return
-        raise ValidationError(f'lod {name}: empty geometry on a shown row')
-    for part in g:
-        rings = part if gtype == 'MultiPolygon' else [part]
-        if not rings:
-            raise ValidationError(f'lod {name}: empty polygon')
-        for ring in rings:
-            # polygon rings decode closed: three stored vertices and the repeated first
-            if gtype == 'MultiPolygon' and len(ring) < 4:
-                raise ValidationError(f'lod {name}: polygon ring with fewer than three vertices')
-            if len(ring) < 2:
-                raise ValidationError(f'lod {name}: line with fewer than two vertices')
-            if any(len(v) != 2 for v in ring):
-                raise ValidationError(f'lod {name}: a vertex is not an [x, y] pair')
+def _check_records(u: Unpacked, child: dict, num_rows: int):
+    """The first record breaking the geometry or copy rules, and how, or None."""
+    found = []
+    if child['geometry_type'] == 'Point':
+        x, y = u.geometry
+    else:
+        found += _check_geometry(u, child['geometry_type'])
+        x, y = u.geometry[3:]
+    outside = np.flatnonzero((np.minimum(x, y) < INT32.min) | (np.maximum(x, y) > INT32.max))
+    if len(outside):
+        found.append((_record_of_vertex(u, outside[0]), 'a grid coordinate outside int32'))
+    zoom = (u.tile >> np.uint64(48)).astype(np.int64)
+    cell = u.tile & np.uint64((1 << 48) - 1)
+    cells = np.uint64(1) << (2 * np.minimum(zoom, 24)).astype(np.uint64)
+    tag = u.copy & (~np.isin(zoom, child['zooms']) | (cell >= cells))
+    found += [(i, 'invalid spill tile tag') for i in np.flatnonzero(tag)[:1]]
+    rows = u.copy & (u.id >= num_rows)
+    found += [(i, 'spill row id out of range') for i in np.flatnonzero(rows)[:1]]
+    return min(found, default=None)
+
+
+def _check_geometry(u: Unpacked, gtype: str) -> list:
+    """Empty geometry on a record that needs some, empty polygons, and rings
+    and parts too short. A polygon ring's closing vertex is implicit, so it
+    stores three vertices or more and decodes with one more."""
+    geom, poly, ring = u.geometry[:3]
+    found = []
+    # a row shown only to host straddler copies has no geometry of its own
+    hosts = np.append(u.copy[1:], False) & ~u.copy
+    empty = np.flatnonzero((np.diff(geom) == 0) & ~hosts)
+    if len(empty):
+        what = 'a copy with empty geometry' if u.copy[empty[0]] else 'empty geometry on a shown row'
+        found.append((empty[0], what))
+    vertices = np.diff(ring)
+    if gtype == 'MultiPolygon':
+        polygons = np.flatnonzero(np.diff(poly) == 0)
+        if len(polygons):
+            found.append((_parent(geom, polygons[0]), 'empty polygon'))
+        short = np.flatnonzero(vertices < 4)
+        what = 'polygon ring with fewer than three vertices'
+    else:
+        short = np.flatnonzero(vertices < 2)
+        what = 'line with fewer than two vertices'
+    if len(short):
+        found.append((_parent(geom, _parent(poly, short[0])), what))
+    return found
+
+
+def _parent(offsets: np.ndarray, child: int) -> int:
+    return int(np.searchsorted(offsets, child, side='right') - 1)
+
+
+def _record_of_vertex(u: Unpacked, vertex: int) -> int:
+    if len(u.geometry) == 2:
+        return int(vertex)
+    geom, poly, ring = u.geometry[:3]
+    return _parent(geom, _parent(poly, _parent(ring, vertex)))
 
 
 def inspect(path: str | Path) -> dict:

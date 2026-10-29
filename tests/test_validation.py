@@ -265,6 +265,48 @@ def test_corrupt_packed_row_beyond_sample(indexed, tmp_path):
     assert name in validate(indexed, full=True)['lods']
 
 
+def varints(*values):
+    out = bytearray()
+    for value in values:
+        while value >= 128:
+            out.append((value & 127) | 128)
+            value >>= 7
+        out.append(value)
+    return bytes(out)
+
+
+@pytest.mark.parametrize(
+    'value, message',
+    [
+        # one polygon of one ring storing two vertices, no attributes, no copies
+        (varints(1, 1, 2, 0, 0, 2, 0, 0, 0), 'polygon ring with fewer than three vertices'),
+        (varints(0, 0, 0), 'empty geometry on a shown row'),
+        (varints(1, 1, 3, 2**33, 0, 2, 0, 0, 2, 0, 0), 'a grid coordinate outside int32'),
+    ],
+)
+def test_invalid_geometry_names_its_row(indexed, tmp_path, value, message):
+    table = pq.read_table(indexed)
+    lod = table['lod'].combine_chunks()
+    children = [lod.field(i).to_pylist() for i in range(lod.type.num_fields)]
+    target = next(i for i in range(len(table) - 1, 64, -1) if children[0][i] is not None)
+    children[0][target] = value
+    replacement = pa.StructArray.from_arrays(
+        [pa.array(values, type=pa.binary()) for values in children], fields=list(lod.type)
+    )
+    table = table.set_column(
+        table.schema.get_field_index('lod'), table.schema.field('lod'), replacement
+    )
+    metadata = dict(table.schema.metadata)
+    metadata.pop(b'lod_spatial_index', None)
+    bad = tmp_path / 'geometry.parquet'
+    table = table.replace_schema_metadata(metadata)
+    pq.write_table(table, bad, row_group_size=64, write_page_index=True)
+    validate(bad, sample_rows=3)
+    where = f'row group {target // 64}, row {target % 64}, lod {lod.type[0].name}: {message}'
+    with pytest.raises(ValidationError, match=where):
+        validate(bad, full=True)
+
+
 @pytest.mark.parametrize('mutation', ['tile', 'id'])
 def test_invalid_spill_identifiers(indexed, tmp_path, mutation):
     from geoparquet_lod.pack import Unpacker
