@@ -19,7 +19,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
-from geoparquet_lod.pack import Unpacker
+from geoparquet_lod.unpack import unpack_batches
 
 GEOMETRY = pa.list_(pa.list_(pa.list_(pa.struct([('x', pa.int32()), ('y', pa.int32())]))))
 
@@ -28,54 +28,31 @@ def decode_chunk(args):
     path, group, name, family, fields, dictionaries, first_row = args
     f = pq.ParquetFile(path)
     table = f.read_row_group(group, columns=['hilbert', f'lod.{name}'])
-    keys = table.column('hilbert').to_numpy(zero_copy_only=False)
-    blobs = table.column('lod').combine_chunks().field(name)
+    keys = table.column('hilbert').combine_chunks()
     arrow_fields = [pa.field(a['name'], pa.type_for_alias(a['type'])) for a in fields]
-    out = {k: [] for k in ('key', 'row', 'tile', *[a['name'] for a in fields])}
-    polys, rings, verts, xs, ys = [0], [0], [0], [], []
-
-    def add(key, row, tile, geometry, attrs):
-        out['key'].append(int(key))
-        out['row'].append(int(row))
-        out['tile'].append(tile)
-        for a in fields:
-            out[a['name']].append(attrs.get(a['name']))
-        for polygon in geometry:
-            for ring in polygon:
-                for x, y in ring:
-                    xs.append(x)
-                    ys.append(y)
-                verts.append(len(xs))
-            rings.append(len(verts) - 1)
-        polys.append(len(rings) - 1)
-
-    for i, blob in enumerate(blobs.to_pylist()):
-        if blob is None:
+    tables = []
+    for u in unpack_batches(table.column('lod').flatten()[0], family, arrow_fields, dictionaries):
+        geom, poly, ring, x, y = u.geometry
+        # a row shown only to host copies has no geometry of its own
+        keep = np.flatnonzero(u.copy | (np.diff(geom) > 0))
+        if not len(keep):
             continue
-        rec = Unpacker(blob, family, arrow_fields, dictionaries).row()
-        if rec['geometry']:
-            add(keys[i], first_row + i, None, rec['geometry'], rec['attrs'])
-        for copy in rec['spill']:
-            add(keys[i], copy['id'], copy['tile'], copy['geometry'], copy['attrs'])
-    n = len(out['key'])
-    if not n:
-        return name, None
-    struct = pa.StructArray.from_arrays(
-        [pa.array(xs, pa.int32()), pa.array(ys, pa.int32())], ['x', 'y']
-    )
-    inner = pa.ListArray.from_arrays(pa.array(verts, pa.int32()), struct)
-    middle = pa.ListArray.from_arrays(pa.array(rings, pa.int32()), inner)
-    geometry = pa.ListArray.from_arrays(pa.array(polys, pa.int32()), middle)
-    columns = {
-        'level': pa.array([name] * n, pa.string()),
-        'row': pa.array(out['row'], pa.int64()),
-        'tile': pa.array(out['tile'], pa.int64()),
-        'geometry': geometry,
-    }
-    for a in fields:
-        columns[a['name']] = pa.array(out[a['name']], pa.type_for_alias(a['type']))
-    columns['key'] = pa.array(out['key'], pa.int64())
-    return name, pa.table(columns)
+        vertices = pa.StructArray.from_arrays(
+            [pa.array(x, pa.int32()), pa.array(y, pa.int32())], ['x', 'y']
+        )
+        rings = pa.ListArray.from_arrays(pa.array(ring, pa.int32()), vertices)
+        polygons = pa.ListArray.from_arrays(pa.array(poly, pa.int32()), rings)
+        geometry = pa.ListArray.from_arrays(pa.array(geom, pa.int32()), polygons)
+        columns = {
+            'level': pa.array([name] * len(keep), pa.string()),
+            'row': pa.array(np.where(u.copy, u.id, first_row + u.row)[keep]),
+            'tile': pa.array(u.tile[keep].astype(np.int64), mask=~u.copy[keep]),
+            'geometry': geometry.take(keep),
+            **{a.name: u.attrs[a.name].take(keep) for a in arrow_fields},
+            'key': keys.take(u.row[keep]),
+        }
+        tables.append(pa.table(columns))
+    return name, pa.concat_tables(tables) if tables else None
 
 
 def main():
