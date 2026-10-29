@@ -3,6 +3,7 @@ import type { ProjectionExecutor, ProjectionTask } from './projection.js'
 import { parquetMetadata, parquetSchema } from 'hyparquet'
 import { readColumn } from 'hyparquet/src/column.js'
 import { DEFAULT_PARSERS } from 'hyparquet/src/convert.js'
+import { deserializeTCompactProtocol } from 'hyparquet/src/thrift.js'
 import { compressors } from './compressors.js'
 import { attributeKind, decodeSelectedRow, type AttributeField } from './decode.js'
 import { visitPlainPage } from './pages.js'
@@ -43,8 +44,10 @@ interface SourcePage {
   first: number
   count: number
 }
+/** Rows `first` to `first + count - 1`. */
+type RowSpan = { first: number; count: number }
 /** A run of a geometry page's rows and the box of their cells. */
-type Run = { box: Box; first: number; count: number }
+type Run = RowSpan & { box: Box }
 /** A geometry page cut into runs, whose rows together are the page's. */
 type PrimaryPage = SourcePage & { runs: Run[] }
 /** A primary directory leaf: geometry pages, and per indexed attribute that
@@ -221,33 +224,69 @@ const RAW_GEOMETRY_PARSERS = {
   geographyFromBytes: (bytes: Uint8Array) => bytes,
 }
 
-/** Values at the ascending global `rows` of consecutive `pages` of one
- * column, each page decoded whole; a page must hold exactly the rows the
- * directory says, and every requested row lie in a page. */
-function decodePages(
+/** A page's values, decoded whole once its header shows a data page, not
+ * dictionary encoded, of exactly its bytes holding the rows the directory
+ * gives it. */
+function pageValues(
+  decoder: ColumnDecoder,
+  page: SourcePage & { bytes: ArrayBuffer },
+): ArrayLike<unknown> {
+  const reader = { view: new DataView(page.bytes), offset: 0 }
+  const header = deserializeTCompactProtocol(reader)
+  const v1 = header.field_1 === 0 && (header.field_5 as Record<string, number> | undefined)
+  const v2 = header.field_1 === 3 && (header.field_8 as Record<string, number> | undefined)
+  const [rows, encoding] = v1 ? [v1.field_1, v1.field_2] : v2 ? [v2.field_3, v2.field_4] : []
+  if (
+    rows !== page.count ||
+    encoding === 2 ||
+    encoding === 8 ||
+    reader.offset + Number(header.field_3) !== page.bytes.byteLength
+  )
+    throw new Error('page header disagrees with the primary directory')
+  const { data } = readColumn(
+    { view: new DataView(page.bytes), offset: 0 },
+    { groupStart: page.first, selectStart: 0, selectEnd: page.count } as never,
+    { ...decoder, compressors, parsers: RAW_GEOMETRY_PARSERS } as never,
+  )
+  const values = data.length === 1 ? data[0] : data.flatMap((chunk) => Array.from(chunk))
+  if (values.length !== page.count) throw new Error('page rows disagree with the primary directory')
+  return values
+}
+
+/** Visit each row of the ascending, disjoint `runs` with its value from
+ * consecutive `pages` of one column; every run must lie in the pages. */
+function visitRuns(
   decoder: ColumnDecoder,
   pages: (SourcePage & { bytes: ArrayBuffer })[],
-  rows: number[],
-): unknown[] {
-  const out = new Array<unknown>(rows.length)
-  let next = 0
+  runs: RowSpan[],
+  visit: (row: number, value: unknown) => void,
+): void {
+  let r = 0,
+    row = runs[0]?.first ?? 0
   for (const page of pages) {
-    if (next === rows.length) break
-    if (rows[next] < page.first) break
-    if (rows[next] >= page.first + page.count) continue
-    const { data } = readColumn(
-      { view: new DataView(page.bytes), offset: 0 },
-      { groupStart: page.first, selectStart: 0, selectEnd: page.count } as never,
-      { ...decoder, compressors, parsers: RAW_GEOMETRY_PARSERS } as never,
-    )
-    let row = page.first
-    for (const chunk of data)
-      for (let i = 0; i < chunk.length; i++, row++)
-        if (rows[next] === row) out[next++] = chunk[i] ?? null
-    if (row !== page.first + page.count)
-      throw new Error('page rows disagree with the primary directory')
+    if (r === runs.length || row < page.first) break
+    const end = page.first + page.count
+    if (row >= end) continue
+    const values = pageValues(decoder, page)
+    while (row < end) {
+      const stop = runs[r].first + runs[r].count
+      for (; row < Math.min(end, stop); row++) visit(row, values[row - page.first] ?? null)
+      if (row < stop || ++r === runs.length) break
+      if (runs[r].first < row) throw new Error('primary directory runs overlap')
+      row = runs[r].first
+    }
   }
-  if (next !== rows.length) throw new Error('primary directory pages miss requested rows')
+  if (r !== runs.length) throw new Error('primary directory pages miss requested rows')
+}
+
+/** Ascending rows as runs of consecutive rows. */
+function spans(rows: number[]): RowSpan[] {
+  const out: RowSpan[] = []
+  for (const row of rows) {
+    const last = out.at(-1)
+    if (last && last.first + last.count === row) last.count++
+    else out.push({ first: row, count: 1 })
+  }
   return out
 }
 
@@ -598,26 +637,25 @@ export class SpatialReader implements TileReader {
       wkb: [],
       columns: Object.fromEntries(attributes.map((a) => [a, []])),
     }
-    const rows = hits.flatMap(({ live }) =>
-      live.flatMap((run) => Array.from({ length: run.count }, (_, i) => run.first + i)),
-    )
-    const wkb = decodePages(
+    visitRuns(
       this.decoders[0],
       pages.map((page, i) => ({ ...page, bytes: payloads[i] })),
-      rows,
+      hits.flatMap(({ live }) => live),
+      (row, value) => {
+        if (!(value instanceof Uint8Array)) return
+        const extent = wkbBounds(value)
+        if (!extent || !overlaps(float32Outward(extent), bbox)) return
+        out.rows.push(row)
+        out.wkb.push(value)
+      },
     )
-    for (const [i, value] of wkb.entries()) {
-      if (!(value instanceof Uint8Array)) continue
-      const extent = wkbBounds(value)
-      if (!extent || !overlaps(float32Outward(extent), bbox)) continue
-      out.rows.push(rows[i])
-      out.wkb.push(value)
-    }
+    const taken = spans(out.rows)
     for (const [i, name] of located.entries())
-      out.columns[name] = decodePages(
+      visitRuns(
         this.decoders[indexed.indexOf(name) + 1],
         sources[i].map((page, j) => ({ ...page, bytes: sourcePayloads[i][j] })),
-        out.rows,
+        taken,
+        (_, value) => out.columns[name].push(value),
       )
     const others = attributes.filter((a) => !located.includes(a))
     if (others.length) Object.assign(out.columns, await this.readColumns(out.rows, others, signal))

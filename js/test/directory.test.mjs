@@ -5,8 +5,10 @@ import { SpatialReader, hilbertIndex } from '../dist/index.js'
 // One LOD at zoom 2 with depth-2 keys, so a key is a directory cell. Page
 // bytes sit past the nodes and are fetched but not decoded here.
 const PAGES = 60000
-// Thrift metadata whose schema holds an optional binary `geometry`
+// Thrift metadata whose schema holds an optional binary `geometry`, and
+// another with an optional binary `a` after it
 const SCHEMA = 'FQIZLEgGc2NoZW1hFQIAFQwlAhgIZ2VvbWV0cnkAFgAZDAA='
+const SCHEMA_A = 'FQIZPEgGc2NoZW1hFQQAFQwlAhgIZ2VvbWV0cnkAFQwlAhgBYQAWABkMAA=='
 const EMPTY_TOP = [1, [], [], [], []]
 const reader = (bytes, top, exact = EMPTY_TOP, reads = [], root = {}) =>
   new SpatialReader(
@@ -225,8 +227,9 @@ const varint = (n) => {
   for (; n >= 128; n = Math.floor(n / 128)) out.push((n % 128) | 128)
   return [...out, n]
 }
-/** An uncompressed v1 data page of optional binary values, null for a null. */
-const binaryPage = (values) => {
+/** An uncompressed v1 data page of optional binary values, null for a null,
+ * PLAIN unless another encoding is given. */
+const binaryPage = (values, encoding = 0) => {
   // definition levels as one bit-packed run of groups of eight
   const levels = [...varint(Math.ceil(values.length / 8) * 2 + 1)]
   for (let i = 0; i < values.length; i += 8)
@@ -237,7 +240,7 @@ const binaryPage = (values) => {
   // Thrift i32 fields one id apart: type DATA_PAGE and both sizes, then a
   // nested header of the value count, PLAIN values and RLE levels
   const i32 = (n) => [0x15, ...varint(n * 2)]
-  const page = [values.length, 0, 3, 3].flatMap(i32)
+  const page = [values.length, encoding, 3, 3].flatMap(i32)
   const header = [...[0, body.length, body.length].flatMap(i32), 0x2c, ...page, 0, 0]
   return Uint8Array.from([...header, ...body])
 }
@@ -446,11 +449,10 @@ console.log('primary directory: routing, runs, cells, levels, self-references, s
     const [offset, length] = file.add(primaryLeaf(pages).with(9, sources))
     return cellBranch(1, [{ low: 0, high: 15, offset, length }])
   }
-  // Thrift metadata whose schema holds an optional binary `geometry` and int32 `a`
   const attributed = {
     attributes: ['a'],
     codecs: ['UNCOMPRESSED', 'UNCOMPRESSED'],
-    schema: 'FQIZPEgGc2NoZW1hFQQAFQwlAhgIZ2VvbWV0cnkAFQIlAhgBYQAWABkMAA==',
+    schema: SCHEMA_A,
     directory: exact([page(...inside)], [[[past], [10], [0], [1]]]),
   }
   const lodLeaf = file.add(leaf([[1, past, 10, 0, 3]]))
@@ -491,3 +493,43 @@ console.log('primary directory: routing, runs, cells, levels, self-references, s
   )
 }
 console.log('byte ranges: nodes, pages and row metadata past the file are refused unread')
+
+{
+  // Before any row is visited, a page's header must count the rows its runs,
+  // or the leaf for an attribute page, give it, and not be dictionary encoded.
+  const file = store()
+  const plain = file.raw(binaryPage([point(5, 5), point(5, 5)]))
+  const named = file.raw(binaryPage([new Uint8Array([97]), new Uint8Array([98])]))
+  const read = (count, attributeRows, geometry = plain) => {
+    const page = { offset: geometry[0], length: geometry[1], first: 0 }
+    const leaf = primaryLeaf([{ ...page, runs: [{ box: at(5, 5), count }] }])
+    const [offset, length] = file.add(
+      leaf.with(9, [[[named[0]], [named[1]], [0], [attributeRows]]]),
+    )
+    const primary_index = {
+      attributes: ['a'],
+      codecs: ['UNCOMPRESSED', 'UNCOMPRESSED'],
+      schema: SCHEMA_A,
+      directory: cellBranch(1, [{ low: 0, high: 15, offset, length }]),
+    }
+    return reader(file.bytes, EMPTY_TOP, EMPTY_TOP, [], { primary_index }).readPrimary(
+      [4, 4, 6, 6],
+      ['a'],
+    )
+  }
+  const exact = await read(2, 2)
+  assert.deepEqual(exact.rows, [0, 1])
+  assert.deepEqual(
+    exact.columns.a.map((v) => [...v]),
+    [[97], [98]],
+  )
+  for (const [count, attributeRows, why] of [
+    [500_000_000, 2, 'a run far past its page’s rows'],
+    [1, 2, 'a run short of its page’s rows'],
+    [2, 3, 'an attribute page past its header’s rows'],
+  ])
+    await assert.rejects(read(count, attributeRows), /page header disagrees/, why)
+  const dictionary = file.raw(binaryPage([point(5, 5), point(5, 5)], 8))
+  await assert.rejects(read(2, 2, dictionary), /page header disagrees/, 'a dictionary page')
+}
+console.log('page headers: rows and encoding agree with the directory before rows are read')
