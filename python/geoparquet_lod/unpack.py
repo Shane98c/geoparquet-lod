@@ -4,16 +4,22 @@
 are split into varints together, then every value's structure is walked in
 step, one nesting level at a time, so the work is a few array passes per
 level rather than Python per byte. A value that does not decode raises
-`UnpackError` with its index.
+`UnpackError` with its index. `read_overview` uses it to read one zoom of a
+file as an ordinary table.
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import pyarrow as pa
+import pyarrow.parquet as pq
+import shapely
 
+from .encoding import PACK_VERSION
 from .pack import FAMILY_DEPTH
 
 # larger than any real count; counts are clipped to it so positions stay in int64
@@ -51,6 +57,53 @@ def carried(lod: dict) -> tuple[list[pa.Field], dict[str, list]]:
     attributes = lod.get('attributes', [])
     fields = [pa.field(a['name'], pa.type_for_alias(a['type'])) for a in attributes]
     return fields, {a['name']: a['values'] for a in attributes if 'values' in a}
+
+
+def read_overview(path: str | Path, zoom: int) -> pa.Table:
+    """The rows shown at `zoom` with their overview geometry: `row`, the file
+    row index; `geometry`, WKB in EPSG:3857 metres, the CRS stated in the
+    field's GeoArrow metadata; and the carried attributes as that zoom's LOD
+    stores them. Boundary copies are left out, as each repeats a shown row."""
+    f = pq.ParquetFile(path)
+    lod = json.loads((f.schema_arrow.metadata or {}).get(b'geo', b'{}')).get('lod_columns')
+    if not lod or lod.get('pack_version') != PACK_VERSION:
+        raise ValueError(f'{path} has no packed LOD columns of version {PACK_VERSION}')
+    name = next((n for n, c in lod['lods'].items() if zoom in c['zooms']), None)
+    if name is None:
+        raise ValueError(f'zoom {zoom} is not one of the file zooms {lod["zooms"]}')
+    child = lod['lods'][name]
+    fields, dictionaries = carried(lod)
+    crs = {'crs': 'EPSG:3857', 'crs_type': 'authority_code'}
+    wkb = {'ARROW:extension:name': 'geoarrow.wkb', 'ARROW:extension:metadata': json.dumps(crs)}
+    schema = pa.schema(
+        [pa.field('row', pa.int64()), pa.field('geometry', pa.binary(), metadata=wkb), *fields]
+    )
+    tables, first = [], 0
+    for group in range(f.metadata.num_row_groups):
+        column = f.read_row_group(group, columns=[f'{lod["column"]}.{name}']).column(0)
+        u = unpack(
+            column.combine_chunks().field(name), child['geometry_type'], fields, dictionaries
+        )
+        shapes = _geometries(u, child)
+        own = np.flatnonzero(~u.copy & ~shapely.is_empty(shapes))
+        attrs = [u.attrs[a.name].take(own) for a in fields]
+        tables.append(pa.table([first + u.row[own], shapely.to_wkb(shapes[own]), *attrs], schema))
+        first += f.metadata.row_group(group).num_rows
+    return pa.concat_tables(tables) if tables else schema.empty_table()
+
+
+def _geometries(u: Unpacked, child: dict) -> np.ndarray:
+    """Shapely geometries of every record, in EPSG:3857 metres."""
+    (sx, sy), (ox, oy) = child['scale'], child['offset']
+    if child['geometry_type'] == 'Point':
+        return shapely.points(ox + sx * u.geometry[0], oy + sy * u.geometry[1])
+    geom, poly, ring, x, y = u.geometry
+    coords = np.stack([ox + sx * x, oy + sy * y], axis=1)
+    if child['geometry_type'] == 'MultiPolygon':
+        kind, offsets = shapely.GeometryType.MULTIPOLYGON, (ring, poly, geom)
+    else:
+        kind, offsets = shapely.GeometryType.MULTILINESTRING, (ring, geom)
+    return shapely.from_ragged_array(kind, coords, offsets)
 
 
 def unpack(

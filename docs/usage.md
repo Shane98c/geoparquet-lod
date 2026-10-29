@@ -277,6 +277,23 @@ mode reads the complete data, keeps one row group at a time, and uses temporary
 disk space of eight bytes per source row for key verification. The returned
 `mode` and `checked_non_null` describe the work performed.
 
+### Overviews in Python
+
+`read_overview(path, zoom)` returns what a zoom shows as an ordinary pyarrow
+table, one row per shown feature: `row`, the file row index to join source
+columns on; `geometry`, the overview shape as WKB in EPSG:3857 metres on that
+zoom's grid, its CRS stated in the field's GeoArrow (`geoarrow.wkb`) metadata;
+and the carried attributes as that zoom's LOD stores them. Boundary copies are
+left out, since each repeats a row the table already has.
+
+```python
+import shapely
+from geoparquet_lod import read_overview
+
+z10 = read_overview('buildings.lod.parquet', 10)
+shapes = shapely.from_wkb(z10['geometry'].to_numpy(zero_copy_only=False))
+```
+
 ### Whole-feature reads
 
 ```js

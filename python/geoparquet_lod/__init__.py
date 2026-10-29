@@ -14,6 +14,7 @@ from .thinning import (
     size_threshold,
     tiny_polygons,
 )
+from .unpack import read_overview
 from .validate import ValidationError, inspect, validate
 from .writer import LOD_KEY, LOD_VERSION, write
 
@@ -32,6 +33,7 @@ __all__ = [
     'importance',
     'inspect',
     'only',
+    'read_overview',
     'size_threshold',
     'tiny_polygons',
     'validate',

@@ -1,4 +1,4 @@
-"""The column decoder against the row decoder, and malformed values."""
+"""The column decoder against the row decoder, malformed values, and overview tables."""
 
 import json
 import math
@@ -8,7 +8,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 import shapely
-from geoparquet_lod import write
+from geoparquet_lod import read_overview, write
 from geoparquet_lod.pack import Unpacker
 from geoparquet_lod.unpack import UnpackError, carried, unpack
 
@@ -92,7 +92,9 @@ def assert_agrees(path):
     return copies
 
 
-def test_polygons_agree(tmp_path):
+@pytest.fixture(scope='module')
+def polygons(tmp_path_factory):
+    work = tmp_path_factory.mktemp('unpack')
     rng = np.random.default_rng(4)
     n = 1500
     x, y = -105 + rng.random(n) * 0.4, 39.6 + rng.random(n) * 0.3
@@ -113,9 +115,45 @@ def test_polygons_agree(tmp_path):
         'zone': pa.array([f'zone{i % 4}' for i in range(n)]),
         'kind': pa.nulls(n, pa.string()),
     }
-    src = source(tmp_path / 'polygons.parquet', geometry, columns, ['Polygon', 'MultiPolygon'])
-    out = write(src, tmp_path / 'out.parquet', carry=list(columns), workers=1, log=quiet)
-    assert assert_agrees(out) > 0, 'the fixture has boundary copies'
+    src = source(work / 'polygons.parquet', geometry, columns, ['Polygon', 'MultiPolygon'])
+    out = work / 'out.parquet'
+    return write(src, out, carry=list(columns), row_group_rows=512, workers=1, log=quiet)
+
+
+def test_polygons_agree(polygons):
+    assert assert_agrees(polygons) > 0, 'the fixture has boundary copies'
+
+
+def test_read_overview(polygons):
+    f = pq.ParquetFile(polygons)
+    assert f.metadata.num_row_groups > 1, 'row indexes continue across row groups'
+    lod = json.loads(f.schema_arrow.metadata[b'geo'])['lod_columns']
+    fields, dictionaries = carried(lod)
+    for zoom in (lod['zooms'][0] + 2, lod['zooms'][-1]):
+        name, child = next((n, c) for n, c in lod['lods'].items() if zoom in c['zooms'])
+        (sx, sy), (ox, oy) = child['scale'], child['offset']
+        table = read_overview(polygons, zoom)
+        values = f.read(columns=['lod'])['lod'].combine_chunks().field(name).to_pylist()
+        decoded = [
+            (i, Unpacker(blob, 'MultiPolygon', fields, dictionaries).row())
+            for i, blob in enumerate(values)
+            if blob is not None
+        ]
+        rows = [(i, row) for i, row in decoded if row['geometry']]
+        assert table['row'].to_pylist() == [i for i, _ in rows], 'shown rows, copies left out'
+        shapes = shapely.from_wkb(table['geometry'].to_numpy(zero_copy_only=False))
+        for shape, (_, row) in zip(shapes, rows, strict=True):
+            rings = [[list(r.coords) for r in (p.exterior, *p.interiors)] for p in shape.geoms]
+            grid = [
+                [[(ox + sx * x, oy + sy * y) for x, y in r] for r in p] for p in row['geometry']
+            ]
+            assert rings == grid
+        for a in fields:
+            assert same(table[a.name].to_pylist(), [row['attrs'][a.name] for _, row in rows])
+    metadata = table.schema.field('geometry').metadata
+    assert json.loads(metadata[b'ARROW:extension:metadata'])['crs'] == 'EPSG:3857'
+    with pytest.raises(ValueError, match='not one of'):
+        read_overview(polygons, lod['zooms'][-1] + 1)
 
 
 def test_lines_and_points_agree(tmp_path):
