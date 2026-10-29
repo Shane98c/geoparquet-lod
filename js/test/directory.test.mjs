@@ -8,7 +8,7 @@ const PAGES = 60000
 // Thrift metadata whose schema holds an optional binary `geometry`
 const SCHEMA = 'FQIZLEgGc2NoZW1hFQIAFQwlAhgIZ2VvbWV0cnkAFgAZDAA='
 const EMPTY_TOP = [1, [], [], [], []]
-const reader = (bytes, top, exact = EMPTY_TOP, reads = []) =>
+const reader = (bytes, top, exact = EMPTY_TOP, reads = [], root = {}) =>
   new SpatialReader(
     {
       byteLength: bytes.length,
@@ -31,6 +31,7 @@ const reader = (bytes, top, exact = EMPTY_TOP, reads = []) =>
       },
       directories: { f2: top },
       primary_index: { attributes: [], codecs: ['UNCOMPRESSED'], schema: SCHEMA, directory: exact },
+      ...root,
     },
   )
 const tile = (r, z, h) => {
@@ -426,3 +427,67 @@ const cellBranch = (level, children) => [
   )
 }
 console.log('primary directory: routing, runs, cells, levels, self-references, shared nodes')
+
+{
+  // A byte range past the end of the file is refused before any request: an
+  // overview node or page, a primary node, geometry or attribute page, or the
+  // row metadata.
+  const file = store()
+  const past = file.bytes.length + 1024
+  const inside = file.raw(binaryPage([point(5, 5)]))
+  const page = (offset, length) => ({
+    offset,
+    length,
+    first: 0,
+    runs: [{ box: at(5, 5), count: 1 }],
+  })
+  /** A top node over one leaf of `pages`, with `sources` per attribute. */
+  const exact = (pages, sources = []) => {
+    const [offset, length] = file.add(primaryLeaf(pages).with(9, sources))
+    return cellBranch(1, [{ low: 0, high: 15, offset, length }])
+  }
+  // Thrift metadata whose schema holds an optional binary `geometry` and int32 `a`
+  const attributed = {
+    attributes: ['a'],
+    codecs: ['UNCOMPRESSED', 'UNCOMPRESSED'],
+    schema: 'FQIZPEgGc2NoZW1hFQQAFQwlAhgIZ2VvbWV0cnkAFQIlAhgBYQAWABkMAA==',
+    directory: exact([page(...inside)], [[[past], [10], [0], [1]]]),
+  }
+  const lodLeaf = file.add(leaf([[1, past, 10, 0, 3]]))
+  const reads = []
+  const rows = (r, attributes = []) => r.readPrimary([4, 4, 6, 6], attributes)
+  for (const [what, r, read] of [
+    ['an overview node', reader(file.bytes, [1, [1], [0], [past], [99]], EMPTY_TOP, reads)],
+    [
+      'an overview page',
+      reader(file.bytes, [1, [1], [0], ...lodLeaf.map((v) => [v])], EMPTY_TOP, reads),
+    ],
+    [
+      'a primary node',
+      reader(
+        file.bytes,
+        EMPTY_TOP,
+        cellBranch(1, [{ low: 0, high: 15, offset: past, length: 99 }]),
+        reads,
+      ),
+      rows,
+    ],
+    ['a geometry page', reader(file.bytes, EMPTY_TOP, exact([page(past, 10)]), reads), rows],
+    [
+      'an attribute page',
+      reader(file.bytes, EMPTY_TOP, EMPTY_TOP, reads, { primary_index: attributed }),
+      (r) => rows(r, ['a']),
+    ],
+    [
+      'the row metadata',
+      reader(file.bytes, EMPTY_TOP, EMPTY_TOP, reads, { row_metadata: [past, 99] }),
+      (r) => r.readRow(0, ['geometry']),
+    ],
+  ])
+    await assert.rejects((read ?? ((r) => tile(r, 0, 0)))(r), /outside the file/, what)
+  assert.ok(
+    reads.every(([, end]) => end <= file.bytes.length),
+    'no request reaches past the file',
+  )
+}
+console.log('byte ranges: nodes, pages and row metadata past the file are refused unread')

@@ -520,7 +520,7 @@ export class SpatialReader implements TileReader {
     if (!this.rowFallback || this.rowFallback.abandoned) {
       const [offset, length] = this.root.row_metadata
       const current = new SharedLoad(async (signal) => {
-        const bytes = await this.file.slice(offset, offset + length, signal)
+        const bytes = await this.read(offset, length, signal)
         const metadata = metadataFrom(await gunzip(bytes).arrayBuffer())
         signal?.throwIfAborted()
         return LodReader.fromMetadata(this.file, metadata)
@@ -658,6 +658,20 @@ export class SpatialReader implements TileReader {
     return selected.flat()
   }
 
+  /** `length` bytes of the file from `offset`, refused before any request
+   * unless they lie inside the file. Every directory and page read is one. */
+  private read(offset: number, length: number, signal?: AbortSignal): Promise<ArrayBuffer> {
+    if (
+      !Number.isSafeInteger(offset) ||
+      !Number.isSafeInteger(length) ||
+      offset < 0 ||
+      length <= 0 ||
+      offset + length > this.file.byteLength
+    )
+      return Promise.reject(new Error('spatial index byte range outside the file'))
+    return this.file.slice(offset, offset + length, signal)
+  }
+
   /** A node from `cache` or loaded and decoded, read at `length` bytes. */
   private load<T>(
     cache: Map<number, { length: number; node: SharedLoad<T> }>,
@@ -671,7 +685,7 @@ export class SpatialReader implements TileReader {
       const current = {
         length,
         node: new SharedLoad(async (signal) =>
-          decode(await gunzipJson(await this.file.slice(offset, offset + length, signal))),
+          decode(await gunzipJson(await this.read(offset, length, signal))),
         ),
       }
       while (cache.size >= 128) cache.delete(cache.keys().next().value!)
@@ -777,7 +791,7 @@ export class SpatialReader implements TileReader {
         last = run.at(-1)!
       // Each page subscribes to the run; the last departing page aborts I/O.
       const fetched = new SharedLoad((signal) =>
-        this.file.slice(start, last.offset + last.length, signal),
+        this.read(start, last.offset + last.length - start, signal),
       )
       for (const p of run) {
         const data = new SharedLoad((signal) =>
