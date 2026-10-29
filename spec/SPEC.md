@@ -57,10 +57,12 @@ A conforming file MUST satisfy:
    rows by reading the two boundary key pages, then reads only those rows of
    the LOD column. A row whose primary geometry is null or empty has a null
    key and sorts after every row with a key. A feature centred outside a
-   tile whose geometry reaches into the tile or its buffer (64/4096 of the
-   tile) is a _straddler_; its
-   row is in another interval, so each packed LOD row carries the copies it
-   hosts: the tile each serves as `zoom << 48 | x * 2^zoom + y`, the
+   tile whose geometry reaches into the tile or within 2 pixels of it
+   (16/4096 of the tile) is a _straddler_. A renderer draws each tile's
+   shapes clipped to the tile, so a feature is needed only where it draws
+   inside it, and the margin holds an outline drawn along the edge. A
+   straddler's row is in another interval, so each packed LOD row carries the
+   copies it hosts: the tile each serves as `zoom << 48 | x * 2^zoom + y`, the
    feature's file row index, its geometry on that LOD's grid and its
    attributes. The writer MUST place every
    copy a tile needs on the tile's _host_: the first row whose key is at or

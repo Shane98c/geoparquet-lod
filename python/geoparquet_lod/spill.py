@@ -1,9 +1,11 @@
 """Straddlers: a feature whose geometry reaches into a tile other than the one
-holding its bbox centre is needed by that tile too, but its row lives in its
-own tile's key interval. The writer therefore stores a copy of its LOD
-geometry, with its attributes and file row index, on a host row inside each
-such tile's interval, so a tile is exactly its own interval and a reader
-never searches for neighbours. The copies are the LOD's `spill` list.
+holding its bbox centre, or within MARGIN of it, is needed by that tile too,
+but its row lives in its own tile's key interval. The writer therefore stores
+a copy of its LOD geometry, with its attributes and file row index, on a host
+row inside each such tile's interval, so a tile is exactly its own interval
+and a reader never searches for neighbours. The copies are the LOD's `spill`
+list. MapLibre draws each tile's fills and lines clipped to the tile, so a
+copy draws only inside it; the margin holds an outline drawn along the edge.
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ import numpy as np
 
 from .key import KEY_DEPTH, hilbert_cell, hilbert_key, tile_x, tile_y
 
-BUFFER = 64 / 4096  # the tile encoder's buffer as a share of the tile
+MARGIN = 16 / 4096  # two pixels of a 512-pixel tile, as a share of the tile
 
 
 def ranges(starts: np.ndarray, stops: np.ndarray) -> np.ndarray:
@@ -32,14 +34,14 @@ def straddlers(
 ) -> tuple[np.ndarray, np.ndarray]:
     """For features reaching into tiles beyond their own at `zoom`: the row
     index of each such feature and the tile (x * 2^zoom + y) it reaches into,
-    one pair per foreign tile, taking the encoder's buffer into account. A
+    one pair per foreign tile, a tile reaching MARGIN past its edge. A
     feature's own tile is the one its Hilbert key (`keys`, at KEY_DEPTH) is
     in, so copies go to exactly the tiles whose intervals do not hold its row."""
     n = 2**zoom
-    x0 = np.clip(np.floor(tile_x(xmin, zoom) - BUFFER), 0, n - 1).astype(np.int64)
-    x1 = np.clip(np.floor(tile_x(xmax, zoom) + BUFFER), 0, n - 1).astype(np.int64)
-    y0 = np.clip(np.floor(tile_y(ymax, zoom) - BUFFER), 0, n - 1).astype(np.int64)
-    y1 = np.clip(np.floor(tile_y(ymin, zoom) + BUFFER), 0, n - 1).astype(np.int64)
+    x0 = np.clip(np.floor(tile_x(xmin, zoom) - MARGIN), 0, n - 1).astype(np.int64)
+    x1 = np.clip(np.floor(tile_x(xmax, zoom) + MARGIN), 0, n - 1).astype(np.int64)
+    y0 = np.clip(np.floor(tile_y(ymax, zoom) - MARGIN), 0, n - 1).astype(np.int64)
+    y1 = np.clip(np.floor(tile_y(ymin, zoom) + MARGIN), 0, n - 1).astype(np.int64)
     many = np.flatnonzero((x0 < x1) | (y0 < y1))
     x0, x1, y0, y1 = (v[many] for v in (x0, x1, y0, y1))
     own_x, own_y = hilbert_cell(np.asarray(keys, np.int64)[many] >> 2 * (KEY_DEPTH - zoom), zoom)

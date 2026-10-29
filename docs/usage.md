@@ -88,9 +88,10 @@ quantized copy per LOD: one per zoom below the complete zoom, where the
 thinning changes the row set, and one per two zooms from it up. Each LOD is
 one binary column: a row's value packs its geometry on the LOD's pixel grid
 as varint ring steps, its carried attributes, and copies of neighbouring
-features that reach into its tile, so a tile can read a contiguous range of
-that column. Page, directory, and row-group boundaries can add requests. Grid
-coordinates decode as `offset + scale * integer`; the transform and grid are
+features that reach into its tile or within two pixels of it, so a tile can
+read a contiguous range of that column. Page, directory, and row-group
+boundaries can add requests. Grid coordinates decode as
+`offset + scale * integer`; the transform and grid are
 COGP's `quantized_geoarrow`, the byte format is this layout's own, a page of
 spec. When the full-detail shapes of the whole dataset are small (16 MB by
 default) a single LOD serves every zoom from the complete zoom up instead of

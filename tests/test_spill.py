@@ -11,7 +11,7 @@ import shapely
 from geoparquet_lod import validate, write
 from geoparquet_lod.key import KEY_DEPTH, hilbert_key, tile_x, tile_y
 from geoparquet_lod.quantize import render_polygons
-from geoparquet_lod.spill import BUFFER, straddlers, take_ragged
+from geoparquet_lod.spill import MARGIN, straddlers, take_ragged
 from unpacker import Unpacker
 
 
@@ -22,7 +22,7 @@ def key_in(x: int, y: int, zoom: int) -> np.ndarray:
 
 
 def reached(xmin, ymin, xmax, ymax, zoom):
-    """The tiles a bbox reaches at `zoom`, the encoder's buffer included, by trying each."""
+    """The tiles a bbox reaches at `zoom`, each reaching MARGIN past its edge, by trying each."""
     fx0, fx1, fy0, fy1 = (
         tile_x(xmin, zoom),
         tile_x(xmax, zoom),
@@ -33,7 +33,7 @@ def reached(xmin, ymin, xmax, ymax, zoom):
         (x, y)
         for x in range(int(fx0) - 2, int(fx1) + 3)
         for y in range(int(fy0) - 2, int(fy1) + 3)
-        if fx0 - BUFFER < x + 1 and x <= fx1 + BUFFER and fy0 - BUFFER < y + 1 and y <= fy1 + BUFFER
+        if fx0 - MARGIN < x + 1 and x <= fx1 + MARGIN and fy0 - MARGIN < y + 1 and y <= fy1 + MARGIN
     }
 
 
@@ -64,6 +64,18 @@ def test_a_feature_centred_on_a_tile_edge_is_copied_where_its_key_is_not():
         rows, tiles = straddlers(*bounds, key_in(own, row, zoom), zoom)
         assert rows.tolist() == [0]
         assert tiles.tolist() == [other * 2**zoom + row]
+
+
+def test_a_feature_short_of_a_tile_is_copied_there_within_the_margin():
+    """A neighbour two pixels away still draws an outline across the edge; one
+    in the encoder's 64/4096 buffer but past the margin draws nothing there."""
+    zoom, k = 14, 3413
+    edge = -180 + k * 360 / 2**zoom
+    pixel = 360 / 2**zoom / 512
+    row = int(tile_y(39.7, zoom))
+    for gap, tiles in ((1, [k * 2**zoom + row]), (6, [])):
+        bounds = [np.array([v]) for v in (edge - 40 * pixel, 39.7, edge - gap * pixel, 39.7001)]
+        assert straddlers(*bounds, key_in(k - 1, row, zoom), zoom)[1].tolist() == tiles, gap
 
 
 def test_every_other_tile_a_feature_reaches_gets_one_copy():
@@ -114,10 +126,12 @@ def test_take_ragged_picks_whole_rows_in_order():
 
 @pytest.fixture
 def edge_features(tmp_path):
-    """Shapes centred exactly on tile edges, and shapes three, four and two by two
-    tiles across, at zoom 14."""
+    """Shapes centred exactly on tile edges, shapes three, four and two by two
+    tiles across, and shapes ending a pixel and six pixels short of a tile, at
+    zoom 14."""
     zoom = 14
     tile = 360 / 2**zoom
+    pixel = tile / 512
     k = int(tile_x(-105.0, zoom))
     edge = -180 + k * tile
     row = int(tile_y(39.7, zoom))
@@ -135,6 +149,8 @@ def edge_features(tmp_path):
             edge + 0.2 * tile,
             lat_edge + 0.2 * tile,
         ),
+        'within the margin': (edge - 0.3 * tile, 39.7005, edge - pixel, 39.7008),
+        'past the margin': (edge - 0.3 * tile, 39.7005, edge - 6 * pixel, 39.7008),
     }
     table = pa.table(
         {
@@ -162,6 +178,8 @@ def test_every_tile_a_feature_reaches_holds_it_once(edge_features, tmp_path):
         workers=1,
         log=lambda *_: None,
     )
+    assert len(reached(*boxes['within the margin'], 14)) == 2
+    assert len(reached(*boxes['past the margin'], 14)) == 1
     table = pq.read_table(out)
     meta = json.loads(table.schema.metadata[b'geo'])['lod_columns']
     keys = table.column('hilbert').to_numpy()
