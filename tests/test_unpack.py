@@ -143,6 +143,25 @@ def test_batches_decode_as_one(polygons, batch_bytes):
     assert batches > 3 * f.metadata.num_row_groups * len(lod['lods'])
 
 
+@pytest.mark.parametrize('batch_bytes', [0, -1])
+def test_batches_refuse_a_nonpositive_budget(batch_bytes):
+    values = pa.array([None], pa.binary())
+    with pytest.raises(ValueError, match='batch_bytes must be positive'):
+        list(unpack_batches(values, 'MultiPolygon', [], None, batch_bytes))
+
+
+@pytest.mark.parametrize(
+    'values',
+    [
+        pa.array([], pa.binary()),
+        pa.array([None, None], pa.binary()),
+        pa.chunked_array([pa.array([], pa.binary()), pa.array([None], pa.binary())]),
+    ],
+)
+def test_empty_and_null_columns_decode_to_no_records(values):
+    assert sum(len(u.row) for u in unpack_batches(values, 'MultiPolygon', [], None)) == 0
+
+
 def test_read_overview(polygons):
     f = pq.ParquetFile(polygons)
     assert f.metadata.num_row_groups > 1, 'row indexes continue across row groups'

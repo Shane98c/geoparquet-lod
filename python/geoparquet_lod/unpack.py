@@ -192,7 +192,9 @@ def unpack_batches(
     (`BATCH_BYTES` unless given) packed bytes each, so decoding holds one
     run's arrays at a time. Records' `row` and an `UnpackError`'s index
     `values` as a whole."""
-    budget = batch_bytes or BATCH_BYTES
+    budget = BATCH_BYTES if batch_bytes is None else batch_bytes
+    if budget <= 0:
+        raise ValueError(f'batch_bytes must be positive, not {budget}')
     first = 0
     for chunk in values.chunks if isinstance(values, pa.ChunkedArray) else [values]:
         for start, stop in _runs(chunk, budget):
