@@ -925,10 +925,10 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
             ids[order],
             {
                 a.name: cast_carried(
-                    changed.column(a.name)
-                    .combine_chunks()
-                    .take(order)
-                    .cast(sorted_schema.field(a.name).type),
+                    cast_carried(
+                        changed.column(a.name).combine_chunks().take(order),
+                        pa.field(a.name, sorted_schema.field(a.name).type),
+                    ),
                     a,
                 )
                 for a in attributes

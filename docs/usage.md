@@ -87,9 +87,11 @@ tiles get each value rounded to the nearest float16, about three significant
 digits, packed in at most two bytes from 0 up to 2 and three otherwise, where
 a typical float32 takes five. A style threshold compares with the rounded
 value, so a value that close to a threshold can land on its other side, and
-a magnitude under about 3e-8 rounds to 0. Float16 holds magnitudes up to
-65504; the writer refuses a finite value beyond that with an error naming the
-column and the value, and packs NaN and the infinities as they are.
+a magnitude under about 3e-8 rounds to 0. Rounding is to nearest, ties to
+even, so magnitudes from 65504 up to 65520 round to 65504, the largest
+float16; the writer refuses a finite value that would round to infinity with
+an error naming the column and the value, and packs NaN and the infinities as
+they are.
 
 ## Geometry
 

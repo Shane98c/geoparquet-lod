@@ -359,6 +359,37 @@ def test_the_writer_refuses_a_value_float16_cannot_hold(tmp_path, where):
         )
 
 
+@pytest.mark.parametrize('carried', ['float', 'halffloat'])
+def test_the_writer_refuses_an_override_wider_than_its_column(tmp_path, carried):
+    """A thinning's float64 value that the float32 source column can't hold is
+    refused, not packed as infinity."""
+    x = -105 + np.arange(40) * 1e-3
+    table = pa.table(
+        {
+            'share': np.ones(40, dtype=np.float32),
+            'geometry': pa.array(shapely.to_wkb(shapely.box(x, 39.7, x + 5e-4, 39.7005))),
+        }
+    )
+    src = geoparquet(tmp_path / 'share.parquet', table, ['Polygon'])
+
+    def wider(rows, zoom, ctx):
+        kept = rows.slice(0, 4)
+        values = pa.array([1e39] * kept.num_rows, pa.float64())
+        return kept.set_column(kept.schema.get_field_index('share'), 'share', values)
+
+    with pytest.raises(ValueError, match=re.escape('cannot pack share value 1e+39')):
+        write(
+            src,
+            tmp_path / 'share.lod.parquet',
+            thinning=wider,
+            zooms=[13, 14],
+            complete_from=14,
+            carry=[('share', carried)],
+            workers=1,
+            log=lambda *_: None,
+        )
+
+
 def test_float16_overviews_hold_the_source_rounded(buildings, tmp_path):
     """The source column keeps its float32 values; every LOD, its copies
     included, holds them rounded to float16."""

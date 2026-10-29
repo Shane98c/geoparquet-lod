@@ -250,10 +250,10 @@ are the integer types (`int8` to `uint64`), `halffloat`, `float`, `double`,
 packed carried uint64 value MUST NOT exceed 2^63 - 1; the source column
 itself is unrestricted. A float is packed in its declared type, so a source
 column carried as `halffloat` packs each value rounded to the nearest
-half-precision float, a varint of at most two bytes in [0, 2) and of three
-otherwise. A finite value too large for the declared type MUST NOT be
-packed, and the reference writer refuses it; NaN and the infinities pack as
-themselves. A copy MUST carry the
+half-precision float, ties to even, a varint of at most two bytes in [0, 2)
+and of three otherwise. A finite value that would round to infinity in the
+declared type MUST NOT be packed, and the reference writer refuses it; NaN
+and the infinities pack as themselves. A copy MUST carry the
 attribute values its row has at the LOD: a thinning that overrides an
 attribute writes the overridden value, cast to the declared type, into that
 LOD's rows and their copies, so a feature reads the same in every tile it
