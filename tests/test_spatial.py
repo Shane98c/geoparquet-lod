@@ -12,7 +12,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 import shapely
-from geoparquet_lod import drop_rate, validate
+from geoparquet_lod import chain, drop_rate, validate
 from geoparquet_lod import write as build
 from geoparquet_lod._compact import dumps, get, loads
 from geoparquet_lod._layout import finalize_layout, page_cells, read_node
@@ -40,16 +40,18 @@ def _leaves(raw, node):
 
 
 @pytest.mark.parametrize(
-    'family,sparse,leaf_pages,page_bytes',
+    'family,sparse,leaf_pages,page_bytes,empty',
     [
-        ('polygon', False, 16, 16384),
-        ('polygon', False, 1, 32768),
-        ('point', False, 16, 16384),
-        ('point', True, 16, 65536),
-        ('line', False, 16, 131072),
+        ('polygon', False, 16, 16384, False),
+        ('polygon', False, 1, 32768, False),
+        ('point', False, 16, 16384, False),
+        ('point', True, 16, 65536, False),
+        ('line', False, 16, 131072, False),
+        # the coarsest zoom shows no rows, so its LOD has no pages
+        ('polygon', False, 16, 16384, True),
     ],
 )
-def test_spatial_roundtrip(tmp_path, monkeypatch, family, sparse, leaf_pages, page_bytes):
+def test_spatial_roundtrip(tmp_path, monkeypatch, family, sparse, leaf_pages, page_bytes, empty):
     rng = np.random.default_rng(913)
     n = 12000 if sparse else 1200
     x, y = -105 + rng.random(n) * 0.25, 39.6 + rng.random(n) * 0.25
@@ -87,10 +89,13 @@ def test_spatial_roundtrip(tmp_path, monkeypatch, family, sparse, leaf_pages, pa
     ).replace_schema_metadata({b'geo': json.dumps(geo).encode()})
     src, old, new = [tmp_path / name for name in ('source.parquet', 'old.parquet', 'new.parquet')]
     pq.write_table(table, src)
+    thinning = drop_rate(10 if sparse else 2.5)
+    if empty:
+        thinning = chain(thinning, lambda rows, zoom, ctx: rows.slice(0, 0) if zoom == 10 else rows)
     options = dict(
         zooms=range(10, 15),
         complete_from=13,
-        thinning=drop_rate(10 if sparse else 2.5),
+        thinning=thinning,
         carry=['height', 'name'],
         row_group_rows=n if sparse else 256,
         page_bytes=1024,
@@ -117,6 +122,8 @@ def test_spatial_roundtrip(tmp_path, monkeypatch, family, sparse, leaf_pages, pa
         finalize_layout(old, new, leaf_pages=leaf_pages, page_bytes=page_bytes, log=lambda *_: None)
     raw = new.read_bytes()
     root = _root(raw)
+    if empty:
+        assert root['directories']['f10'] == [1, [], [], [], []]
     leaves = [leaf for top in root['directories'].values() for leaf in _leaves(raw, top)]
     if sparse:
         largest = max(leaf['count'].max() for leaf in leaves if len(leaf['count']))
