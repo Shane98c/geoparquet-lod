@@ -879,9 +879,11 @@ def _write_unindexed(
     del extent
     # file order: key, then id, whatever order the query returned rows in
     by_key = valid_ids[np.lexsort((valid_ids, keys[valid_ids]))]
+    keys_by_file = keys[by_key]
     file_pos = np.full(n_rows, -1, np.int64)
     file_pos[by_key] = np.arange(len(valid_ids))
-    spill_entries: dict[str, tuple] = {}  # LOD name -> (host, zoom, tile, src), sorted by host
+    # LOD name -> (host row, tile tag, copied row) per copy, sorted by host
+    spill_entries: dict[str, tuple] = {}
     for b in lod_plan:
         shown = np.flatnonzero((levels >> lod_bit[b['name']]) & 1)
         size = EARTH_RADIUS * np.radians(bounds['xmax'][shown] - bounds['xmin'][shown])
@@ -895,24 +897,25 @@ def _write_unindexed(
             # a shape under a pixel draws as a placeholder square its own tile shows whole
             wide = size / resolution(z) >= 1
             large = shown[wide]
-            src, tiles = straddlers(
+            copied, tiles = straddlers(
                 bounds['xmin'][large],
                 bounds['ymin'][large],
                 bounds['xmax'][large],
                 bounds['ymax'][large],
+                keys[large],
                 z,
             )
-            src = large[src]
-            host = hosts(tiles, z, KEY_DEPTH, keys[by_key], by_key)
-            parts.append((host, (z << 48) | tiles, src))
+            copied = large[copied]
+            host = hosts(tiles, z, keys_by_file, by_key)
+            parts.append((host, (z << 48) | tiles, copied))
         if parts:
-            host, tile_of, src = (np.concatenate(c) for c in zip(*parts, strict=True))
+            host, tile_of, copied = (np.concatenate(c) for c in zip(*parts, strict=True))
             if len(host):
                 order = np.argsort(host, kind='stable')
-                spill_entries[b['name']] = (host[order], tile_of[order], src[order])
+                spill_entries[b['name']] = (host[order], tile_of[order], copied[order])
     spill_total = sum(len(v[0]) for v in spill_entries.values())
     log(f'  {spill_total:,} straddler copies across {len(spill_entries)} LODs')
-    del bounds, keys, by_key
+    del bounds, keys, by_key, keys_by_file
     lod_field = pa.field(
         'lod',
         pa.struct([pa.field(b['name'], lod_type(), nullable=True) for b in lod_plan]),

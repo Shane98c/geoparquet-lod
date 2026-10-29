@@ -47,16 +47,16 @@ def buildings(tmp_path):
     return geoparquet(tmp_path / 'buildings.parquet', table, ['Polygon'])
 
 
-def copied_straddlers(bounds, zoom):
+def copied_straddlers(bounds, keys, zoom):
     """The straddlers that get copies: shapes a pixel or larger at `zoom`."""
-    from geoparquet_lod.quantize import mercator, resolution
+    from geoparquet_lod.key import mercator, resolution
     from geoparquet_lod.spill import straddlers
 
     xmin, ymin, xmax, ymax = bounds.T
     x0, y0 = mercator(xmin, ymin)
     x1, y1 = mercator(xmax, ymax)
     large = np.flatnonzero(np.maximum(x1 - x0, y1 - y0) / resolution(zoom) >= 1)
-    rows, tiles = straddlers(xmin[large], ymin[large], xmax[large], ymax[large], zoom)
+    rows, tiles = straddlers(xmin[large], ymin[large], xmax[large], ymax[large], keys[large], zoom)
     return large[rows], tiles
 
 
@@ -435,7 +435,7 @@ def test_cli_auto_thinning():
 
 
 def test_straddlers_are_copied_into_the_tiles_they_reach(buildings, tmp_path):
-    from geoparquet_lod.writer import hilbert_key
+    from geoparquet_lod.key import hilbert_key
 
     out = write(buildings, tmp_path / 'spill.parquet', workers=1, log=lambda *_: None)
     validate(out)
@@ -449,7 +449,7 @@ def test_straddlers_are_copied_into_the_tiles_they_reach(buildings, tmp_path):
     finest = max(meta['zooms'])
     name = next(n for n, c in meta['lods'].items() if finest in c['zooms'])
     column = lod.field(name)
-    src, tiles = copied_straddlers(bounds, finest)
+    src, tiles = copied_straddlers(bounds, keys, finest)
     assert len(src) > 0, 'the fixture has buildings crossing tile edges at the finest zoom'
     n = 2**finest
     span = 4 ** (depth - finest)
@@ -489,9 +489,9 @@ def test_reader_finds_straddler_copies(buildings, tmp_path):
     assert zone['values'] == ['zone0', 'zone1', 'zone2', 'zone3'], (
         'few distinct strings get a value table'
     )
-    t = pq.read_table(out, columns=['geometry'])
+    t = pq.read_table(out, columns=['geometry', 'hilbert'])
     bounds = shapely.bounds(shapely.from_wkb(t.column('geometry').to_numpy(zero_copy_only=False)))
-    rows, tiles = copied_straddlers(bounds, finest)
+    rows, tiles = copied_straddlers(bounds, t.column('hilbert').to_numpy(), finest)
     n = 2**finest
     cases = [
         {'z': finest, 'x': int(tl // n), 'y': int(tl % n), 'id': int(r), 'attribute': 'zone'}

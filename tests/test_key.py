@@ -5,6 +5,7 @@ import numpy as np
 import pyarrow as pa
 from geoparquet_lod.key import (
     KEY_DEPTH,
+    hilbert_cell,
     hilbert_key,
     mercator,
     sql_key_cell,
@@ -29,6 +30,17 @@ def test_hilbert_key_is_the_standard_curve():
     # the quadtree prefix: a cell's index at a coarser depth is the finer index shifted down
     deep = hilbert_key(x, y, 16)
     assert np.array_equal(hilbert_key(x >> 5, y >> 5, 11), deep >> 10)
+
+
+def test_hilbert_cell_inverts_hilbert_key():
+    rng = np.random.default_rng(1)
+    for depth in (1, 5, 16, KEY_DEPTH):
+        x = rng.integers(0, 1 << depth, 2000)
+        y = rng.integers(0, 1 << depth, 2000)
+        cx, cy = hilbert_cell(hilbert_key(x, y, depth), depth)
+        assert np.array_equal(cx, x) and np.array_equal(cy, y)
+    every = np.arange(4**4)
+    assert np.array_equal(hilbert_key(*hilbert_cell(every, 4), 4), every)
 
 
 def test_sql_and_numpy_agree():

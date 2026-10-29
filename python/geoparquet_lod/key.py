@@ -90,3 +90,24 @@ def hilbert_key(x: np.ndarray, y: np.ndarray, depth: int) -> np.ndarray:
         x, y = np.where(~ry, y, x), np.where(~ry, x, y)
         s >>= 1
     return d
+
+
+def hilbert_cell(d: np.ndarray, depth: int) -> tuple[np.ndarray, np.ndarray]:
+    """The cells (x, y) on a 2^depth grid of Hilbert indexes `d` (d2xy), the
+    inverse of `hilbert_key`."""
+    t = np.asarray(d, dtype=np.int64).copy()
+    x = np.zeros(len(t), dtype=np.int64)
+    y = np.zeros(len(t), dtype=np.int64)
+    s = 1
+    while s < 1 << depth:
+        rx = 1 & (t >> 1)
+        ry = 1 & (t ^ rx)
+        flip = (ry == 0) & (rx == 1)
+        x = np.where(flip, s - 1 - x, x)
+        y = np.where(flip, s - 1 - y, y)
+        x, y = np.where(ry == 0, y, x), np.where(ry == 0, x, y)
+        x += s * rx
+        y += s * ry
+        t >>= 2
+        s <<= 1
+    return x, y
