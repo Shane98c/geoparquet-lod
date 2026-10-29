@@ -69,11 +69,12 @@ def lod_values(parquet: pq.ParquetFile, group: int, column: str, name: str) -> p
 
 
 def read_overview(path: str | Path, zoom: int) -> pa.Table:
-    """The rows shown at `zoom` with their overview geometry: `row`, the file
-    row index; `geometry`, WKB in EPSG:3857 metres, the CRS stated in the
-    field's GeoArrow metadata; and the carried attributes as that zoom's LOD
-    stores them. Boundary copies are left out, as each repeats a shown row. A
-    carried attribute named `row` or `geometry` is refused."""
+    """The rows shown at `zoom`, one of the file's zooms, with their overview
+    geometry: `row`, the file row index; `geometry`, WKB in EPSG:3857 metres,
+    the CRS stated in the field's GeoArrow metadata; and the carried
+    attributes as that zoom's LOD stores them. Boundary copies are left out,
+    as each repeats a shown row. A carried attribute named `row` or
+    `geometry` is refused."""
     f = pq.ParquetFile(path)
     lod = json.loads((f.schema_arrow.metadata or {}).get(b'geo', b'{}')).get('lod_columns')
     if not lod or lod.get('pack_version') != PACK_VERSION:

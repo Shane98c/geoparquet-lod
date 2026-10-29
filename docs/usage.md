@@ -289,9 +289,13 @@ zoom's grid, its CRS stated in the field's GeoArrow (`geoarrow.wkb`) metadata;
 and the carried attributes as that zoom's LOD stores them. Boundary copies are
 left out, since each repeats a row the table already has.
 
-A file carrying an attribute named `row` or `geometry` raises `ValueError`,
-naming the attribute, since it would collide with those columns; rename it in
-the source and rewrite the file to read its overviews here.
+`zoom` must be one of the file's zooms; any other raises `ValueError`. The JS
+readers clamp a map's zoom to the file's coarsest or finest LOD, which suits
+drawing; an analysis asking for z18 of a file that stops at z15 gets an error
+rather than z15. A file carrying an attribute named `row` or `geometry` also
+raises `ValueError`, naming the attribute, since it would collide with those
+columns; rename it in the source and rewrite the file to read its overviews
+here.
 
 ```python
 import shapely

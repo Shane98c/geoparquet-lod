@@ -171,8 +171,9 @@ def test_read_overview(polygons):
             assert same(table[a.name].to_pylist(), [row['attrs'][a.name] for _, row in rows])
     metadata = table.schema.field('geometry').metadata
     assert json.loads(metadata[b'ARROW:extension:metadata'])['crs'] == 'EPSG:3857'
-    with pytest.raises(ValueError, match='not one of'):
-        read_overview(polygons, lod['zooms'][-1] + 1)
+    for zoom in (lod['zooms'][0] - 1, lod['zooms'][-1] + 1):
+        with pytest.raises(ValueError, match='not one of'):
+            read_overview(polygons, zoom)
 
 
 def test_read_overview_in_batches(polygons, monkeypatch):
