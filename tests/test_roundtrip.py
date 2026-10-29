@@ -614,6 +614,52 @@ def test_zooms_past_the_key_depth_are_refused_before_sorting(tmp_path):
     assert copy['tile'] >> 48 == KEY_DEPTH
 
 
+def test_a_string_a_thinning_introduces_joins_the_value_table(tmp_path, monkeypatch):
+    """A value only a thinning gives a string attribute is in its value table,
+    or the attribute packs plain strings when the table would pass its limit."""
+    from geoparquet_lod import read_overview, writer
+
+    pts = [shapely.Point(-105, 39.7), shapely.Point(-104.99, 39.71)]
+    source = geoparquet(
+        tmp_path / 'labels.parquet',
+        pa.table({'label': ['A', 'B'], 'geometry': pa.array(shapely.to_wkb(pts), pa.binary())}),
+        ['Point'],
+    )
+
+    def rename(rows, zoom, ctx):
+        kept = rows.slice(0, 1)
+        return kept.set_column(kept.schema.get_field_index('label'), 'label', pa.array(['NEW']))
+
+    for limit, values in ((writer.DICTIONARY_MAX, ['A', 'B', 'NEW']), (2, None)):
+        monkeypatch.setattr(writer, 'DICTIONARY_MAX', limit)
+        out = write(
+            source,
+            tmp_path / f'labels-{limit}.lod.parquet',
+            thinning=rename,
+            zooms=[13, 14],
+            complete_from=14,
+            carry=['label'],
+            workers=1,
+            log=lambda *_: None,
+        )
+        validate(out, full=True)
+        (label,) = json.loads(pq.read_schema(out).metadata[b'geo'])['lod_columns']['attributes']
+        assert label.get('values') == values
+        assert read_overview(out, 13)['label'].to_pylist() == ['NEW']
+        assert sorted(read_overview(out, 14)['label'].to_pylist()) == ['A', 'B']
+
+
+def test_pack_refuses_a_string_outside_its_value_table():
+    from geoparquet_lod.pack import pack
+
+    fields = [pa.field('label', pa.string())]
+    points = (np.zeros(2, np.int32), np.zeros(2, np.int32))
+    tables = {'label': ['A', 'B']}
+    pack('Point', points, fields, {'label': pa.array(['B', None])}, dictionaries=tables)
+    with pytest.raises(ValueError, match="cannot pack label value 'NEW'"):
+        pack('Point', points, fields, {'label': pa.array(['A', 'NEW'])}, dictionaries=tables)
+
+
 def test_placeholder_pixels_sets_the_square_size(buildings, tmp_path):
     from geoparquet_lod.quantize import SUBPIXELS
 

@@ -165,6 +165,12 @@ def _attr_values(fields: list[pa.Field], arrays: dict[str, pa.Array], n: int, di
             import pyarrow.compute as pc
 
             codes = pc.index_in(arr, value_set=pa.array(dictionaries[f.name], arr.type))
+            unknown = np.flatnonzero(valid & codes.is_null().to_numpy(zero_copy_only=False))
+            if len(unknown):
+                raise ValueError(
+                    f'cannot pack {f.name} value {arr[int(unknown[0])].as_py()!r}: '
+                    'it is not in the value table'
+                )
             vals = codes.fill_null(0).to_numpy(zero_copy_only=False).astype(np.uint64)
         elif pa.types.is_integer(t):
             v = arr.fill_null(0).to_numpy(zero_copy_only=False)

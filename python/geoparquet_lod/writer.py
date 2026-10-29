@@ -816,16 +816,6 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
         ).to_arrow_reader(1_000_000)
     ).combine_chunks()
     con.execute('SET preserve_insertion_order = false')
-    # a string attribute with few distinct values is packed as an index into a value table
-    dictionaries: dict[str, list] = {}
-    for a in attributes:
-        if pa.types.is_string(a.type) or pa.types.is_large_string(a.type):
-            distinct = con.execute(
-                f"SELECT DISTINCT {a.name} FROM '{sorted_path}' WHERE {a.name} IS NOT NULL "
-                f'ORDER BY 1 LIMIT {DICTIONARY_MAX + 1}'
-            ).fetchall()
-            if len(distinct) <= DICTIONARY_MAX:
-                dictionaries[a.name] = [v[0] for v in distinct]
     ctx = Context(tuple(zooms), zooms[-1] if complete_from is None else complete_from, 512)
     # bit i of a row's levels is set when it is shown at zooms[i]; null or empty geometry is shown nowhere
     levels = np.zeros(n_rows, dtype=np.int64)
@@ -889,6 +879,45 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
         if single:
             log('  full-detail shapes are small; one shape LOD serves every zoom')
     lod_plan = lods(zooms, complete_from, family, single_shape_lod=single)
+    lod_bit = {b['name']: zooms.index(b['zooms'][0]) for b in lod_plan}
+    # the attribute values a thinning changed, by row id, for the LODs of the zooms it
+    # changed them at, cast as the sorted copy's column and then as the attribute
+    sorted_schema = pq.read_schema(sorted_path)
+    lod_overrides: dict[str, tuple] = {}
+    for b in lod_plan:
+        changed = overrides.get(lod_bit[b['name']])
+        if changed is None or not changed.num_rows:
+            continue
+        ids = changed.column('id').to_numpy()
+        order = np.argsort(ids, kind='stable')
+        lod_overrides[b['name']] = (
+            ids[order],
+            {
+                a.name: changed.column(a.name)
+                .combine_chunks()
+                .take(order)
+                .cast(sorted_schema.field(a.name).type)
+                .cast(a.type)
+                for a in attributes
+                if a.name in changed.column_names
+            },
+        )
+    del overrides
+    # a string attribute with few distinct values, counting those a thinning gives it, is
+    # packed as an index into a value table
+    dictionaries: dict[str, list] = {}
+    for a in attributes:
+        if pa.types.is_string(a.type) or pa.types.is_large_string(a.type):
+            distinct = con.execute(
+                f"SELECT DISTINCT {a.name} FROM '{sorted_path}' WHERE {a.name} IS NOT NULL "
+                f'LIMIT {DICTIONARY_MAX + 1}'
+            ).fetchall()
+            values = {v[0] for v in distinct}
+            for _, replaced in lod_overrides.values():
+                if a.name in replaced:
+                    values.update(replaced[a.name].drop_null().unique().to_pylist())
+            if len(values) <= DICTIONARY_MAX:
+                dictionaries[a.name] = sorted(values)
 
     # 3. schema and metadata, known before writing
     origin = (mxmin, mymin)
@@ -896,7 +925,6 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
     shape_lods = [b for b in lod_plan if b['geometry_type'] != 'Point']
     # 3b. straddlers: a feature reaching into a tile beyond its own gets a copy of its LOD
     # geometry on the first row of that tile's key interval, so a tile is one interval
-    lod_bit = {b['name']: zooms.index(b['zooms'][0]) for b in lod_plan}
     extent = con.execute(
         f'SELECT __id, __bbox.xmin AS xmin, __bbox.ymin AS ymin, __bbox.xmax AS xmax, '
         f"__bbox.ymax AS ymax, __h FROM '{sorted_path}' WHERE __cx IS NOT NULL"
@@ -1147,29 +1175,6 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
         tuple(attributes),
         dictionaries,
     )
-    # the attribute values a thinning changed, by row id, for the LODs of the zooms it
-    # changed them at, cast as the sorted copy's column and then as the attribute
-    sorted_schema = pq.read_schema(sorted_path)
-    lod_overrides: dict[str, tuple] = {}
-    for b in lod_plan:
-        changed = overrides.get(lod_bit[b['name']])
-        if changed is None or not changed.num_rows:
-            continue
-        ids = changed.column('id').to_numpy()
-        order = np.argsort(ids, kind='stable')
-        lod_overrides[b['name']] = (
-            ids[order],
-            {
-                a.name: changed.column(a.name)
-                .combine_chunks()
-                .take(order)
-                .cast(sorted_schema.field(a.name).type)
-                .cast(a.type)
-                for a in attributes
-                if a.name in changed.column_names
-            },
-        )
-    del overrides
 
     def jobs(table: pa.Table):
         """Render and pack jobs of consecutive rows, at most JOB_ROWS each and as
