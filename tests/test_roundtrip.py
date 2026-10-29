@@ -5,10 +5,12 @@ from pathlib import Path
 
 import numpy as np
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import pytest
 import shapely
 from geoparquet_lod import cluster, drop_rate, importance, only, size_threshold, validate, write
+from geoparquet_lod.writer import DICTIONARY_MAX
 from unpacker import Unpacker
 
 GEO = {
@@ -614,39 +616,117 @@ def test_zooms_past_the_key_depth_are_refused_before_sorting(tmp_path):
     assert copy['tile'] >> 48 == KEY_DEPTH
 
 
-def test_a_string_a_thinning_introduces_joins_the_value_table(tmp_path, monkeypatch):
-    """A value only a thinning gives a string attribute is in its value table,
-    or the attribute packs plain strings when the table would pass its limit."""
+@pytest.mark.parametrize('count', [DICTIONARY_MAX - 2, DICTIONARY_MAX - 1, DICTIONARY_MAX])
+def test_a_string_a_thinning_introduces_joins_the_value_table(tmp_path, monkeypatch, count):
+    """A value only a thinning gives a string attribute is in its value table
+    while the table holds DICTIONARY_MAX values or fewer; past that the
+    attribute packs plain strings. The thinning's values are counted a few
+    rows at a time, its new one in the last batch."""
     from geoparquet_lod import read_overview, writer
 
-    pts = [shapely.Point(-105, 39.7), shapely.Point(-104.99, 39.71)]
+    monkeypatch.setattr(writer, 'DICTIONARY_SCAN_ROWS', 7)
+    labels = [f'v{i:03d}' for i in range(count)]
+    pts = shapely.points(-105 + np.arange(count) * 1e-4, np.full(count, 39.7))
     source = geoparquet(
         tmp_path / 'labels.parquet',
-        pa.table({'label': ['A', 'B'], 'geometry': pa.array(shapely.to_wkb(pts), pa.binary())}),
+        pa.table({'label': labels, 'geometry': pa.array(shapely.to_wkb(pts), pa.binary())}),
         ['Point'],
     )
 
     def rename(rows, zoom, ctx):
-        kept = rows.slice(0, 1)
-        return kept.set_column(kept.schema.get_field_index('label'), 'label', pa.array(['NEW']))
+        kept = rows.filter(pc.greater(rows['id'], 1))
+        label = pc.if_else(pc.equal(kept['id'], count), 'NEW', kept['label'])
+        return kept.set_column(kept.schema.get_field_index('label'), 'label', label)
 
-    for limit, values in ((writer.DICTIONARY_MAX, ['A', 'B', 'NEW']), (2, None)):
-        monkeypatch.setattr(writer, 'DICTIONARY_MAX', limit)
-        out = write(
-            source,
-            tmp_path / f'labels-{limit}.lod.parquet',
-            thinning=rename,
-            zooms=[13, 14],
-            complete_from=14,
-            carry=['label'],
-            workers=1,
-            log=lambda *_: None,
-        )
-        validate(out, full=True)
-        (label,) = json.loads(pq.read_schema(out).metadata[b'geo'])['lod_columns']['attributes']
-        assert label.get('values') == values
-        assert read_overview(out, 13)['label'].to_pylist() == ['NEW']
-        assert sorted(read_overview(out, 14)['label'].to_pylist()) == ['A', 'B']
+    out = write(
+        source,
+        tmp_path / 'labels.lod.parquet',
+        thinning=rename,
+        zooms=[13, 14],
+        complete_from=14,
+        carry=['label'],
+        workers=1,
+        log=lambda *_: None,
+    )
+    validate(out, full=True)
+    (label,) = json.loads(pq.read_schema(out).metadata[b'geo'])['lod_columns']['attributes']
+    table = sorted([*labels, 'NEW'])
+    assert label.get('values') == (table if len(table) <= DICTIONARY_MAX else None)
+    assert sorted(read_overview(out, 13)['label'].to_pylist()) == sorted([*labels[1:-1], 'NEW'])
+    assert sorted(read_overview(out, 14)['label'].to_pylist()) == labels
+
+
+def test_a_string_past_the_value_table_limit_is_not_counted_in_python(tmp_path, monkeypatch):
+    """Strings past DICTIONARY_MAX values pack plain without becoming a set of
+    Python strings: a source column of that many values is counted without
+    its thinning's values, a thinning giving one batch that many stops there,
+    and one giving them over several batches stops at the batch passing the
+    limit. Each count stays under 256 KiB of Python memory; the 17,500
+    strings the thinning gives `kind` take over a megabyte as Python objects."""
+    import tracemalloc
+
+    from geoparquet_lod import read_overview, writer
+
+    n = 20_000
+    rng = np.random.default_rng(5)
+    pts = shapely.points(-105 + rng.random(n) * 0.1, 39.7 + rng.random(n) * 0.1)
+    source = geoparquet(
+        tmp_path / 'strings.parquet',
+        pa.table(
+            {
+                'label': [f'label-{i}' for i in range(n)],
+                'kind': ['a', 'b'] * (n // 2),
+                'zone': ['a', 'b'] * (n // 2),
+                'geometry': pa.array(shapely.to_wkb(pts), pa.binary()),
+            }
+        ),
+        ['Point'],
+    )
+
+    def relabel(rows, zoom, ctx):
+        kept = rows.filter(pc.not_equal(pc.bit_wise_and(rows['id'], 7), 0))
+        ids = kept['id'].cast(pa.string())
+        columns = {
+            'label': pc.if_else(pc.equal(kept['id'], 1), 'NEW', kept['label']),
+            'kind': pc.binary_join_element_wise('kind-', ids, ''),
+            'zone': pc.binary_join_element_wise(
+                'zone-', pc.divide(kept['id'], 10).cast(pa.string()), ''
+            ),
+        }
+        for name, column in columns.items():
+            kept = kept.set_column(kept.schema.get_field_index(name), name, column)
+        return kept
+
+    peaks = {}
+    value_table = writer._value_table
+
+    def traced(con, path, name, overrides):
+        tracemalloc.start()
+        try:
+            return value_table(con, path, name, overrides)
+        finally:
+            peaks[name] = tracemalloc.get_traced_memory()[1]
+            tracemalloc.stop()
+
+    monkeypatch.setattr(writer, '_value_table', traced)
+    monkeypatch.setattr(writer, 'DICTIONARY_SCAN_ROWS', 1000)
+    out = write(
+        source,
+        tmp_path / 'strings.lod.parquet',
+        thinning=relabel,
+        zooms=[13, 14],
+        complete_from=14,
+        carry=['label', 'kind', 'zone'],
+        workers=1,
+        log=lambda *_: None,
+    )
+    attributes = json.loads(pq.read_schema(out).metadata[b'geo'])['lod_columns']['attributes']
+    assert [a['name'] for a in attributes if 'values' not in a] == ['label', 'kind', 'zone']
+    assert set(peaks) == {'label', 'kind', 'zone'}
+    assert max(peaks.values()) < 256 * 1024, peaks
+    shown = read_overview(out, 13)
+    assert 'NEW' in shown['label'].to_pylist()
+    assert pc.count_distinct(shown['kind']).as_py() == shown.num_rows
 
 
 def test_pack_refuses_a_string_outside_its_value_table():

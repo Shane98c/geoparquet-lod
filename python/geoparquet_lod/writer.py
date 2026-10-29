@@ -14,7 +14,7 @@ import json
 import os
 import tempfile
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,6 +54,8 @@ from .thinning import Context, Thin, default_thinning, describe
 LOD_KEY = 'lod_columns'
 KEY_COLUMN = 'hilbert'
 DICTIONARY_MAX = 256
+# a thinning's values of a string attribute are counted this many rows at a time
+DICTIONARY_SCAN_ROWS = 65_536
 KEY_FIELD = pa.field(KEY_COLUMN, pa.int64(), nullable=True)
 
 
@@ -452,6 +454,31 @@ def _overridden(ids: np.ndarray, sorted_ids: np.ndarray, values: dict) -> tuple:
     at = np.minimum(np.searchsorted(sorted_ids, ids), len(sorted_ids) - 1)
     hit = sorted_ids[at] == ids
     return hit, {k: v.take(at[hit]) for k, v in values.items()}
+
+
+def _value_table(con, path: Path, name: str, overrides: Iterable[pa.Array]) -> list[str] | None:
+    """The sorted distinct values of string attribute `name`, those of its
+    column in `path` and of the thinnings' `overrides`, or None when there are
+    more than DICTIONARY_MAX and it packs plain strings. The overrides are
+    read DICTIONARY_SCAN_ROWS rows at a time until the values pass the limit,
+    and a batch's values become Python strings only when it has DICTIONARY_MAX
+    or fewer, so at most twice that many are held."""
+    values = {
+        v
+        for (v,) in con.execute(
+            f"SELECT DISTINCT {name} FROM '{path}' WHERE {name} IS NOT NULL "
+            f'LIMIT {DICTIONARY_MAX + 1}'
+        ).fetchall()
+    }
+    for column in overrides:
+        for start in range(0, len(column), DICTIONARY_SCAN_ROWS):
+            if len(values) > DICTIONARY_MAX:
+                return None
+            distinct = column.slice(start, DICTIONARY_SCAN_ROWS).unique().drop_null()
+            if len(distinct) > DICTIONARY_MAX:
+                return None
+            values.update(distinct.to_pylist())
+    return sorted(values) if len(values) <= DICTIONARY_MAX else None
 
 
 def _spill_for_batch(
@@ -908,16 +935,14 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
     dictionaries: dict[str, list] = {}
     for a in attributes:
         if pa.types.is_string(a.type) or pa.types.is_large_string(a.type):
-            distinct = con.execute(
-                f"SELECT DISTINCT {a.name} FROM '{sorted_path}' WHERE {a.name} IS NOT NULL "
-                f'LIMIT {DICTIONARY_MAX + 1}'
-            ).fetchall()
-            values = {v[0] for v in distinct}
-            for _, replaced in lod_overrides.values():
-                if a.name in replaced:
-                    values.update(replaced[a.name].drop_null().unique().to_pylist())
-            if len(values) <= DICTIONARY_MAX:
-                dictionaries[a.name] = sorted(values)
+            table = _value_table(
+                con,
+                sorted_path,
+                a.name,
+                (replaced[a.name] for _, replaced in lod_overrides.values() if a.name in replaced),
+            )
+            if table is not None:
+                dictionaries[a.name] = table
 
     # 3. schema and metadata, known before writing
     origin = (mxmin, mymin)
