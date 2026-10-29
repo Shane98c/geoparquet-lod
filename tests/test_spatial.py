@@ -16,9 +16,9 @@ from geoparquet_lod import drop_rate, validate
 from geoparquet_lod import write as build
 from geoparquet_lod._compact import dumps, get, loads
 from geoparquet_lod._layout import finalize_layout
-from geoparquet_lod.pack import Unpacker
 from geoparquet_lod.writer import _write_unindexed as write
 from geoparquet_lod.writer import hilbert_key
+from unpacker import Unpacker
 
 ROOT = Path(__file__).resolve().parents[1]
 

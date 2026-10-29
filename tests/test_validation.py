@@ -317,7 +317,7 @@ def test_invalid_geometry_names_its_row(indexed, tmp_path, monkeypatch, value, m
 
 @pytest.mark.parametrize('mutation', ['tile', 'id'])
 def test_invalid_spill_identifiers(indexed, tmp_path, mutation):
-    from geoparquet_lod.pack import Unpacker
+    from unpacker import Unpacker
 
     table = pq.read_table(indexed)
     lod = table['lod'].combine_chunks()

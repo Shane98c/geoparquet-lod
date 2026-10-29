@@ -7,8 +7,8 @@ import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import shapely
 from geoparquet_lod import drop_rate, write
-from geoparquet_lod.pack import Unpacker
 from geoparquet_lod.writer import _write_unindexed
+from unpacker import Unpacker
 
 
 def test_indexed_layout_keeps_feature_identity(tmp_path):

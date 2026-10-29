@@ -10,9 +10,9 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 import shapely
-from geoparquet_lod.pack import Unpacker
 from geoparquet_lod.writer import _write_unindexed as write
 from geoparquet_lod.writer import hilbert_key
+from unpacker import Unpacker
 
 ROOT = Path(__file__).resolve().parents[1]
 

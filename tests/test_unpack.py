@@ -9,8 +9,8 @@ import pyarrow.parquet as pq
 import pytest
 import shapely
 from geoparquet_lod import read_overview, write
-from geoparquet_lod.pack import Unpacker
 from geoparquet_lod.unpack import UnpackError, carried, lod_values, unpack, unpack_batches
+from unpacker import Unpacker
 
 
 def quiet(*_):

@@ -9,7 +9,7 @@ import pyarrow.parquet as pq
 import pytest
 import shapely
 from geoparquet_lod import cluster, drop_rate, importance, only, size_threshold, validate, write
-from geoparquet_lod.pack import Unpacker
+from unpacker import Unpacker
 
 GEO = {
     'version': '1.1.0',
