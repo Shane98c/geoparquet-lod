@@ -171,8 +171,9 @@ export async function openReader(file: RangeSource): Promise<TileReader> {
   const length = new DataView(head).getUint32(12, true)
   if (!length || length > head.byteLength - 16) throw new Error('invalid spatial index root length')
   const root = await gunzipJson<SpatialRoot>(head.slice(16, 16 + length))
-  if (root.version !== VERSION || root.file_bytes !== file.byteLength)
-    throw new Error('invalid spatial index version or file length')
+  if (root.version !== VERSION) throw new Error(`unsupported spatial index version ${root.version}`)
+  if (root.file_bytes !== file.byteLength)
+    throw new Error('spatial index file length disagrees with the file')
   if (
     !isCompatibleVersion(root.lod.version) ||
     root.lod.encoding !== 'packed' ||

@@ -6,6 +6,12 @@ const realFetch = globalThis.fetch
 const file = new Uint8Array(128 * 1024)
 file.set(new TextEncoder().encode('PAR1'))
 file.set(new TextEncoder().encode('LODIDX01'), 4)
+const setRoot = (root) => {
+  const packed = gzipSync(JSON.stringify(root))
+  file.fill(0, 12, 16384)
+  new DataView(file.buffer).setUint32(12, packed.length, true)
+  file.set(packed, 16)
+}
 const calls = []
 let exposeRange = true,
   truncate = false,
@@ -53,9 +59,7 @@ try {
     2,
     'HEAD fallback when Content-Range is hidden and no root sizes the file',
   )
-  const root = gzipSync(JSON.stringify({ version: 1, file_bytes: file.length }))
-  new DataView(file.buffer).setUint32(12, root.length, true)
-  file.set(root, 16)
+  setRoot({ version: 2, file_bytes: file.length })
   calls.length = 0
   file.set(new TextEncoder().encode('PAR1'), file.length - 4)
   const sized = await httpSource(['https://example.test/data.parquet'])
@@ -65,6 +69,13 @@ try {
   assert.equal(calls.length, 3, 'the first read past the bootstrap checks the footer magic')
   await sized.slice(30000, 30010)
   assert.equal(calls.length, 4, 'the footer magic is checked once')
+  setRoot({ version: 1, file_bytes: file.length })
+  await assert.rejects(
+    openReader(await httpSource(['https://example.test/data.parquet'])),
+    /unsupported spatial index version 1/,
+    'a version-1 root is rejected, not read as this version',
+  )
+  setRoot({ version: 2, file_bytes: file.length })
   // a server error on the check is retried by the next read
   failTail = 1
   const retried = await httpSource(['https://example.test/data.parquet'])
@@ -76,7 +87,7 @@ try {
   await assert.rejects(truncated.slice(20000, 20010), /range request failed|does not end/)
   served = file.length
   file.fill(0, file.length - 4)
-  file.fill(0, 12, 16 + root.length)
+  file.fill(0, 12, 16384)
   exposeRange = true
   calls.length = 0
   file.fill(0, 4, 12)
