@@ -145,12 +145,17 @@ uv run geoparquet-lod write buildings.parquet buildings.lod.parquet \
 ```python
 from geoparquet_lod import write, combine, drop_rate, only, size_threshold
 
-write(
-    "buildings.parquet", "buildings.lod.parquet",
-    thinning=only("risk > 0", combine(size_threshold(4), drop_rate(2.5))),
-    carry=["risk"],
-)
+if __name__ == "__main__":
+    write(
+        "buildings.parquet", "buildings.lod.parquet",
+        thinning=only("risk > 0", combine(size_threshold(4), drop_rate(2.5))),
+        carry=["risk"],
+    )
 ```
+
+`write()` packs overviews in worker processes, which import the calling
+script again unless Python forks them, so a script calls it under an
+`if __name__ == "__main__":` guard.
 
 The input is any GeoParquet with a WKB geometry column in OGC:CRS84 or
 EPSG:4326 with planar edges, as a path or a `*` glob, local or on S3 (`s3://`, with credentials
