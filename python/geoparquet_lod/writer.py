@@ -202,6 +202,11 @@ def _rebatch(batches, rows: int):
         yield pa.Table.from_batches(held).combine_chunks()
 
 
+def _quoted(name: str) -> str:
+    """`name` as a DuckDB identifier, so any source column name reads as itself."""
+    return '"' + name.replace('"', '""') + '"'
+
+
 def _first_rows(path: Path, columns: list[str], valid: str, rows: int) -> pa.Table:
     """The first `rows` rows of `path` in file order whose `valid` column is not null."""
     parts, count = [], 0
@@ -315,7 +320,7 @@ def guess_zooms(con, sorted_path, geometry, family, zooms, complete_from, extent
     auto_from = complete_from == 'auto'
     if auto_zooms or auto_from:
         sample = con.execute(
-            f"SELECT __diag AS diag, {geometry} FROM '{sorted_path}' WHERE __cx IS NOT NULL USING SAMPLE 5000 ROWS"
+            f"SELECT __diag AS diag, {_quoted(geometry)} FROM '{sorted_path}' WHERE __cx IS NOT NULL USING SAMPLE 5000 ROWS"
         ).to_arrow_table()
         diag = float(np.median(sample.column('diag').to_numpy())) if sample.num_rows else 0.0
         geoms = shapely.from_wkb(sample.column(geometry).to_numpy(zero_copy_only=False))
@@ -357,7 +362,7 @@ def _full_detail_bytes(con, sorted_path, geometry, family, finest_zoom, origin, 
     """Estimated geometry bytes of the whole dataset at the finest zoom, from a sample:
     two int32 per vertex before compression."""
     sample = con.execute(
-        f"SELECT {geometry} FROM '{sorted_path}' WHERE __cx IS NOT NULL USING SAMPLE 2000 ROWS"
+        f"SELECT {_quoted(geometry)} FROM '{sorted_path}' WHERE __cx IS NOT NULL USING SAMPLE 2000 ROWS"
     ).to_arrow_table()
     if not sample.num_rows:
         return 0.0
@@ -466,7 +471,7 @@ def _value_table(con, path: Path, name: str, overrides: Iterable[pa.Array]) -> l
     values = {
         v
         for (v,) in con.execute(
-            f"SELECT DISTINCT {name} FROM '{path}' WHERE {name} IS NOT NULL "
+            f"SELECT DISTINCT {_quoted(name)} FROM '{path}' WHERE {_quoted(name)} IS NOT NULL "
             f'LIMIT {DICTIONARY_MAX + 1}'
         ).fetchall()
     }
@@ -695,6 +700,7 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
     out.parent.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
     geometry, log = o.geometry, o.log
+    quoted = _quoted(geometry)
     workers = o.workers or min(os.cpu_count() or 1, DEFAULT_WORKERS)
     con = held.enter_context(connect(o.memory_limit, o.temp_dir))
     _attach_source(con, src)
@@ -711,7 +717,7 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
     types = [t.lower() for t in column.get('geometry_types', [])]
     if not types:
         sample = con.execute(
-            f"SELECT ST_GeometryType({geometry}) FROM read_parquet('{src}') LIMIT 1000"
+            f"SELECT ST_GeometryType({quoted}) FROM read_parquet('{src}') LIMIT 1000"
         ).fetchall()
         types = [str(t[0]).lower() for t in sample]
     if types and all('point' in t for t in types):
@@ -735,9 +741,9 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
         raise ValueError(
             f'columns {bad} clash with the names thinnings see; rename them in the source'
         )
-    valid = f'({geometry} IS NOT NULL AND NOT ST_IsEmpty({geometry}))'
+    valid = f'({quoted} IS NOT NULL AND NOT ST_IsEmpty({quoted}))'
     xmin, ymin, xmax, ymax = con.execute(
-        f'SELECT min(ST_XMin({geometry})), min(ST_YMin({geometry})), max(ST_XMax({geometry})), max(ST_YMax({geometry})) '
+        f'SELECT min(ST_XMin({quoted})), min(ST_YMin({quoted})), max(ST_XMax({quoted})), max(ST_YMax({quoted})) '
         f"FROM read_parquet('{src}') WHERE {valid}"
     ).fetchone()
     if xmin is None:
@@ -759,17 +765,15 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
     # the key cell holds the bbox centre; its Hilbert index is computed in numpy and the
     # rows sorted by it
     cell_x, cell_y = sql_key_cell(
-        f'(ST_XMin({geometry}) + ST_XMax({geometry})) / 2',
-        f'(ST_YMin({geometry}) + ST_YMax({geometry})) / 2',
+        f'(ST_XMin({quoted}) + ST_XMax({quoted})) / 2',
+        f'(ST_YMin({quoted}) + ST_YMax({quoted})) / 2',
     )
     # thinnings and grids work in Web Mercator metres; the covering stays in degrees
-    centroid = f'ST_Centroid({geometry})'
-    width = f'({sql_mercator_x(f"ST_XMax({geometry})")} - {sql_mercator_x(f"ST_XMin({geometry})")})'
-    height = (
-        f'({sql_mercator_y(f"ST_YMax({geometry})")} - {sql_mercator_y(f"ST_YMin({geometry})")})'
-    )
+    centroid = f'ST_Centroid({quoted})'
+    width = f'({sql_mercator_x(f"ST_XMax({quoted})")} - {sql_mercator_x(f"ST_XMin({quoted})")})'
+    height = f'({sql_mercator_y(f"ST_YMax({quoted})")} - {sql_mercator_y(f"ST_YMin({quoted})")})'
     # the source is lon/lat; DuckDB 2 requires the axis order to be stated
-    area = f"ST_Area(ST_Transform({geometry}, 'OGC:CRS84', 'EPSG:3857', true))"
+    area = f"ST_Area(ST_Transform({quoted}, 'OGC:CRS84', 'EPSG:3857', true))"
     sorted_path = out.with_suffix('.sorted.parquet')
     unsorted_path = out.with_suffix('.unsorted.parquet')
     log(f'sorting {src}')
@@ -782,8 +786,8 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
                 CASE WHEN {valid} THEN {sql_mercator_y(f'ST_Y({centroid})')}::DOUBLE END AS __cy,
                 CASE WHEN {valid} THEN sqrt({width} ^ 2 + {height} ^ 2) END AS __diag,
                 CASE WHEN {valid} THEN {area} END AS __area,
-                CASE WHEN {valid} THEN ST_NPoints({geometry}) END AS __nv,
-                CASE WHEN {valid} THEN {{xmin: ST_XMin({geometry}), ymin: ST_YMin({geometry}), xmax: ST_XMax({geometry}), ymax: ST_YMax({geometry})}} END AS __bbox,
+                CASE WHEN {valid} THEN ST_NPoints({quoted}) END AS __nv,
+                CASE WHEN {valid} THEN {{xmin: ST_XMin({quoted}), ymin: ST_YMin({quoted}), xmax: ST_XMax({quoted}), ymax: ST_YMax({quoted})}} END AS __bbox,
                 CASE WHEN {valid} THEN {cell_x} END AS __kx,
                 CASE WHEN {valid} THEN {cell_y} END AS __ky,
                 {passthrough}
@@ -828,8 +832,8 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
                 '__area AS area',
                 '__nv AS nv',
             ]
-            + [a.name for a in attributes]
-            + list(o.columns)
+            + [_quoted(a.name) for a in attributes]
+            + [_quoted(c) for c in o.columns]
         )
     )
     # The sorted copy is already in (key, id) order; reading it in file order,
@@ -838,7 +842,7 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
     con.execute('SET preserve_insertion_order = true')
     rows = pa.Table.from_batches(
         con.execute(
-            f'SELECT {slim}, (hash({geometry}) % 1000000007) / 1000000007.0 AS u '
+            f'SELECT {slim}, (hash({quoted}) % 1000000007) / 1000000007.0 AS u '
             f"FROM '{sorted_path}' WHERE __cx IS NOT NULL"
         ).to_arrow_reader(1_000_000)
     ).combine_chunks()
@@ -1121,7 +1125,7 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
         # one pass over the sorted copy picks the straddlers out as it goes, so a national file's
         # tens of millions of copies cost one scan and never sit in memory as WKB at once; each
         # LOD's store is in file order with a permutation for lookup by id
-        attr_select = ''.join(f', {a.name}' for a in attributes)
+        attr_select = ''.join(f', {_quoted(a.name)}' for a in attributes)
         lod_srcs = {
             b['name']: np.unique(spill_entries[b['name']][2])
             for b in lod_plan
@@ -1134,7 +1138,7 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
         attr_ids: list = []
         scanned = 0
         reader = con.execute(
-            f'SELECT __id, {geometry} AS g, __cx AS cx, __cy AS cy{attr_select} '
+            f'SELECT __id, {quoted} AS g, __cx AS cx, __cy AS cy{attr_select} '
             f"FROM '{sorted_path}' WHERE __cx IS NOT NULL"
         ).to_arrow_reader(1_000_000)
         for batch in reader:

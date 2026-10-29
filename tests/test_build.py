@@ -122,3 +122,52 @@ def test_a_build_failing_midway_leaves_no_workers_or_files(tmp_path, monkeypatch
     assert not any(p.is_alive() for p in workers)
     assert output.read_bytes() == b'existing output'
     assert sorted(tmp_path.iterdir()) == [output, source]
+
+
+def test_source_column_names_reach_the_overviews_as_written(tmp_path):
+    """Carried, thinning and geometry columns named like SQL keywords or with
+    dots and quotes build, validate and carry their values."""
+    from geoparquet_lod import read_overview, validate
+
+    geometry = 'shape "x"'
+    geo = {
+        'version': '1.1.0',
+        'primary_column': geometry,
+        'columns': {geometry: {'encoding': 'WKB', 'geometry_types': ['Point']}},
+    }
+    n = 40
+    lon = -105 + np.arange(n) * 1e-3
+    table = pa.table(
+        {
+            'group': pa.array(np.arange(n) % 3, pa.int32()),
+            'odd.name': pa.array([f'v{i % 4}' for i in range(n)]),
+            'order': pa.array(np.arange(n), pa.int64()),
+            geometry: shapely.to_wkb(shapely.points(lon, np.full(n, 39.7))),
+        }
+    ).replace_schema_metadata({b'geo': json.dumps(geo).encode()})
+    source, output = tmp_path / 'source.parquet', tmp_path / 'output.parquet'
+    pq.write_table(table, source)
+
+    def thin(rows, zoom, ctx):
+        return rows.filter(pa.array(rows.column('order').to_numpy() % 2 == 0))
+
+    write(
+        source,
+        output,
+        thinning=thin,
+        columns=['order'],
+        carry=['group', 'odd.name'],
+        geometry=geometry,
+        zooms=[10, 11],
+        complete_from=11,
+        workers=1,
+        log=lambda *_: None,
+    )
+    validate(output, full=True)
+    shown = read_overview(output, 10).sort_by('row')
+    assert shown.num_rows == n // 2
+    source_rows = pq.read_table(output, columns=['group', 'odd.name', 'order'])
+    picked = source_rows.take(shown.column('row'))
+    assert shown.column('group').to_pylist() == picked.column('group').to_pylist()
+    assert shown.column('odd.name').to_pylist() == picked.column('odd.name').to_pylist()
+    assert all(v % 2 == 0 for v in picked.column('order').to_pylist())
