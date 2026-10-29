@@ -8,6 +8,7 @@ without changing table values. Ordinary readers use the standard Parquet footer.
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 import json
 import os
@@ -634,15 +635,20 @@ def _write_unindexed(src: str, out: str | Path, **options) -> Path:
     GeoParquet LOD layout, without the tile-aligned pages and spatial
     directory `write` adds after. Takes `write`'s options, with its defaults;
     overview columns are written at zstd level STAGED_LOD_LEVEL, since
-    `finalize_layout` encodes them again. Returns the output path."""
-    o = _options(options)
-    src = str(src)
-    out = Path(out)
+    `finalize_layout` encodes them again. Returns the output path. However it
+    ends, its DuckDB connections and output file are closed and its workers
+    have exited, queued jobs cancelled."""
+    with contextlib.ExitStack() as held:
+        return _build(str(src), Path(out), _options(options), held)
+
+
+def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) -> Path:
+    """`_write_unindexed`'s work, leaving what it opens with `held` to close."""
     out.parent.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
     geometry, log = o.geometry, o.log
     workers = o.workers or min(os.cpu_count() or 1, DEFAULT_WORKERS)
-    con = connect(o.memory_limit, o.temp_dir)
+    con = held.enter_context(connect(o.memory_limit, o.temp_dir))
     _attach_source(con, src)
     source_schema = _read_schema(src)
     attributes = infer_attributes(source_schema, o.carry)
@@ -747,7 +753,7 @@ def _write_unindexed(src: str, out: str | Path, **options) -> Path:
     del key_ids, keys
     # a fresh connection returns the memory DuckDB held for the copy
     con.close()
-    con = connect(o.memory_limit, o.temp_dir)
+    con = held.enter_context(connect(o.memory_limit, o.temp_dir))
     pa.default_memory_pool().release_unused()
     n_rows = con.execute(f"SELECT count(*) FROM '{sorted_path}'").fetchone()[0]
     log(f'  {n_rows:,} rows sorted, {time.time() - t0:.0f}s')
@@ -1021,11 +1027,12 @@ def _write_unindexed(src: str, out: str | Path, **options) -> Path:
     log(f'  {len(lod_plan)} LODs, batch {batch_rows} rows')
 
     # 5. write every row in Hilbert order
-    writer = pq.ParquetWriter(out, schema, **options)
+    writer = held.enter_context(pq.ParquetWriter(out, schema, **options))
     # Workers stay for the whole build, each holding about the largest job it has run;
     # with max_tasks_per_child, a pool fed in bursts can stop replacing the workers that
     # exit, leaving jobs that never run.
     pool = ProcessPoolExecutor(max_workers=workers)
+    held.callback(pool.shutdown, cancel_futures=True)
 
     # the straddlers' copies, rendered once per LOD, and their attributes
     spill_store: dict[str, tuple] = {}

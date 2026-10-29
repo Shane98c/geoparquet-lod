@@ -1,8 +1,10 @@
 """The public build publishes only complete indexed files."""
 
 import json
+import multiprocessing
 from pathlib import Path
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
@@ -70,3 +72,53 @@ def test_failed_build_preserves_output_and_cleans_staging(tmp_path, monkeypatch,
         write('unused-source', output, log=lambda *_: None)
     assert output.read_bytes() == b'existing output'
     assert list(tmp_path.iterdir()) == [output]
+
+
+@pytest.mark.parametrize('failure', ['packing', 'interrupt'])
+def test_a_build_failing_midway_leaves_no_workers_or_files(tmp_path, monkeypatch, failure):
+    """A worker refusing a value, or an interrupt once the workers have
+    rendered the straddlers, ends the build with its workers gone, its staging
+    removed and the existing output kept."""
+    rng = np.random.default_rng(3)
+    x, y = -105 + rng.random(400) * 0.2, 39.6 + rng.random(400) * 0.2
+    geo = {
+        'version': '1.1.0',
+        'primary_column': 'geometry',
+        'columns': {'geometry': {'encoding': 'WKB', 'geometry_types': ['Polygon']}},
+    }
+    big = [2**63 if failure == 'packing' and i == 200 else i for i in range(400)]
+    table = pa.table(
+        {
+            'big': pa.array(big, pa.uint64()),
+            'geometry': shapely.to_wkb(shapely.box(x, y, x + 0.01, y + 0.01)),
+        }
+    )
+    source, output = tmp_path / 'source.parquet', tmp_path / 'output.parquet'
+    pq.write_table(table.replace_schema_metadata({b'geo': json.dumps(geo).encode()}), source)
+    output.write_bytes(b'existing output')
+    before = set(multiprocessing.active_children())
+    workers = set()
+    spill_for_batch = writer._spill_for_batch
+
+    def watched(*args):
+        workers.update(set(multiprocessing.active_children()) - before)
+        if failure == 'interrupt':
+            raise KeyboardInterrupt
+        return spill_for_batch(*args)
+
+    monkeypatch.setattr(writer, '_spill_for_batch', watched)
+    error = ValueError if failure == 'packing' else KeyboardInterrupt
+    with pytest.raises(error):
+        write(
+            source,
+            output,
+            zooms=[12, 13],
+            complete_from=12,
+            carry=['big'],
+            workers=2,
+            log=lambda *_: None,
+        )
+    assert workers, 'the workers rendered the straddlers before the failure'
+    assert not any(p.is_alive() for p in workers)
+    assert output.read_bytes() == b'existing output'
+    assert sorted(tmp_path.iterdir()) == [output, source]
