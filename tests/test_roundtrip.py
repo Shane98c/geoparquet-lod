@@ -153,6 +153,119 @@ def test_polygon_rings_are_stored_open():
             pack('MultiPolygon', (*parts[:2], np.array([0, len(ring)]), x, y), [], {})
 
 
+INT64_MAX = 2**63 - 1
+
+
+def int64_limits(path, value):
+    """Small buildings and two boxes across a z10 tile edge, which are copied
+    into the next tile at z10 and finer. uint64 `big` is `value` on the first
+    box and null on the second and every third building; int64 `signed` is
+    its minimum on the first box and its maximum on the second."""
+    rng = np.random.default_rng(6)
+    x, y = -105.3 + rng.random(300) * 0.3, 39.6 + rng.random(300) * 0.2
+    boxes = shapely.box(
+        np.r_[x, -105.13, -105.13],
+        np.r_[y, 39.7, 39.75],
+        np.r_[x + 1e-4, -105.1, -105.1],
+        np.r_[y + 1e-4, 39.72, 39.77],
+    )
+    table = pa.table(
+        {
+            'big': pa.array(
+                [None if i % 3 == 0 else i for i in range(300)] + [value, None], pa.uint64()
+            ),
+            'signed': pa.array([*range(300), -INT64_MAX - 1, INT64_MAX], pa.int64()),
+            'geometry': pa.array(shapely.to_wkb(boxes), pa.binary()),
+        }
+    )
+    return geoparquet(path, table, ['Polygon'])
+
+
+def test_carried_integers_reach_the_int64_limits(tmp_path):
+    from geoparquet_lod import read_overview
+    from geoparquet_lod.unpack import carried, lod_values, unpack_batches
+
+    src = int64_limits(tmp_path / 'limits.parquet', INT64_MAX)
+    out = write(
+        src,
+        tmp_path / 'limits.lod.parquet',
+        carry=['big', 'signed'],
+        zooms=range(9, 13),
+        workers=1,
+        log=lambda *_: None,
+    )
+    validate(out, full=True)
+    f = pq.ParquetFile(out)
+    lod = json.loads(f.schema_arrow.metadata[b'geo'])['lod_columns']
+    fields, dictionaries = carried(lod)
+    copies = set()
+    for name, child in lod['lods'].items():
+        values = lod_values(f, 0, 'lod', name)
+        for u in unpack_batches(values, child['geometry_type'], fields, dictionaries):
+            pairs = zip(u.attrs['signed'].to_pylist(), u.attrs['big'].to_pylist(), strict=True)
+            copies.update(pair for pair, copy in zip(pairs, u.copy, strict=True) if copy)
+    assert {(-INT64_MAX - 1, INT64_MAX), (INT64_MAX, None)} <= copies
+    table = read_overview(out, 12)
+    big = dict(zip(table['signed'].to_pylist(), table['big'].to_pylist(), strict=True))
+    assert big[-INT64_MAX - 1] == INT64_MAX and big[INT64_MAX] is None
+    assert table['big'].null_count == 101
+
+
+def test_carried_uint64_above_int64_is_refused(tmp_path):
+    src = int64_limits(tmp_path / 'over.parquet', INT64_MAX + 1)
+    with pytest.raises(ValueError, match=f'cannot pack big value {INT64_MAX + 1}'):
+        write(
+            src,
+            tmp_path / 'over.lod.parquet',
+            carry=['big', 'signed'],
+            zooms=range(9, 13),
+            workers=1,
+            log=lambda *_: None,
+        )
+
+
+def test_copies_refuse_uint64_above_int64():
+    """The packer checks the values of the copies a row hosts as well as its own."""
+    from geoparquet_lod.pack import pack
+    from geoparquet_lod.unpack import unpack
+
+    x, y = np.array([0, 2, 2, 0, 0], np.int32), np.array([0, 0, 2, 2, 0], np.int32)
+    parts = (np.array([0, 1]), np.array([0, 1]), np.array([0, 5]), x, y)
+    fields = [pa.field('big', pa.uint64())]
+    own = {'big': pa.array([None], pa.uint64())}
+
+    def host(copy):
+        spill = (
+            np.array([1]),
+            np.array([10 << 48]),
+            np.array([7]),
+            parts,
+            {'big': pa.array([copy], pa.uint64())},
+        )
+        return pack('MultiPolygon', parts, fields, own, spill)
+
+    decoded = unpack(host(INT64_MAX), 'MultiPolygon', fields)
+    assert decoded.attrs['big'].to_pylist() == [None, INT64_MAX]
+    with pytest.raises(ValueError, match=f'cannot pack big value {INT64_MAX + 1}'):
+        host(INT64_MAX + 1)
+
+
+@pytest.mark.parametrize(
+    'kind', ['int8', 'int16', 'int32', 'int64', 'uint8', 'uint16', 'uint32', 'uint64']
+)
+def test_every_integer_type_packs_its_range(kind):
+    """Every integer type packs whole except uint64, which packs up to the int64 maximum."""
+    from geoparquet_lod.pack import pack
+    from geoparquet_lod.unpack import unpack
+
+    t = pa.type_for_alias(kind)
+    limits = np.iinfo(kind)
+    values = pa.array([int(limits.min), min(int(limits.max), INT64_MAX), None], t)
+    fields = [pa.field('v', t)]
+    blobs = pack('Point', (np.zeros(3, np.int32), np.zeros(3, np.int32)), fields, {'v': values})
+    assert unpack(blobs, 'Point', fields).attrs['v'].equals(values)
+
+
 def test_points_importance_and_cluster(points, tmp_path):
     out = write(
         points,

@@ -31,6 +31,7 @@ import numpy as np
 import pyarrow as pa
 
 FAMILY_DEPTH = {'Point': 0, 'MultiLineString': 2, 'MultiPolygon': 3}
+INT64_MAX = np.iinfo(np.int64).max
 
 
 def zigzag(v: np.ndarray) -> np.ndarray:
@@ -166,7 +167,13 @@ def _attr_values(fields: list[pa.Field], arrays: dict[str, pa.Array], n: int, di
             codes = pc.index_in(arr, value_set=pa.array(dictionaries[f.name], arr.type))
             vals = codes.fill_null(0).to_numpy(zero_copy_only=False).astype(np.uint64)
         elif pa.types.is_integer(t):
-            vals = zigzag(np.where(valid, arr.fill_null(0).to_numpy(zero_copy_only=False), 0))
+            v = arr.fill_null(0).to_numpy(zero_copy_only=False)
+            if pa.types.is_uint64(t) and (big := v > INT64_MAX).any():
+                raise ValueError(
+                    f'cannot pack {f.name} value {v[big][0]}: carried integers are packed as '
+                    f'int64, at most {INT64_MAX}'
+                )
+            vals = zigzag(v)
         elif pa.types.is_floating(t):
             if pa.types.is_float64(t):
                 vals = (

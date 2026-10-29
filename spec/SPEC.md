@@ -230,9 +230,11 @@ is a quarter of a Web Mercator pixel at the LOD's finest zoom, close to
 tippecanoe's eighth-pixel tolerance; features a pixel or two across keep
 their own shape.
 
-Carried attributes keep their declared Arrow types and nulls. A thinning
-that overrides an attribute writes the overridden value, cast to the
-declared type, into that LOD's rows; copies carry the source row's values.
+Carried attributes keep their declared Arrow types and nulls. Integers are
+zigzagged as int64, so a uint64 attribute MUST NOT hold a value above
+2^63 - 1. A thinning that overrides an attribute writes the overridden
+value, cast to the declared type, into that LOD's rows; copies carry the
+source row's values.
 
 ## Reading without the spatial index
 

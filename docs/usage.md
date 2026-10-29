@@ -73,6 +73,8 @@ Carry a few frequently used scalar columns. Other attributes can be read with
 on demand; the first read of a source column is substantially slower than a
 carried attribute, and a file rewrite is the way to make one fast. Thinning
 functions can read any source column via `columns=` without carrying it.
+Carried integers are packed as int64, so the writer refuses a uint64 value
+above 2^63 - 1 with an error naming the column and the value.
 
 ## Geometry
 
