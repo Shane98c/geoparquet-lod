@@ -15,7 +15,7 @@ import pytest
 import shapely
 from click.testing import CliRunner
 from geoparquet_lod import _validate_index, validate, write
-from geoparquet_lod._compact import dumps, get, loads, set_value
+from geoparquet_lod._compact import dumps, get, loads, loads_prefix, set_value
 from geoparquet_lod._layout import (
     _node,
     finalize_layout,
@@ -479,6 +479,75 @@ def test_overview_pages_are_v1_plain(indexed, tmp_path, monkeypatch):
     monkeypatch.undo()
     with pytest.raises(ValidationError, match='v1 data pages'):
         validate(out, full=True)
+
+
+def test_v2_source_pages_are_indexed(carried, tmp_path):
+    """Source chunks are copied byte for byte, so the primary directory
+    locates v2 geometry and attribute pages as it does v1 ones."""
+    table = pq.read_table(carried[0])
+    metadata = dict(table.schema.metadata)
+    metadata.pop(b'lod_spatial_index', None)
+    packed = tmp_path / 'packed.parquet'
+    pq.write_table(
+        table.replace_schema_metadata(metadata),
+        packed,
+        row_group_size=64,
+        max_rows_per_page=16,
+        use_dictionary=False,
+        data_page_version='2.0',
+        write_page_index=True,
+    )
+    out = finalize_layout(packed, tmp_path / 'v2.parquet', log=lambda *_: None)
+    raw = out.read_bytes()
+    group = pq.ParquetFile(out).metadata.row_group(0)
+    for name in ('geometry', 'height'):
+        chunk = next(
+            group.column(i)
+            for i in range(group.num_columns)
+            if group.column(i).path_in_schema == name
+        )
+        header, _ = loads_prefix(raw[chunk.data_page_offset :])
+        assert get(header, 1) == 3, f'{name} pages are DATA_PAGE_V2'
+    assert _root(out)[1]['primary_index']['attributes'] == ['height']
+    validate(out, full=True)
+
+
+@pytest.mark.parametrize(
+    'kind, values, nulls, rows, ok',
+    [
+        (3, 3, 0, 3, True),
+        (3, 3, 1, 3, True),
+        (0, 3, None, None, True),
+        # hyparquet sizes a v2 page's level and value arrays by its values
+        (3, 500_000_000, 0, 3, False),
+        (3, 3, 0, 4, False),
+        (3, 3, -1, 3, False),
+        (3, 3, 4, 3, False),
+        (0, 500_000_000, None, None, False),
+    ],
+)
+def test_source_page_headers_hold_a_value_or_null_per_row(kind, values, nulls, rows, ok):
+    """An indexed column is flat, so a page's header counts as many values as
+    its offset index gives it rows, a v2 header as many rows too, and at
+    most that many nulls."""
+    body = bytes(8)
+    if kind == 0:
+        page = {1: (5, values), 2: (5, 0), 3: (5, 3), 4: (5, 3)}
+    else:
+        page = {1: (5, values), 2: (5, nulls), 3: (5, rows), 4: (5, 0), 5: (5, 0), 6: (5, 0)}
+    header = {1: (5, kind), 2: (5, len(body)), 3: (5, len(body)), 5 if kind == 0 else 8: (12, page)}
+    raw = dumps(header) + body
+    chunk = {7: (6, len(raw)), 9: (6, 4)}
+
+    def read(offset, length):
+        return raw[offset - 4 : offset - 4 + length]
+
+    check = (read, chunk, np.array([4]), np.array([len(raw)]), np.array([3]))
+    if ok:
+        _validate_index._check_source_pages(*check)
+        return
+    with pytest.raises(ValueError, match='indexed column page header disagrees'):
+        _validate_index._check_source_pages(*check)
 
 
 @pytest.mark.parametrize(

@@ -377,7 +377,8 @@ def _index_part(byte, length, bounds, _cm, start):
 def _check_source_pages(read, cm, byte, length, rows):
     """Check that a primary or attribute chunk holds only the pages its offset
     index lists, back to back from its first data page to its end, each a
-    data page, not dictionary encoded, of as many rows as the index says."""
+    data page, not dictionary encoded, of as many rows as the index says.
+    The column is flat, so a page holds a value or a null per row."""
     start = get(cm, 9)
     if (
         11 in cm
@@ -394,14 +395,20 @@ def _check_source_pages(read, cm, byte, length, rows):
             header, header_size = loads_prefix(read(offset, size))
         kind, v1, v2 = get(header, 1), get(header, 5), get(header, 8)
         if kind == 0 and v1 is not None:
-            values, encoding = get(v1, 1), get(v1, 2)
+            values, nulls, rows, encoding = get(v1, 1), 0, get(v1, 1), get(v1, 2)
         elif kind == 3 and v2 is not None:
-            values, encoding = get(v2, 3), get(v2, 4)
+            values, nulls, rows, encoding = (get(v2, k) for k in (1, 2, 3, 4))
         else:
             raise ValueError('indexed column pages must be data pages')
         if encoding in (2, 8):
             raise ValueError('indexed column pages must not be dictionary encoded')
-        if values != count or header_size + get(header, 3) != size:
+        if (
+            values != count
+            or rows != count
+            or type(nulls) is not int
+            or not 0 <= nulls <= values
+            or header_size + get(header, 3) != size
+        ):
             raise ValueError('indexed column page header disagrees with its offset index')
 
 

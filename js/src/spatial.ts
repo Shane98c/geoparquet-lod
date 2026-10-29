@@ -226,7 +226,7 @@ const RAW_GEOMETRY_PARSERS = {
 
 /** A page's values, decoded whole once its header shows a data page, not
  * dictionary encoded, of exactly its bytes holding the rows the directory
- * gives it. */
+ * gives it: an indexed column is flat, so a value or a null per row. */
 function pageValues(
   decoder: ColumnDecoder,
   page: SourcePage & { bytes: ArrayBuffer },
@@ -235,9 +235,15 @@ function pageValues(
   const header = deserializeTCompactProtocol(reader)
   const v1 = header.field_1 === 0 && (header.field_5 as Record<string, number> | undefined)
   const v2 = header.field_1 === 3 && (header.field_8 as Record<string, number> | undefined)
-  const [rows, encoding] = v1 ? [v1.field_1, v1.field_2] : v2 ? [v2.field_3, v2.field_4] : []
+  const [valueCount, rowCount, nullCount, encoding] = v1
+    ? [v1.field_1, v1.field_1, 0, v1.field_2]
+    : v2
+      ? [v2.field_1, v2.field_3, v2.field_2, v2.field_4]
+      : [NaN, NaN, NaN, NaN]
   if (
-    rows !== page.count ||
+    valueCount !== page.count ||
+    rowCount !== page.count ||
+    !(nullCount >= 0 && nullCount <= valueCount) ||
     encoding === 2 ||
     encoding === 8 ||
     reader.offset + Number(header.field_3) !== page.bytes.byteLength

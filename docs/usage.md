@@ -324,7 +324,8 @@ runs wherever it is listed; each run's box is the union of its rows' covering
 boxes and holds a row with an extent; attribute page lists match their offset
 indexes over the leaf's rows; codecs and schema match the footer; and every
 indexed page is a data page, not dictionary encoded, of the rows its index
-says. Files without a spatial directory get the packed-value and offset-index
+says, its header counting a value or a null for each. Files without a
+spatial directory get the packed-value and offset-index
 checks. This is a storage and reader contract check; it does not
 prove polygon topology or compare simplification accuracy with primary WKB. Full
 mode reads the complete data, holds one LOD column of one row group at a time,

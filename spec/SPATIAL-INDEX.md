@@ -211,7 +211,10 @@ runs whose geometry is present and whose bbox intersects the query: the
 reference reader takes it from the WKB, rounded outward to float32, which
 [Layout](SPEC.md#layout) 2 makes the covering, so it keeps the rows the
 covering would. Alongside the geometry, read the pages of each needed
-attribute that the same leaves locate over the taken runs' rows.
+attribute that the same leaves locate over the taken runs' rows. These
+columns are flat, so a page's header counts one value, null or not, per row:
+a v1 header's values and a v2 header's values and rows are the page's rows,
+and a v2 header's nulls at most as many.
 
 ## Analytical access and publishing
 

@@ -255,6 +255,26 @@ const binaryPage = (values, encoding = 0) => {
   const header = [...[0, body.length, body.length].flatMap(i32), 0x2c, ...page, 0, 0]
   return Uint8Array.from([...header, ...body])
 }
+/** The same values as an uncompressed v2 data page, whose header's value,
+ * null and row counts may be given. */
+const binaryPageV2 = (
+  values,
+  { count = values.length, nulls = values.filter((v) => !v).length, rows = values.length } = {},
+) => {
+  // v2 definition levels have no length prefix: the header gives it
+  const levels = [...varint(Math.ceil(values.length / 8) * 2 + 1)]
+  for (let i = 0; i < values.length; i += 8)
+    levels.push(values.slice(i, i + 8).reduce((bits, v, j) => bits | ((v ? 1 : 0) << j), 0))
+  const body = [...levels]
+  for (const v of values.filter(Boolean))
+    body.push(...new Uint8Array(new Uint32Array([v.length]).buffer), ...v)
+  const i32 = (n) => [0x15, ...varint(n < 0 ? -2 * n - 1 : 2 * n)]
+  // type DATA_PAGE_V2 and both sizes, then field 8: the counts, PLAIN and
+  // the levels' byte lengths
+  const page = [count, nulls, rows, 0, levels.length, 0].flatMap(i32)
+  const header = [...[3, body.length, body.length].flatMap(i32), 0x5c, ...page, 0, 0]
+  return Uint8Array.from([...header, ...body])
+}
 /** A primary leaf over pages {offset, length, first, runs: [{box, count}]}:
  * an entry per run, each but a page's first of length 0. */
 const primaryLeaf = (pages) => {
@@ -542,8 +562,29 @@ console.log('byte ranges: nodes, pages and row metadata past the file are refuse
     await assert.rejects(read(count, attributeRows), /page header disagrees/, why)
   const dictionary = file.raw(binaryPage([point(5, 5), point(5, 5)], 8))
   await assert.rejects(read(2, 2, dictionary), /page header disagrees/, 'a dictionary page')
+
+  // A v2 header counts values, nulls and rows apart, and hyparquet sizes a
+  // page's arrays by its values: those of a flat column's page are its rows.
+  const rows = (geometry) => {
+    const leaf = primaryLeaf([
+      { offset: geometry[0], length: geometry[1], first: 0, runs: [{ box: at(5, 5), count: 3 }] },
+    ])
+    const [offset, length] = file.add(leaf)
+    const top = cellBranch(1, [{ low: 0, high: 15, offset, length }])
+    return reader(file.bytes, EMPTY_TOP, top).readPrimary([4, 4, 6, 6])
+  }
+  const values = [point(5, 5), null, point(5, 5)]
+  assert.deepEqual((await rows(file.raw(binaryPageV2(values)))).rows, [0, 2])
+  for (const [counts, why] of [
+    [{ count: 500_000_000 }, 'values far past its rows'],
+    [{ rows: 2 }, 'rows short of the directory’s'],
+    [{ count: 4, rows: 4 }, 'values and rows past the directory’s'],
+    [{ nulls: -1 }, 'negative nulls'],
+    [{ nulls: 4 }, 'more nulls than values'],
+  ])
+    await assert.rejects(rows(file.raw(binaryPageV2(values, counts))), /page header disagrees/, why)
 }
-console.log('page headers: rows and encoding agree with the directory before rows are read')
+console.log('page headers: counts and encoding agree with the directory before rows are read')
 
 {
   // A NaN x or y leaves that ordinate alone out of a row's bbox, as the
