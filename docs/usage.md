@@ -316,12 +316,14 @@ standard page ranges, and the complete spatial directory against the footer and
 source keys: metadata, codecs, v1 PLAIN overview page headers, page membership
 and order, row spans, cell bounds, fences, and branch bounds. The primary
 directory is checked against the geometry's page index and covering, one row
-group at a time: its pages are exactly those with a row with an extent, each
-page and piece box is the union of its rows' covering boxes, branch boxes are
-the union of their nodes', attribute page runs match their offset indexes,
-codecs and schema match the footer, and every indexed page is a data page,
-not dictionary encoded, of the rows its index says. Files without a
-spatial directory get the packed-value and offset-index checks. This is a storage and reader contract check; it does not
+group at a time: its leaves hold every cell of its zoom once, each listing
+every page with a row whose box reaches the leaf's tiles, cut into the same
+runs wherever it is listed; each run's box is the union of its rows' covering
+boxes and holds a row with an extent; attribute page lists match their offset
+indexes over the leaf's rows; codecs and schema match the footer; and every
+indexed page is a data page, not dictionary encoded, of the rows its index
+says. Files without a spatial directory get the packed-value and offset-index
+checks. This is a storage and reader contract check; it does not
 prove polygon topology or compare simplification accuracy with primary WKB. Full
 mode reads the complete data, holds one LOD column of one row group at a time,
 decoding it two megabytes of packed values at a time, and holds one row group's

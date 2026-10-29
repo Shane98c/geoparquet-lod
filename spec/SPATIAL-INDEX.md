@@ -188,11 +188,12 @@ and a page's runs are the same in every leaf that lists it. When the Hilbert
 curve leaves the data and re-enters it far away, one page can hold rows of
 distant places; its runs keep the empty space between them out of the
 lookup. The reference writer cuts a page in two at the row where the halves'
-boxes cover the fewest tiles of 32 cells, when they cover at most 70% of the
-page box's, then each half once more the same way. It ends a leaf after about
-1,024 pages, before the coarsest aligned cell among those of its last half
-of pages, so a leaf's region is a few large tiles: a tile past the finest
-LOD lies in one leaf, and its buffer seldom reaches another.
+boxes cover the fewest tiles of 32 cells, when they cover at most 70% of those
+one box over all its rows would, then each half once more the same way. It
+ends a leaf after about 1,024 pages, before the coarsest aligned cell among
+those of its last half of pages, so a leaf's region is a few large tiles: a
+tile past the finest LOD lies in one leaf, and its buffer seldom reaches
+another.
 
 To read the rows whose bbox intersects a WGS84 query, a tile's buffered bounds
 for an MVT tile, descend from the top node into every entry whose cells hold a
