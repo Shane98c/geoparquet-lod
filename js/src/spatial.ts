@@ -22,13 +22,19 @@ import {
 
 export const BOOTSTRAP_BYTES = 16384
 const MAGIC = 'LODIDX01'
+const VERSION = 2
 // [minimum key, maximum key, offset, length, first global row, row count, fences, valid key rows]
 type Page = [number, number, number, number, number, number, number[], number?]
-type Shard = [number, number, number, number, number?]
+// [minimum key, maximum key, offset, length, level of the node located]
+type Shard = [number, number, number, number, number]
+/** A stored directory node: its level, then one column per field with a value
+ * per entry. Leaves, at level 0, add the page columns. */
+type StoredNode = [number, number[], number[], number[], number[], ...unknown[]]
+/** A node's entries: pages in a leaf, else the nodes one level down. */
+type DirectoryNode = { level: 0; entries: Page[] } | { level: number; entries: Shard[] }
 interface SpatialRoot {
   columns?: string[]
   bounds?: Bbox
-  directory_encoding?: string
   version: number
   file_bytes: number
   footer_bytes?: number
@@ -38,7 +44,53 @@ interface SpatialRoot {
   primary: string
   codecs: Record<string, string>
   /** One or more directory series per LOD; the reference writer emits one. */
-  streams: Record<string, Shard[][]>
+  streams: Record<string, StoredNode[]>
+}
+
+/**
+ * Decode a directory node. Its columns hold, per entry: minimum cell minus the
+ * previous entry's, cell span, byte gap after the previous entry's end, and
+ * length; a leaf adds the row gap after the previous page's end, row count,
+ * fences after the implied [minimum cell, 0] as pairs minus the pair before,
+ * and trailing null-key rows. The first entry counts from zero. Bounds widen
+ * to whole cells of `span` keys, which select the same entries for any tile
+ * interval made of whole cells.
+ */
+function decodeNode(node: StoredNode, span: number): DirectoryNode {
+  const [level, cells, spans, gaps, lengths] = node
+  const [rows, counts, fences, nulls] = node.slice(5) as [number[], number[], number[][], number[]]
+  if (
+    !Number.isInteger(level) ||
+    level < 0 ||
+    node.length !== (level ? 5 : 9) ||
+    [cells, spans, gaps, lengths, ...(level ? [] : [rows, counts, fences, nulls])].some(
+      (column) => !Array.isArray(column) || column.length !== cells.length,
+    )
+  )
+    throw new Error('malformed spatial directory node')
+  const pages: Page[] = [],
+    shards: Shard[] = []
+  let cell = 0,
+    end = 0,
+    row = 0
+  for (let i = 0; i < cells.length; i++) {
+    cell += cells[i]
+    const offset = end + gaps[i]
+    end = offset + lengths[i]
+    const low = cell * span,
+      high = (cell + spans[i] + 1) * span - 1
+    if (level) {
+      shards.push([low, high, offset, lengths[i], level - 1])
+      continue
+    }
+    const first = row + rows[i]
+    row = first + counts[i]
+    const pairs = [cell, 0]
+    for (let j = 0; j < fences[i].length; j += 2)
+      pairs.push(pairs[j] + fences[i][j], pairs[j + 1] + fences[i][j + 1])
+    pages.push([low, high, offset, lengths[i], first, counts[i], pairs, counts[i] - nulls[i]])
+  }
+  return level ? { level, entries: shards } : { level: 0, entries: pages }
 }
 
 export function hasSpatialIndex(bytes: ArrayBuffer): boolean {
@@ -98,7 +150,7 @@ export async function openReader(file: RangeSource): Promise<TileReader> {
   const length = new DataView(head).getUint32(12, true)
   if (!length || length > head.byteLength - 16) throw new Error('invalid spatial index root length')
   const root = await gunzipJson<SpatialRoot>(head.slice(16, 16 + length))
-  if (root.version !== 1 || root.file_bytes !== file.byteLength)
+  if (root.version !== VERSION || root.file_bytes !== file.byteLength)
     throw new Error('invalid spatial index version or file length')
   if (
     !isCompatibleVersion(root.lod.version) ||
@@ -107,33 +159,6 @@ export async function openReader(file: RangeSource): Promise<TileReader> {
     !root.lod.key
   )
     throw new Error('unsupported spatial LOD encoding')
-  if (root.directory_encoding === 'delta') {
-    const encoded = root.streams as unknown as Record<string, [number, number, number[]][]>
-    root.streams = Object.fromEntries(
-      Object.entries(encoded).map(([name, sections]) => {
-        const span = 4 ** Math.max(0, root.lod.key!.depth - Math.max(...root.lod.lods[name].zooms))
-        const streams = sections.map(([base, depth, values]) => {
-          const shards: Shard[] = []
-          let offset = base,
-            low = 0
-          for (let i = 0; i < values.length; i += 3) {
-            low += values[i]
-            shards.push([
-              low * span,
-              (low + values[i + 1] + 1) * span - 1,
-              offset,
-              values[i + 2],
-              depth,
-            ])
-            offset += values[i + 2]
-          }
-          return shards
-        })
-        return [name, streams]
-      }),
-    )
-  } else if (root.directory_encoding !== undefined)
-    throw new Error('unsupported directory encoding')
   return new SpatialReader(file, root)
 }
 
@@ -148,7 +173,8 @@ export class SpatialReader implements TileReader {
   readonly primary: string
   readonly finestZoom: number
   private readonly fields: AttributeField[]
-  private readonly directories = new Map<number, SharedLoad<Page[] | Shard[]>>()
+  private readonly series: Record<string, DirectoryNode[]>
+  private readonly directories = new Map<number, SharedLoad<DirectoryNode>>()
   private readonly pages = new Map<number, { size: number; data: SharedLoad<ArrayBuffer> }>()
   private pageBytes = 0
   private fallback?: SharedLoad<LodReader>
@@ -170,6 +196,17 @@ export class SpatialReader implements TileReader {
         ? { name: a.name, kind: 'enum', values: a.values }
         : { name: a.name, kind: attributeKind(a.type) },
     )
+    this.series = Object.fromEntries(
+      Object.entries(root.streams).map(([name, nodes]) => {
+        if (!this.lods[name]) throw new Error(`spatial directory for unknown LOD ${name}`)
+        return [name, nodes.map((node) => decodeNode(node, this.cellSpan(this.lods[name])))]
+      }),
+    )
+  }
+
+  /** Keys per directory cell: cells are at the LOD's finest zoom, at most the key depth. */
+  private cellSpan(lod: Lod): number {
+    return 4 ** Math.max(0, this.lod.key!.depth - Math.max(...lod.zooms))
   }
 
   lodForZoom(zoom: number): Lod {
@@ -232,13 +269,16 @@ export class SpatialReader implements TileReader {
     return (await this.analytical(signal)).readPrimary(bbox, attributes, signal)
   }
 
-  private directory(shard: Shard, signal?: AbortSignal): Promise<Page[] | Shard[]> {
-    const [, , offset, length] = shard
+  private directory(shard: Shard, span: number, signal?: AbortSignal): Promise<DirectoryNode> {
+    const [, , offset, length, level] = shard
     let result = this.directories.get(offset)
     if (!result || result.abandoned) {
-      result = new SharedLoad((signal) =>
-        this.file.slice(offset, offset + length, signal).then(gunzipJson<Page[] | Shard[]>),
-      )
+      result = new SharedLoad(async (signal) => {
+        const bytes = await this.file.slice(offset, offset + length, signal)
+        const node = decodeNode(await gunzipJson<StoredNode>(bytes), span)
+        if (node.level !== level) throw new Error('inconsistent spatial directory level')
+        return node
+      })
       while (this.directories.size >= 128)
         this.directories.delete(this.directories.keys().next().value!)
       this.directories.set(offset, result)
@@ -253,25 +293,26 @@ export class SpatialReader implements TileReader {
     return result.get(signal)
   }
 
+  /** The pages under `node` holding keys in [start, end) when `own`, plus,
+   * when `hosted`, the first page whose maximum key reaches `start`, or the
+   * last page if none does. */
   private async lookup(
-    shards: Shard[],
+    node: DirectoryNode,
     start: number,
     end: number,
     own: boolean,
     hosted: boolean,
+    span: number,
     signal?: AbortSignal,
   ): Promise<Page[]> {
-    const host = hosted ? (shards.find((s) => s[1] >= start) ?? shards.at(-1)) : undefined
-    const hits = shards.filter((s) => (own && s[0] < end && s[1] >= start) || s === host)
+    const entries: (Page | Shard)[] = node.entries
+    const host = hosted ? (entries.find((e) => e[1] >= start) ?? entries.at(-1)) : undefined
+    const hits = entries.filter((e) => (own && e[0] < end && e[1] >= start) || e === host)
+    if (!node.level) return hits as Page[]
     const selected = await Promise.all(
-      hits.map(async (shard) => {
-        const children = await this.directory(shard, signal)
-        if (shard[4])
-          return this.lookup(children as Shard[], start, end, own, shard === host, signal)
-        const pages = children as Page[]
-        const hostPage =
-          shard === host ? (pages.find((p) => p[1] >= start) ?? pages.at(-1)) : undefined
-        return pages.filter((p) => (own && p[0] < end && p[1] >= start) || p === hostPage)
+      (hits as Shard[]).map(async (shard) => {
+        const child = await this.directory(shard, span, signal)
+        return this.lookup(child, start, end, own, shard === host, span, signal)
       }),
     )
     return selected.flat()
@@ -354,22 +395,25 @@ export class SpatialReader implements TileReader {
     signal?: AbortSignal,
   ): Promise<PreparedTile> {
     signal?.throwIfAborted()
+    // Directory bounds and fences are whole cells of the LOD's finest zoom, so
+    // they are exact only for tiles made of whole cells.
+    if (z > Math.max(...lod.zooms)) throw new Error(`zoom ${z} is finer than ${lod.name}`)
     const [start, end] = tileInterval(this.lod.key!.depth, z, x, y)
-    const streams = this.root.streams[lod.name]
-    if (!streams) throw new Error(`missing spatial directory for ${lod.name}`)
+    const series = this.series[lod.name]
+    if (!series) throw new Error(`missing spatial directory for ${lod.name}`)
     // Copies are hosted in the last series; every series may hold a tile's own rows.
     let hostSection = 0
-    streams.forEach((shards, section) => {
-      if (shards.length) hostSection = section
+    series.forEach((node, section) => {
+      if (node.entries.length) hostSection = section
     })
+    const span = this.cellSpan(lod)
     const selected = await Promise.all(
-      streams.map((shards, section) =>
-        this.lookup(shards, start, end, true, section === hostSection, signal),
+      series.map((node, section) =>
+        this.lookup(node, start, end, true, section === hostSection, span, signal),
       ),
     )
     signal?.throwIfAborted()
     const pages = selected.flat().sort((a, b) => a[4] - b[4])
-    const span = 4 ** Math.max(0, this.lod.key!.depth - Math.max(...lod.zooms))
     const firstCell = start / span,
       endCell = end / span
     const hostPage =

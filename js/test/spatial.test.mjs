@@ -192,6 +192,13 @@ for (const row of [0, 100, 1199]) {
     await old.readRow(row, ['name', 'height', 'geometry']),
   )
 }
+// Directory bounds and fences are whole cells of an LOD's finest zoom.
+const finest = fast.lodForZoom(fast.finestZoom)
+await assert.rejects(
+  fast.readLodByTile(finest, Math.max(...finest.zooms) + 1, 0, 0),
+  /finer than/,
+  'a tile finer than its LOD is refused, not read at cell precision',
+)
 const freshSource = await makeSource(newPath)
 const cached = await openReader(coalescing(freshSource))
 const [z, x, y] = cases[8]

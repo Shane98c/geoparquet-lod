@@ -15,12 +15,28 @@ import shapely
 from geoparquet_lod import drop_rate, validate
 from geoparquet_lod import write as build
 from geoparquet_lod._compact import dumps, get, loads
-from geoparquet_lod._layout import finalize_layout
+from geoparquet_lod._layout import finalize_layout, page_cells, read_node
 from geoparquet_lod.writer import _write_unindexed as write
 from geoparquet_lod.writer import hilbert_key
 from unpacker import Unpacker
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _root(raw):
+    return json.loads(gzip.decompress(raw[16 : 16 + int.from_bytes(raw[12:16], 'little')]))
+
+
+def _leaves(raw, node):
+    """The decoded leaves under a directory node, in order."""
+    level, entries = read_node(node)
+    if not level:
+        return [entries]
+    return [
+        leaf
+        for offset, length in zip(entries['offset'], entries['length'], strict=True)
+        for leaf in _leaves(raw, json.loads(gzip.decompress(raw[offset : offset + length])))
+    ]
 
 
 @pytest.mark.parametrize(
@@ -99,24 +115,16 @@ def test_spatial_roundtrip(tmp_path, monkeypatch, family, sparse, leaf_pages, pa
         assert not list(tmp_path.glob('.lod-build-*'))
     else:
         finalize_layout(old, new, leaf_pages=leaf_pages, page_bytes=page_bytes, log=lambda *_: None)
+    raw = new.read_bytes()
+    root = _root(raw)
+    leaves = [leaf for nodes in root['streams'].values() for n in nodes for leaf in _leaves(raw, n)]
     if sparse:
-        raw = new.read_bytes()
-        root = json.loads(gzip.decompress(raw[16 : 16 + int.from_bytes(raw[12:16], 'little')]))
-        largest = 0
-        for sections in root['streams'].values():
-            for offset, depth, triples in sections:
-                assert depth == 0
-                for length in triples[2::3]:
-                    pages = json.loads(gzip.decompress(raw[offset : offset + length]))
-                    largest = max(largest, max(page[5] for page in pages))
-                    offset += length
+        largest = max(leaf['count'].max() for leaf in leaves if len(leaf['count']))
         assert largest > 2048, 'exercise sparse pages spanning many analytical rows'
     if leaf_pages == 1:
-        raw = new.read_bytes()
-        root = json.loads(gzip.decompress(raw[16 : 16 + int.from_bytes(raw[12:16], 'little')]))
-        assert any(
-            section[1] > 0 for sections in root['streams'].values() for section in sections
-        ), 'fixture exercises directory branches'
+        assert any(node[0] > 1 for nodes in root['streams'].values() for node in nodes), (
+            'fixture exercises directory branches'
+        )
     assert old.read_bytes() == before, 'source is immutable'
     assert validate(new, full=True)['rows'] == n
     a, b = pq.read_table(old), pq.read_table(new)
@@ -184,6 +192,50 @@ def test_spatial_roundtrip(tmp_path, monkeypatch, family, sparse, leaf_pages, pa
         text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('zooms', [[3], [6, 7], [10, 11]])
+def test_cell_bounds_select_like_exact_keys(zooms):
+    """Directory bounds are whole cells of an LOD's finest zoom. Every tile
+    served from that LOD, at its zooms or coarser, is a whole number of cells,
+    so own-page and host-page selection match selection by exact keys."""
+    rng = np.random.default_rng(31)
+    depth = 10
+    zoom = min(depth, max(zooms))
+    sentinel = 4**depth
+    # clustered keys: repeated cells, cells across pages, then trailing null keys
+    centres = rng.integers(0, sentinel, 40)
+    keys = np.sort(np.clip(rng.choice(centres, 3000) + rng.integers(-300, 300, 3000), 0, None))
+    keys = np.r_[np.minimum(keys, sentinel - 1), [sentinel] * 25].astype(np.uint64)
+    bounds = np.unique(np.r_[0, rng.integers(1, len(keys) - 40, 300), len(keys)])
+    present = (rng.random(len(keys)) < 0.3) & (keys < sentinel)
+    present[bounds[40] : bounds[45]] = False
+    pages = page_cells(keys, bounds, present, depth, zoom)
+    first, valid = pages['first'], pages['valid']
+    assert (valid > 0).all() and (valid < pages['count']).any()
+    shift = 2 * (depth - zoom)
+    for i, row in enumerate(first):
+        cells = [int(k) >> shift for k in keys[row : row + pages['count'][i]]]
+        fences = [(c, r) for r, c in enumerate(cells) if r == 0 or c != cells[r - 1]]
+        mine = pages['fence_page'] == i
+        assert fences == list(zip(pages['fence_cell'][mine], pages['fence_row'][mine], strict=True))
+    exact = keys[first].astype(np.int64), keys[first + valid - 1].astype(np.int64)
+    span = 4 ** (depth - zoom)
+    rounded = pages['low'] * span, (pages['high'] + 1) * span - 1
+    assert (rounded[0] <= exact[0]).all() and (rounded[1] >= exact[1]).all()
+    if zoom < depth:
+        assert (rounded[0] < exact[0]).any() and (rounded[1] > exact[1]).any()
+
+    def select(low, high, z):
+        """Per tile at zoom z: pages with own keys, and the copy host page."""
+        size = 4 ** (depth - z)
+        start = np.arange(4**z, dtype=np.int64) * size
+        own = (low[None] < start[:, None] + size) & (high[None] >= start[:, None])
+        return own, np.minimum(np.searchsorted(high, start), len(high) - 1)
+
+    for z in range(zoom + 1):
+        for by_key, by_cell in zip(select(*exact, z), select(*rounded, z), strict=True):
+            np.testing.assert_array_equal(by_key, by_cell)
 
 
 def test_layout_requires_separate_output(tmp_path):

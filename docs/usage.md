@@ -214,7 +214,7 @@ only when CORS hides `Content-Range`.
 ### Reader behaviour
 
 The coordinator caches up to 16 MiB of compressed data pages and 128 directory
-shards, and retains up to 64 decoded tiles within an estimated 32 MiB, so a
+nodes, and retains up to 64 decoded tiles within an estimated 32 MiB, so a
 style change on a loaded view reuses decoded geometry and only projects the new
 attribute. Neighbouring tiles share pending fetches. When the last consumer of a
 pending fetch or decode leaves, that work is cancelled; completed cache entries
@@ -271,7 +271,7 @@ at least three vertices (the closing one is implicit), that grid coordinates fit
 int32 and carried values their declared types, packed byte consumption, copy
 source ids and tile tags, finite transforms,
 standard page ranges, and the complete spatial directory against the footer and
-source keys: metadata, codecs, page membership, row spans, key bounds, fences,
+source keys: metadata, codecs, page membership, row spans, cell bounds, fences,
 and branch bounds. Files without a spatial directory get the packed-value and
 offset-index checks. This is a storage and reader contract check; it does not
 prove polygon topology or compare simplification accuracy with primary WKB. Full

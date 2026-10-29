@@ -22,11 +22,13 @@ import pyarrow.parquet as pq
 from ._compact import dumps, get, loads, set_value
 from .encoding import PACK_VERSION
 
+VERSION = 2
 BOOTSTRAP_BYTES = 16384
 # reserve room for file_bytes, footer_bytes, row_metadata and the header
 _ROOT_TARGET_BYTES = BOOTSTRAP_BYTES - 128
 MAGIC = b'LODIDX01'
 CODECS = ['UNCOMPRESSED', 'SNAPPY', 'GZIP', 'LZO', 'BROTLI', 'LZ4', 'ZSTD', 'LZ4_RAW']
+BRANCH_ENTRIES = 64
 PAGE_FIELDS = ('low', 'high', 'offset', 'length', 'first', 'count', 'valid')
 FENCE_FIELDS = ('fence_page', 'fence_row', 'fence_cell')
 
@@ -45,9 +47,10 @@ def page_cells(keys, bounds, present, depth, zoom):
     `bounds[i]:bounds[i + 1]` of the sorted Hilbert `keys`, null keys stored as
     4**depth, and `present` marks the rows with a value. Pages without a value
     are left out. For the rest: their index among the row group's pages, first
-    row and row count, valid (non-null) key rows, and their fences as flat
-    arrays: the page, relative row and cell at `zoom` of each page's first row
-    and of every later row whose cell differs from the row before.
+    row and row count, valid (non-null) key rows, minimum and maximum cell at
+    `zoom`, and their fences as flat arrays: the page, relative row and cell of
+    each page's first row and of every later row whose cell differs from the
+    row before.
     """
     keys = np.asarray(keys, np.uint64)
     filled = np.r_[0, np.cumsum(present, dtype=np.int64)]
@@ -62,6 +65,8 @@ def page_cells(keys, bounds, present, depth, zoom):
     valid = np.clip(np.searchsorted(keys, np.uint64(4**depth)) - firsts, 0, ends - firsts)
     return {
         'pages': np.flatnonzero(shown),
+        'low': cells[firsts],
+        'high': cells[firsts + np.maximum(valid, 1) - 1],
         'first': firsts,
         'count': ends - firsts,
         'valid': valid,
@@ -71,28 +76,98 @@ def page_cells(keys, bounds, present, depth, zoom):
     }
 
 
-def _root_json(root):
-    """Delta-code ordered directory locations. Each series is contiguous on
-    disk. Bounds use the LOD's finest tile cells rather than full Hilbert keys.
-    """
-    streams = {}
-    for name, sections in root['streams'].items():
-        span = 4 ** max(0, root['lod']['key']['depth'] - max(root['lod']['lods'][name]['zooms']))
-        streams[name] = []
-        for shards in sections:
-            if not shards:
-                streams[name].append([0, 0, []])
-                continue
-            values, previous, offset = [], 0, shards[0][2]
-            depth = shards[0][4] if len(shards[0]) > 4 else 0
-            for shard in shards:
-                if shard[2] != offset:
-                    raise ValueError('directory series is not contiguous')
-                low, high = shard[0] // span, shard[1] // span
-                values.extend([low - previous, high - low, shard[3]])
-                previous, offset = low, offset + shard[3]
-            streams[name].append([shards[0][2], depth, values])
-    return _json({**root, 'directory_encoding': 'delta', 'streams': streams})
+def _node(level, low, high, offset, length):
+    """A directory node's leading columns, one value per entry in key order:
+    minimum cell minus the previous entry's, cell span, bytes between the
+    previous entry's end and this entry's start, and compressed length. The
+    first entry counts from zero."""
+    low, high, offset, length = (np.asarray(v, np.int64) for v in (low, high, offset, length))
+    return [
+        level,
+        np.diff(low, prepend=0).tolist(),
+        (high - low).tolist(),
+        (offset - np.r_[0, offset + length][: len(offset)]).tolist(),
+        length.tolist(),
+    ]
+
+
+def _leaf(pages, start, end):
+    """A level-zero node over pages `start:end`, adding per page its first
+    global row minus the previous page's end, row count, fences after the
+    implied [minimum cell, 0] as pairs minus the pair before, and rows with a
+    null key."""
+    first, count = pages['first'][start:end], pages['count'][start:end]
+    a, b = np.searchsorted(pages['fence_page'], [start, end])
+    page, row, cell = (pages[k][a:b] for k in FENCE_FIELDS)
+    later = row > 0
+    pairs = np.column_stack((np.diff(cell, prepend=0), np.diff(row, prepend=0)))[later]
+    fences = [[] for _ in range(end - start)]
+    for p, pair in zip((page[later] - start).tolist(), pairs.tolist(), strict=True):
+        fences[p].extend(pair)
+    return [
+        *_node(0, *(pages[k][start:end] for k in ('low', 'high', 'offset', 'length'))),
+        (first - np.r_[0, first + count][: len(first)]).tolist(),
+        count.tolist(),
+        fences,
+        (count - pages['valid'][start:end]).tolist(),
+    ]
+
+
+def read_node(node):
+    """A directory node's level and its entries as arrays: cell bounds, byte
+    offsets and lengths, and for a leaf the page fields and fences that
+    `page_cells` returns."""
+    if not isinstance(node, list) or len(node) < 5:
+        raise ValueError('malformed directory node')
+    level = node[0]
+    if not isinstance(level, int) or not 0 <= level <= 32:
+        raise ValueError('invalid directory level')
+    if len(node) != (5 if level else 9):
+        raise ValueError('malformed directory node')
+    cells, spans, gaps, length = (_column(values) for values in node[1:5])
+    if not len(cells) == len(spans) == len(gaps) == len(length) or (spans < 0).any():
+        raise ValueError('malformed directory node')
+    if (gaps < 0).any() or (length <= 0).any():
+        raise ValueError('directory byte ranges overlap or are empty')
+    low = np.cumsum(cells)
+    end = np.cumsum(gaps + length)
+    entries = {'low': low, 'high': low + spans, 'offset': end - length, 'length': length}
+    if level:
+        return level, entries
+    rows, count, nulls = (_column(node[i]) for i in (5, 6, 8))
+    fences = node[7]
+    if (
+        not isinstance(fences, list)
+        or not len(low) == len(rows) == len(count) == len(fences) == len(nulls)
+        or not all(isinstance(f, list) and len(f) % 2 == 0 for f in fences)
+        or (rows < 0).any()
+    ):
+        raise ValueError('malformed directory leaf')
+    per_page = np.array([len(f) // 2 + 1 for f in fences], np.int64)
+    heads = np.cumsum(per_page) - per_page
+    delta = np.zeros((int(per_page.sum()), 2), np.int64)
+    later = np.ones(len(delta), bool)
+    later[heads] = False
+    delta[later] = _column([v for f in fences for v in f]).reshape(-1, 2)
+    total = np.cumsum(delta, axis=0)
+    fence = total - np.repeat(total[heads], per_page, axis=0)
+    page = np.repeat(np.arange(len(fences)), per_page)
+    return 0, {
+        **entries,
+        'first': np.cumsum(rows + count) - count,
+        'count': count,
+        'valid': count - nulls,
+        'fence_page': page,
+        'fence_row': fence[:, 1],
+        'fence_cell': fence[:, 0] + low[page],
+    }
+
+
+def _column(values):
+    array = np.asarray(values)
+    if not isinstance(values, list) or (array.size and array.dtype.kind != 'i'):
+        raise ValueError('directory columns hold integers')
+    return array.astype(np.int64)
 
 
 def _copy(src, dst, start, size):
@@ -257,7 +332,7 @@ def finalize_layout(src, out, *, leaf_pages=1024, page_bytes=65536, compression_
     key_column = lod['key']['column']
     if not 0 <= lod['key']['depth'] <= 26:
         raise ValueError('Hilbert depth must fit exact JavaScript integers (0..26)')
-    root = {'version': 1, 'lod': lod, 'primary': geo['primary_column'], 'streams': {}, 'codecs': {}}
+    root = {'version': VERSION, 'lod': lod, 'primary': geo['primary_column'], 'codecs': {}}
     flat = [f.name for f in parquet.schema_arrow if not pa.types.is_nested(f.type)]
     root['columns'] = [name for name in flat if name != geo['primary_column']]
     bounds = [180.0, 90.0, -180.0, -90.0]
@@ -325,7 +400,8 @@ def finalize_layout(src, out, *, leaf_pages=1024, page_bytes=65536, compression_
             # row-group/column positions in the standard footer remain unchanged.
             columns = len(get(groups[0], 1)[1])
             pending_indexes = []
-            directory = {name: [] for name in names}
+            pages = {name: [] for name in names}
+            depth = lod['key']['depth']
             output = work / 'output.parquet'
             with output.open('w+b') as target:
                 target.write(b'PAR1' + bytes(BOOTSTRAP_BYTES - 4))
@@ -336,7 +412,8 @@ def finalize_layout(src, out, *, leaf_pages=1024, page_bytes=65536, compression_
                         path = [p.decode() for p in get(cm, 3)[1]]
                         name = path[1] if len(path) == 2 and path[0] == lod['column'] else None
                         if name:
-                            local_keys = keys[starts[g] : starts[g] + get(group, 3)]
+                            group_rows = get(group, 3)
+                            local_keys = keys[starts[g] : starts[g] + group_rows]
                             cm, index, present = _tile_pages(
                                 parquet,
                                 g,
@@ -349,9 +426,31 @@ def finalize_layout(src, out, *, leaf_pages=1024, page_bytes=65536, compression_
                                 compression_level,
                             )
                             set_value(chunk, 3, cm)
-                            set_value(chunk, 2, 0)
                             chunk.pop(6, None)
                             chunk.pop(7, None)
+                            locations = get(index, 1)[1]
+                            bounds = np.array(
+                                [get(p, 3) for p in locations] + [group_rows], np.int64
+                            )
+                            found = page_cells(
+                                local_keys, bounds, present, depth, grid_zoom(lod, name)
+                            )
+                            if not found['valid'].all():
+                                raise ValueError('a displayed row has a null Hilbert key')
+                            shown = found.pop('pages')
+                            found['offset'] = np.array(
+                                [get(locations[i], 1) for i in shown], np.int64
+                            )
+                            found['length'] = np.array(
+                                [get(locations[i], 2) for i in shown], np.int64
+                            )
+                            found['first'] += starts[g]
+                            found['fence_page'] += sum(len(part['low']) for part in pages[name])
+                            pages[name].append(found)
+                            codec = CODECS[get(cm, 4)]
+                            if name in root['codecs'] and root['codecs'][name] != codec:
+                                raise ValueError('LOD codec must agree across row groups')
+                            root['codecs'][name] = codec
                         else:
                             old_start = min(get(cm, 9), get(cm, 11, get(cm, 9)))
                             delta = target.tell() - old_start
@@ -359,7 +458,6 @@ def finalize_layout(src, out, *, leaf_pages=1024, page_bytes=65536, compression_
                             for field_id in (9, 11):
                                 if field_id in cm:
                                     set_value(cm, field_id, get(cm, field_id) + delta)
-                            set_value(chunk, 2, 0)
                             index = None
                             if 4 in chunk:
                                 original.seek(get(chunk, 4))
@@ -370,49 +468,9 @@ def finalize_layout(src, out, *, leaf_pages=1024, page_bytes=65536, compression_
                                 original.seek(get(chunk, 6))
                                 raw = original.read(get(chunk, 7))
                                 pending_indexes.append(((6, g, c), chunk, 6, 7, raw))
+                        set_value(chunk, 2, 0)
                         if index is not None:
-                            pages = get(index, 1)[1]
-                            if name:
-                                bounds = np.array(
-                                    [get(page, 3) for page in pages] + [get(group, 3)], np.int64
-                                )
-                                found = page_cells(
-                                    local_keys,
-                                    bounds,
-                                    present,
-                                    lod['key']['depth'],
-                                    grid_zoom(lod, name),
-                                )
-                                if not found['valid'].all():
-                                    raise ValueError('a displayed row has a null Hilbert key')
-                                fences = np.split(
-                                    np.column_stack((found['fence_cell'], found['fence_row'])),
-                                    np.searchsorted(
-                                        found['fence_page'], np.arange(1, len(found['pages']))
-                                    ),
-                                )
-                                for i, p in enumerate(found['pages']):
-                                    first, valid = int(found['first'][i]), int(found['valid'][i])
-                                    directory[name].append(
-                                        [
-                                            int(local_keys[first]),
-                                            int(local_keys[first + valid - 1]),
-                                            get(pages[p], 1),
-                                            get(pages[p], 2),
-                                            starts[g] + first,
-                                            int(found['count'][i]),
-                                            fences[i].ravel().tolist(),
-                                            valid,
-                                        ]
-                                    )
                             pending_indexes.append(((4, g, c), chunk, 4, 5, dumps(index)))
-                        elif name:
-                            raise ValueError('LOD column has no offset index')
-                        if name:
-                            codec = CODECS[get(cm, 4)]
-                            if name in root['codecs'] and root['codecs'][name] != codec:
-                                raise ValueError('LOD codec must agree across row groups')
-                            root['codecs'][name] = codec
                     log(f'  clustered column {c + 1}/{columns}')
                 # Offset indexes, then column indexes, each by row group, so one
                 # row's offset indexes across columns are read together.
@@ -421,39 +479,50 @@ def finalize_layout(src, out, *, leaf_pages=1024, page_bytes=65536, compression_
                     set_value(chunk, offset_field, target.tell())
                     set_value(chunk, length_field, len(raw))
                     target.write(raw)
-                directory_bytes = 0
-                for name, pages in directory.items():
-                    root['streams'][name] = [[]]
-                    for first in range(0, len(pages), leaf_pages):
-                        batch = pages[first : first + leaf_pages]
-                        raw = _json(batch)
-                        root['streams'][name][0].append(
-                            [batch[0][0], batch[-1][1], target.tell(), len(raw)]
-                        )
+                directory_start = target.tell()
+                # Each LOD's series starts as one level of leaves. Keep the first
+                # request bounded even for very large datasets: while the root is
+                # too large, group a series' nodes under a new level of branches,
+                # fetched lazily and then shared by a pan.
+                series = {}
+                for name, parts in pages.items():
+                    table = {k: np.concatenate([part[k] for part in parts]) for k in parts[0]}
+                    shards = {k: [] for k in ('low', 'high', 'offset', 'length')}
+                    for first in range(0, len(table['low']), leaf_pages):
+                        last = min(first + leaf_pages, len(table['low']))
+                        raw = _json(_leaf(table, first, last))
+                        shards['low'].append(table['low'][first])
+                        shards['high'].append(table['high'][last - 1])
+                        shards['offset'].append(target.tell())
+                        shards['length'].append(len(raw))
                         target.write(raw)
-                        directory_bytes += len(raw)
-                # Keep the first request bounded even for very large datasets.
-                # Extra directory levels are fetched lazily, then shared by a pan.
-                while len(_root_json(root)) > _ROOT_TARGET_BYTES:
+                    series[name] = (1, shards)
+                while True:
+                    root['streams'] = {
+                        name: [_node(level, **shards)] for name, (level, shards) in series.items()
+                    }
+                    if len(_json(root)) <= _ROOT_TARGET_BYTES:
+                        break
                     reduced = False
-                    for sections in root['streams'].values():
-                        for section, shards in enumerate(sections):
-                            if len(shards) <= 1:
-                                continue
-                            parents = []
-                            for first in range(0, len(shards), 64):
-                                batch = shards[first : first + 64]
-                                raw = _json(batch)
-                                depth = (batch[0][4] if len(batch[0]) > 4 else 0) + 1
-                                parents.append(
-                                    [batch[0][0], batch[-1][1], target.tell(), len(raw), depth]
-                                )
-                                target.write(raw)
-                                directory_bytes += len(raw)
-                            sections[section] = parents
-                            reduced = True
+                    for name, (level, shards) in series.items():
+                        if len(shards['low']) <= 1:
+                            continue
+                        parents = {k: [] for k in shards}
+                        for first in range(0, len(shards['low']), BRANCH_ENTRIES):
+                            batch = {
+                                k: v[first : first + BRANCH_ENTRIES] for k, v in shards.items()
+                            }
+                            raw = _json(_node(level, **batch))
+                            parents['low'].append(batch['low'][0])
+                            parents['high'].append(batch['high'][-1])
+                            parents['offset'].append(target.tell())
+                            parents['length'].append(len(raw))
+                            target.write(raw)
+                        series[name] = (level + 1, parents)
+                        reduced = True
                     if not reduced:
                         raise ValueError('LOD metadata exceeds the 16 KiB bootstrap')
+                directory_bytes = target.tell() - directory_start
                 for group in groups:
                     chunks = get(group, 1)[1]
                     set_value(group, 2, sum(get(get(c, 3), 6) for c in chunks))
@@ -470,7 +539,7 @@ def finalize_layout(src, out, *, leaf_pages=1024, page_bytes=65536, compression_
                 kv.append(
                     {
                         1: (8, b'lod_spatial_index'),
-                        2: (8, b'{"version":1,"offset":4,"length":16380}'),
+                        2: (8, f'{{"version":{VERSION},"offset":4,"length":16380}}'.encode()),
                     }
                 )
                 metadata[5] = (9, (12, kv))
@@ -482,7 +551,7 @@ def finalize_layout(src, out, *, leaf_pages=1024, page_bytes=65536, compression_
                 target.write(struct.pack('<I', len(footer)) + b'PAR1')
                 root['file_bytes'] = target.tell()
                 root['footer_bytes'] = len(footer)
-                packed = _root_json(root)
+                packed = _json(root)
                 if len(packed) + 16 > BOOTSTRAP_BYTES:
                     raise ValueError('root exceeds 16 KiB; increase leaf_pages')
                 target.seek(4)

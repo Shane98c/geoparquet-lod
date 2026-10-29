@@ -1,4 +1,4 @@
-# GeoParquet LOD spatial page index, version 1
+# GeoParquet LOD spatial page index, version 2
 
 An optional physical profile of a packed LOD file. The logical
 `geo.lod_columns` metadata and all table values are unchanged; the profile
@@ -15,18 +15,19 @@ PAR1
 LODIDX01 | root_length:u32le | gzip(root JSON) | padding to byte 16384
 column chunks, physically grouped by column, then logical row group
 standard Parquet offset indexes, then column indexes, each by row group
-gzip spatial directory leaves and optional branches
+gzip directory nodes: leaves and optional branches
 gzip row metadata
 standard Parquet footer | footer_length:u32le | PAR1
 ```
 
 The footer retains the original row groups, columns, schema, statistics, and
 GeoParquet metadata, with relocated offsets and updated physical sizes.
-`lod_spatial_index` in its key/value metadata advertises the bootstrap
-location. Primary geometry and source attribute chunks are copied byte for
-byte. LOD chunks are re-encoded in the original row order, with the same
-nullable binary schema and zstd, without dictionary encoding, with page breaks
-at the LOD's finest tile grid. Multiple pages may serve a dense tile, and a row-group boundary can split
+`lod_spatial_index` in its key/value metadata advertises the profile version
+and bootstrap location, `{"version":2,"offset":4,"length":16380}`. Primary
+geometry and source attribute chunks are copied byte for byte. LOD chunks are
+re-encoded in the original row order, with the same nullable binary schema and
+zstd, without dictionary encoding, with page breaks at the LOD's finest tile
+grid. Multiple pages may serve a dense tile, and a row-group boundary can split
 a tile. The row cap scales with the chunk's LOD density to target 2,048
 present values, up to 262,144 analytical rows per page, alongside an
 uncompressed byte target (64 KiB by default). The target is advisory: write
@@ -43,7 +44,7 @@ directory boundaries can add reads.
 
 The compressed root is bounded by the first 16 KiB and contains:
 
-- `version: 1`, `file_bytes`: format and full file length checks.
+- `version: 2`, `file_bytes`: format and full file length checks.
 - `footer_bytes`: the length of the standard footer's metadata, so a reader
   fetches the footer and its trailer in one request.
 - `row_metadata`: `[byte_offset, compressed_length]` of the row metadata, see
@@ -53,50 +54,65 @@ The compressed root is bounded by the first 16 KiB and contains:
   than the primary geometry, including the key column, so a map can
   initialize without another reader open.
 - `codecs`: LOD name to its Parquet compression codec.
-- `directory_encoding: "delta"` and `streams`: LOD name to a list of directory
-  series. The reference writer emits one series per LOD; readers search every
-  series for a tile's own pages and take its copy host from the last non-empty
-  one.
+- `streams`: LOD name to a list of directory series, each a directory node at
+  level one or above. The reference writer emits one series per LOD; readers
+  search every series for a tile's own pages and take its copy host from the
+  last non-empty one.
 
-Each series is `[initial_byte_offset, depth, triples]`. Triples are a flat
-array of `[delta_min_cell, max_cell_minus_min_cell, compressed_length]`. The
-first minimum is relative to zero; subsequent minima are relative to the
-previous one. Shards are contiguous, so their byte offsets follow from their
-lengths. Cells are Hilbert cells at `min(key.depth, finest_LOD_zoom)`.
-Directory bounds reconstructed from cells conservatively include whole cells.
+## Directory nodes
 
-A depth-zero shard contains page records. A deeper shard contains ordered
-descriptors `[min_key, max_key, byte_offset, compressed_length, child_depth]`;
-`child_depth` is omitted when the children are leaf shards.
-Only the root uses delta-coded descriptors. Branch levels are added only when
-needed to keep the bootstrap bounded. Both branches and leaves are gzip JSON.
-
-## Page records and lookup
-
-A page record is:
+Each series is the top node of a tree over its LOD's pages in key order. The
+root holds the series; the nodes below are gzip JSON. Every node is a JSON
+array of its level and parallel columns with one value per entry:
 
 ```text
-[min_key, max_key, byte_offset, compressed_length,
- first_global_row, row_count, fences, valid_key_rows]
+[level, cells, spans, gaps, lengths]                                level > 0
+[0, cells, spans, gaps, lengths, rows, counts, fences, nulls]       a leaf
 ```
 
-`fences` is a flat array of `[cell, relative_first_row]` pairs, starting at
-row zero, at the same finest-LOD grid. Tile-aligned pages normally have one
-pair. These fences enforce exact tile membership without fetching the key
-column. `valid_key_rows` excludes trailing null-key source rows; those rows
-remain in the analytical table and have null LODs.
+A leaf's entries are pages; the entries of a node at level `L > 0` are nodes
+at level `L - 1`. Positions are delta coded against the previous entry, and
+the first entry's against zero:
 
-To read a tile: look up the pages whose key bounds intersect the tile's key
-interval, plus the first page whose maximum key reaches the interval start, or
-the final page if none does. That page contains the tile's copy host when any
-copies exist. Read consecutive pages together. Decode the standard Parquet
-page with the root's codec and the required-struct/nullable-binary schema.
-Use the fences to retain own rows inside the tile interval, and the host row
-for its copies tagged with the requested tile. Global row indices are the
-feature ids. A reader can scan definition-level runs in v1 PLAIN pages
-directly and skip null rows, falling back to a general decoder for other
-encodings. The directory stores no geometry or styling payload and is not an
-MVT archive.
+- `cells`: the entry's minimum cell minus the previous entry's.
+- `spans`: its maximum cell minus its minimum cell.
+- `gaps`: its byte offset minus the previous entry's end.
+- `lengths`: its compressed length in bytes.
+- `rows`: the page's first global row minus the previous page's end row.
+- `counts`: the page's rows.
+- `fences`: the page's fences after the implied first `[minimum cell, 0]`, a
+  flat array of `[cell, row]` pairs, each minus the pair before. A fence marks
+  the first row, counted within the page, of each run of rows in one cell.
+- `nulls`: the page's trailing rows whose key is null.
+
+Cells are Hilbert cells at `z = min(key.depth, finest zoom of the LOD)`: key
+`k` lies in cell `floor(k / 4^(key.depth - z))`, and a null key counts as cell
+`4^z`, past every other. A node's minimum and maximum cell are its first
+entry's minimum and its last entry's maximum. An entry with cells `lo..hi`
+stands for the keys from `lo * 4^(key.depth - z)` to
+`(hi + 1) * 4^(key.depth - z) - 1`. Every tile served from the LOD, at its
+zooms or coarser, is a whole number of cells, so these bounds select the same
+entries exact key bounds would.
+
+Page fences enforce exact tile membership without fetching the key column;
+tile-aligned pages have only the implied fence. Rows past `counts - nulls`
+have null keys: they remain in the analytical table and have null LODs. The
+reference writer puts 1,024 pages in a leaf and, while the root would exceed
+the bootstrap, adds a level of branches of 64 entries to each series.
+
+## Lookup
+
+To read a tile, descend from each series: in every node, take the entries
+whose bounds intersect the tile's key interval, plus the first entry whose
+maximum reaches the interval start, or the final entry if none does. Among the
+pages, that first page contains the tile's copy host when any copies exist.
+Read consecutive pages together. Decode the standard Parquet page with the
+root's codec and the required-struct/nullable-binary schema. Use the fences to
+retain own rows inside the tile interval, and the host row for its copies
+tagged with the requested tile. Global row indices are the feature ids. A reader can scan
+definition-level runs in v1 PLAIN pages directly and skip null rows, falling
+back to a general decoder for other encodings. The directory stores no
+geometry or styling payload and is not an MVT archive.
 
 ## Analytical access and publishing
 

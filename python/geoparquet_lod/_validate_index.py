@@ -15,8 +15,10 @@ from ._layout import (
     FENCE_FIELDS,
     MAGIC,
     PAGE_FIELDS,
+    VERSION,
     grid_zoom,
     page_cells,
+    read_node,
     row_metadata,
 )
 
@@ -79,16 +81,24 @@ def check_index(path, parquet, lod):
         source.seek(4)
         magic = source.read(8)
         # The footer's key/value metadata, which Arrow's schema metadata need not include.
-        advertised = b'lod_spatial_index' in (parquet.metadata.metadata or {})
+        advertised = (parquet.metadata.metadata or {}).get(b'lod_spatial_index')
         if magic != MAGIC:
-            if advertised:
+            if advertised is not None:
                 raise ValueError('spatial index advertised but bootstrap magic missing')
             return
+        if advertised is None or json.loads(advertised) != {
+            'version': VERSION,
+            'offset': 4,
+            'length': BOOTSTRAP_BYTES - 4,
+        }:
+            raise ValueError('spatial index advertisement missing or of another version')
         root_length = int.from_bytes(source.read(4), 'little')
         if not 0 < root_length <= BOOTSTRAP_BYTES - 16:
             raise ValueError('invalid spatial root length')
         root = json.loads(gzip.decompress(read(16, root_length)))
-        if root.get('version') != 1 or root.get('file_bytes') != size or root.get('lod') != lod:
+        if root.get('version') != VERSION or root.get('file_bytes') != size:
+            raise ValueError('spatial root version or file length disagrees with footer')
+        if root.get('lod') != lod:
             raise ValueError('spatial root metadata disagrees with footer')
         geo = json.loads(parquet.schema_arrow.metadata[b'geo'])
         if root.get('primary') != geo.get('primary_column', 'geometry'):
@@ -123,66 +133,34 @@ def check_index(path, parquet, lod):
                 raise ValueError('Hilbert keys out of range or unsorted')
             keys[starts[g] : starts[g] + len(values)] = values
             last = values[-1] if len(values) else last
-        seen_ranges = set()
-        for name, sections in root['streams'].items():
-            span = 4 ** max(0, depth - max(lod['lods'][name]['zooms']))
-            records = []
 
-            def visit(entries, level, bounds=None, *, records=records):
-                if not isinstance(level, int) or not 0 <= level <= 32:
-                    raise ValueError('invalid directory depth')
-                previous = -1
-                for entry in entries:
-                    low, high, byte, length = entry[:4]
-                    if low > high or low < previous or low < 0 or high >= sentinel:
-                        raise ValueError('invalid directory key bounds or ordering')
-                    if bounds and (low < bounds[0] or high > bounds[1]):
-                        raise ValueError('child directory bounds escape parent')
-                    previous = low
-                    if level:
-                        if len(entry) > 4 and entry[4] != level - 1:
-                            raise ValueError('inconsistent directory depth')
-                        ref = (byte, length)
-                        if ref in seen_ranges:
-                            raise ValueError('duplicate or cyclic directory reference')
-                        seen_ranges.add(ref)
-                        child = json.loads(gzip.decompress(read(byte, length)))
-                        if not child or child[0][0] != low or child[-1][1] != high:
-                            raise ValueError('directory bounds do not cover children exactly')
-                        visit(child, level - 1, (low, high))
-                        continue
-                    if len(entry) != 8 or len(entry[6]) % 2:
-                        raise ValueError('invalid leaf entry shape')
-                    records.append(entry)
+        def walk(level, entries):
+            """The leaf entries under one node, in order."""
+            if not level:
+                return [entries]
+            leaves = []
+            within(entries['offset'], entries['length'])
+            for i in range(len(entries['low'])):
+                raw = read(int(entries['offset'][i]), int(entries['length'][i]))
+                child_level, child = read_node(json.loads(gzip.decompress(raw)))
+                if child_level != level - 1:
+                    raise ValueError('inconsistent directory depth')
+                if not len(child['low']) or (child['low'][0], child['high'][-1]) != (
+                    entries['low'][i],
+                    entries['high'][i],
+                ):
+                    raise ValueError('directory bounds do not cover children exactly')
+                leaves += walk(child_level, child)
+            return leaves
 
-            if not sections:
+        for name, series in root['streams'].items():
+            if not isinstance(series, list) or not series:
                 raise ValueError('missing directory series')
-            for encoded in sections:
-                if root.get('directory_encoding') == 'delta':
-                    offset, level, triples = encoded
-                    if len(triples) % 3:
-                        raise ValueError('malformed delta directory')
-                    entries, previous = [], 0
-                    for i in range(0, len(triples), 3):
-                        low = previous + triples[i]
-                        length = triples[i + 2]
-                        entries.append(
-                            [low * span, (low + triples[i + 1] + 1) * span - 1, offset, length]
-                        )
-                        previous, offset = low, offset + length
-                    # Root delta bounds are rounded to tile cells, unlike exact child bounds.
-                    for entry in entries:
-                        child = json.loads(gzip.decompress(read(entry[2], entry[3])))
-                        if not child or child[0][0] < entry[0] or child[-1][1] > entry[1]:
-                            raise ValueError('root bounds do not cover directory children')
-                        visit(child, level, (entry[0], entry[1]))
-                elif root.get('directory_encoding') is None:
-                    for low, high, byte, length, *rest in encoded:
-                        child = json.loads(gzip.decompress(read(byte, length)))
-                        visit(child, rest[0] if rest else 0, (low, high))
-                else:
-                    raise ValueError('unknown directory encoding')
-            actual = _records(records)
+            tops = [read_node(node) for node in series]
+            if any(level < 1 for level, _ in tops):
+                raise ValueError('a directory series must be above the leaves')
+            leaves = [leaf for top in tops for leaf in walk(*top)]
+            actual = _concat(leaves)
             order = np.argsort(actual['first'], kind='stable')
             position = np.empty_like(order)
             position[order] = np.arange(len(order))
@@ -198,13 +176,11 @@ def check_index(path, parquet, lod):
                     .field(name)
                 )
                 present = values.is_valid().to_numpy(zero_copy_only=False)
-                local = keys[starts[g] : starts[g] + len(present)]
-                found = page_cells(local, bounds, present, depth, zoom)
+                found = page_cells(
+                    keys[starts[g] : starts[g] + len(present)], bounds, present, depth, zoom
+                )
                 shown = found.pop('pages')
                 found['offset'], found['length'] = byte[shown], length[shown]
-                last_valid = found['first'] + np.maximum(found['valid'], 1) - 1
-                found['low'] = local[found['first']].astype(np.int64)
-                found['high'] = local[last_valid].astype(np.int64)
                 found['first'] += starts[g]
                 expected.append(found)
             expected = _concat(expected)
@@ -221,21 +197,6 @@ def check_index(path, parquet, lod):
             ):
                 if any(not np.array_equal(actual[k], expected[k]) for k in fields):
                     raise ValueError(message)
-
-
-def _records(records):
-    """Leaf page records as one table with flat fences."""
-    fences = [entry[6] for entry in records]
-    flat = np.array([value for fence in fences for value in fence], np.int64)
-    return {
-        **{
-            k: np.array([entry[i] for entry in records], np.int64)
-            for i, k in zip((0, 1, 2, 3, 4, 5, 7), PAGE_FIELDS, strict=True)
-        },
-        'fence_page': np.repeat(np.arange(len(fences)), [len(f) // 2 for f in fences]),
-        'fence_row': flat[1::2],
-        'fence_cell': flat[0::2],
-    }
 
 
 def _concat(parts):

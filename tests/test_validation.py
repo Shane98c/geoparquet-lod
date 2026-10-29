@@ -162,9 +162,11 @@ def _write_root(path, raw, root):
     'mutation',
     [
         'root_bounds',
+        'level',
         'leaf_rows',
         'leaf_fences',
         'leaf_offset',
+        'leaf_nulls',
         'codec',
         'primary',
         'footer_bytes',
@@ -192,52 +194,35 @@ def test_spatial_index_corruption(indexed, tmp_path, mutation):
         raw = raw[:footer] + encoded + raw[footer:]
         root['row_metadata'] = [footer, len(encoded)]
         root['file_bytes'] = len(raw)
-    elif mutation == 'root_bounds':
-        stream = next(s for sections in root['streams'].values() for s in sections if s[2])
-        stream[2][0] += 1000000
+    elif mutation in ('root_bounds', 'level'):
+        # [level, cells, spans, gaps, lengths] of one LOD's series
+        node = next(node for nodes in root['streams'].values() for node in nodes if node[1])
+        if mutation == 'root_bounds':
+            node[1][0] += 1000000
+        else:
+            node[0] += 1
     elif mutation == 'magic':
         raw = raw[:4] + bytes(8) + raw[12:]
     else:
-        name = next(iter(root['streams']))
-        # Replace delta directory with equivalent explicit references, then append
-        # one mutated leaf before the unchanged footer (all page offsets stay valid).
-        converted = {}
-        for name_, sections in root['streams'].items():
-            span = 4 ** max(
-                0, root['lod']['key']['depth'] - max(root['lod']['lods'][name_]['zooms'])
-            )
-            converted[name_] = []
-            for offset, depth, triples in sections:
-                refs, previous = [], 0
-                for i in range(0, len(triples), 3):
-                    low = previous + triples[i]
-                    refs.append(
-                        [
-                            low * span,
-                            (low + triples[i + 1] + 1) * span - 1,
-                            offset,
-                            triples[i + 2],
-                            depth,
-                        ]
-                    )
-                    previous, offset = low, offset + triples[i + 2]
-                converted[name_].append(refs)
-        ref = next(ref for section in converted[name] for ref in section)
-        assert ref[4] == 0
-        entries = json.loads(gzip.decompress(raw[ref[2] : ref[2] + ref[3]]))
+        # Append one mutated leaf before the unchanged footer and point the last
+        # entry of a level-one series at it; all page offsets stay valid.
+        node = next(n for nodes in root['streams'].values() for n in nodes if n[0] == 1 and n[1])
+        start = sum(node[3]) + sum(node[4][:-1])
+        leaf = json.loads(gzip.decompress(raw[start : start + node[4][-1]]))
         if mutation == 'leaf_rows':
-            entries[0][5] += 1
+            leaf[6][0] += 1
         elif mutation == 'leaf_fences':
-            entries[0][6][1] += 1
+            leaf[7][0] = [1, 1]
+        elif mutation == 'leaf_nulls':
+            leaf[8][0] = 1
         else:
-            entries[0][2] += 1
-        encoded = gzip.compress(json.dumps(entries).encode(), mtime=0)
+            leaf[3][0] += 1
+        encoded = gzip.compress(json.dumps(leaf).encode(), mtime=0)
         footer = len(raw) - 8 - int.from_bytes(raw[-8:-4], 'little')
-        ref[2], ref[3] = footer, len(encoded)
+        node[3][-1] += footer - start
+        node[4][-1] = len(encoded)
         raw = raw[:footer] + encoded + raw[footer:]
         root['file_bytes'] = len(raw)
-        root.pop('directory_encoding')
-        root['streams'] = converted
     _write_root(bad, raw, root)
     validate(bad, sample_rows=3)  # quick mode intentionally does not traverse directories
     with pytest.raises(ValidationError, match='spatial index'):
