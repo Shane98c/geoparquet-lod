@@ -24,18 +24,17 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.parametrize(
-    'family,tile_pages,leaf_pages,page_bytes',
+    'family,sparse,leaf_pages,page_bytes',
     [
-        ('polygon', True, 16, 16384),
-        ('polygon', True, 1, 32768),
+        ('polygon', False, 16, 16384),
+        ('polygon', False, 1, 32768),
         ('point', False, 16, 16384),
         ('point', True, 16, 65536),
-        ('line', True, 16, 131072),
+        ('line', False, 16, 131072),
     ],
 )
-def test_spatial_roundtrip(tmp_path, monkeypatch, family, tile_pages, leaf_pages, page_bytes):
+def test_spatial_roundtrip(tmp_path, monkeypatch, family, sparse, leaf_pages, page_bytes):
     rng = np.random.default_rng(913)
-    sparse = family == 'point' and tile_pages
     n = 12000 if sparse else 1200
     x, y = -105 + rng.random(n) * 0.25, 39.6 + rng.random(n) * 0.25
     geometry = (
@@ -85,20 +84,6 @@ def test_spatial_roundtrip(tmp_path, monkeypatch, family, tile_pages, leaf_pages
         log=lambda *_: None,
     )
     write(src, old, **options)
-    if family == 'point' and not sparse:
-        # Keep-pages must retain support for standard v2 pages through the
-        # general decoder when the sparse v1/PLAIN fast path doesn't apply.
-        table = pq.read_table(old)
-        pq.write_table(
-            table,
-            old,
-            row_group_size=256,
-            compression='zstd',
-            use_dictionary=False,
-            write_page_index=True,
-            data_page_version='2.0',
-            max_rows_per_page=32,
-        )
     before = old.read_bytes()
     size = int.from_bytes(before[-8:-4], 'little')
     footer = before[-8 - size : -8]
@@ -113,14 +98,7 @@ def test_spatial_roundtrip(tmp_path, monkeypatch, family, tile_pages, leaf_pages
         build(src, new, **options, lod_page_bytes=page_bytes)
         assert not list(tmp_path.glob('.lod-build-*'))
     else:
-        finalize_layout(
-            old,
-            new,
-            leaf_pages=leaf_pages,
-            tile_pages=tile_pages,
-            page_bytes=page_bytes,
-            log=lambda *_: None,
-        )
+        finalize_layout(old, new, leaf_pages=leaf_pages, page_bytes=page_bytes, log=lambda *_: None)
     if sparse:
         raw = new.read_bytes()
         root = json.loads(gzip.decompress(raw[16 : 16 + int.from_bytes(raw[12:16], 'little')]))

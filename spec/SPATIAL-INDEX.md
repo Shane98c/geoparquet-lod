@@ -25,8 +25,8 @@ GeoParquet metadata, with relocated offsets and updated physical sizes.
 `lod_spatial_index` in its key/value metadata advertises the bootstrap
 location. Primary geometry and source attribute chunks are copied byte for
 byte. LOD chunks are re-encoded in the original row order, with the same
-nullable binary schema and zstd, with page breaks at the LOD's finest tile
-grid. Multiple pages may serve a dense tile, and a row-group boundary can split
+nullable binary schema and zstd, without dictionary encoding, with page breaks
+at the LOD's finest tile grid. Multiple pages may serve a dense tile, and a row-group boundary can split
 a tile. The row cap scales with the chunk's LOD density to target 2,048
 present values, up to 262,144 analytical rows per page, alongside an
 uncompressed byte target (64 KiB by default). The target is advisory: write
@@ -121,9 +121,8 @@ Publish files immutably: the profile is
 specific to one file write, and ordinary Parquet writers need not preserve it.
 The reference `write()` builds the layout as its final step, writes to
 temporary files, and publishes only after the completed footer is readable.
-Its layout pass rejects encrypted or external chunks, bloom filters, legacy
-index pages, and, when keeping LOD pages verbatim, dictionary-encoded LOD
-chunks; the default tile-aligned build re-encodes them.
+Its layout pass rejects encrypted or external chunks, bloom filters and legacy
+index pages.
 
 The reference reader's caching, worker pool, and cancellation behaviour are
 described in the [usage guide](../docs/usage.md#reader-behaviour); none of it

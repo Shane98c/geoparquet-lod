@@ -1,9 +1,9 @@
 """Cluster the LOD column chunks and add a compact spatial page directory.
 
 The output is still the same Parquet table, including every LOD value. No
-geometry, attribute or row id is changed. Tile alignment re-encodes LOD
-pages with zstd; keep-pages mode copies every compressed data page verbatim.
-Readers unaware of the directory follow the relocated standard footer.
+geometry, attribute or row id is changed. LOD pages are re-encoded with zstd
+at tile boundaries; every other column chunk is copied verbatim. Readers
+unaware of the directory follow the relocated standard footer.
 """
 
 from __future__ import annotations
@@ -120,9 +120,7 @@ def row_metadata(metadata, columns):
     }
 
 
-def _tile_pages(
-    parquet, group, name, lod, keys, work, target, sparse_pages, page_bytes, compression_level
-):
+def _tile_pages(parquet, group, name, lod, keys, work, target, page_bytes, compression_level):
     """Use Arrow to encode tile-aligned pages, then concatenate its temporary
     column chunks into one ordinary chunk in the original row group. Dictionary
     encoding is disabled so every page is independently decodable. Consecutive
@@ -137,11 +135,7 @@ def _tile_pages(
     # A sparse overview may contain only a handful of values per 2048 source
     # rows. Give its compression pages a useful value budget while retaining
     # tile boundaries, the byte target, and a bounded decoded row span.
-    page_rows = 2048
-    if sparse_pages:
-        page_rows = min(
-            262144, max(page_rows, int(page_rows * len(present) / max(1, present.sum())))
-        )
+    page_rows = min(262144, max(2048, int(2048 * len(present) / max(1, present.sum()))))
     path = work / 'pages.parquet'
     with pq.ParquetWriter(
         path,
@@ -205,21 +199,11 @@ def _append_page_chunks(path, target):
     return combined, {1: (9, (12, pages))}
 
 
-def finalize_layout(
-    src,
-    out,
-    *,
-    leaf_pages=1024,
-    tile_pages=True,
-    sparse_pages=True,
-    page_bytes=65536,
-    compression_level=9,
-    log=print,
-):
+def finalize_layout(src, out, *, leaf_pages=1024, page_bytes=65536, compression_level=9, log=print):
     """Write a separate optimized copy, atomically. Working memory is bounded by
     one row group of LOD values plus the file's page directory and indexes; keys
     are staged in a disk mmap. Encrypted/external chunks and bloom filters are
-    unsupported; keep-pages mode also rejects dictionary-encoded LODs.
+    unsupported.
     """
     src, out = Path(src), Path(out)
     if src.resolve() == out.resolve():
@@ -314,8 +298,7 @@ def finalize_layout(
                         cm = get(chunk, 3)
                         path = [p.decode() for p in get(cm, 3)[1]]
                         name = path[1] if len(path) == 2 and path[0] == lod['column'] else None
-                        present = None
-                        if name and tile_pages:
+                        if name:
                             local_keys = keys[starts[g] : starts[g] + get(group, 3)]
                             cm, index, present = _tile_pages(
                                 parquet,
@@ -325,7 +308,6 @@ def finalize_layout(
                                 local_keys,
                                 work,
                                 target,
-                                sparse_pages,
                                 page_bytes,
                                 compression_level,
                             )
@@ -351,14 +333,6 @@ def finalize_layout(
                                 original.seek(get(chunk, 6))
                                 raw = original.read(get(chunk, 7))
                                 pending_indexes.append(((6, g, c), chunk, 6, 7, raw))
-                            if name:
-                                array = (
-                                    parquet.read_row_group(g, columns=[f'{lod["column"]}.{name}'])
-                                    .column(0)
-                                    .combine_chunks()
-                                    .field(name)
-                                )
-                                present = array.is_valid().to_numpy(zero_copy_only=False)
                         if index is not None:
                             pages = get(index, 1)[1]
                             if name:
@@ -399,8 +373,6 @@ def finalize_layout(
                         elif name:
                             raise ValueError('LOD column has no offset index')
                         if name:
-                            if 11 in cm:
-                                raise ValueError('dictionary-encoded LODs are unsupported')
                             codec = CODECS[get(cm, 4)]
                             if name in root['codecs'] and root['codecs'][name] != codec:
                                 raise ValueError('LOD codec must agree across row groups')
