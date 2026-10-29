@@ -222,6 +222,17 @@ const point = (x, y) => {
   view.setFloat64(13, y, true)
   return new Uint8Array(view.buffer)
 }
+const lineString = (points) => {
+  const view = new DataView(new ArrayBuffer(9 + 16 * points.length))
+  view.setUint8(0, 1)
+  view.setUint32(1, 2, true)
+  view.setUint32(5, points.length, true)
+  points.forEach(([x, y], i) => {
+    view.setFloat64(9 + 16 * i, x, true)
+    view.setFloat64(17 + 16 * i, y, true)
+  })
+  return new Uint8Array(view.buffer)
+}
 const varint = (n) => {
   const out = []
   for (; n >= 128; n = Math.floor(n / 128)) out.push((n % 128) | 128)
@@ -533,3 +544,27 @@ console.log('byte ranges: nodes, pages and row metadata past the file are refuse
   await assert.rejects(read(2, 2, dictionary), /page header disagrees/, 'a dictionary page')
 }
 console.log('page headers: rows and encoding agree with the directory before rows are read')
+
+{
+  // A NaN x or y leaves that ordinate alone out of a row's bbox, as the
+  // covering's bounds do: this line reaches latitude 50 but not longitude 12.
+  const file = store()
+  const geometry = file.raw(
+    binaryPage([
+      lineString([
+        [10, 10],
+        [NaN, 50],
+        [11, 11],
+      ]),
+    ]),
+  )
+  const page = { offset: geometry[0], length: geometry[1], first: 0 }
+  const leaf = file.add(
+    primaryLeaf([{ ...page, runs: [{ box: join(at(10, 10), at(11, 50)), count: 1 }] }]),
+  )
+  const top = cellBranch(1, [{ low: 0, high: 15, offset: leaf[0], length: leaf[1] }])
+  const r = reader(file.bytes, EMPTY_TOP, top)
+  assert.deepEqual((await r.readPrimary([10.4, 39.9, 10.6, 40.1])).rows, [0])
+  assert.deepEqual((await r.readPrimary([11.5, 30, 12, 60])).rows, [])
+}
+console.log('exact bboxes: NaN ordinates left out one axis at a time')

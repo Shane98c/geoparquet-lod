@@ -17,6 +17,8 @@ from .unpack import Unpacked, UnpackError, carried, lod_values, unpack_batches
 from .writer import LOD_KEY, LOD_VERSION
 
 BOUNDS = ('xmin', 'ymin', 'xmax', 'ymax')
+# rows of covering and primary geometry parsed at a time
+COVERING_BATCH_ROWS = 65_536
 
 
 class ValidationError(Exception):
@@ -27,11 +29,12 @@ def validate(path: str | Path, sample_rows: int = 2000, *, full: bool = False) -
     """Check metadata and a quick sample, or every packed row and index with full=True.
 
     The sample is the first sample_rows rows of the first row group: quick
-    mode decodes their packed values, and both modes check that their
-    covering is null exactly where their primary geometry is null or empty.
-    Full mode streams one LOD column of one row group at a time, decoding it
-    in batches, and checks a row group at a time that the covering and the
-    Hilbert key are null on the same rows.
+    mode decodes their packed values, and both modes check that each one's
+    covering is its primary geometry's bounds rounded outward to float32,
+    null exactly where the geometry is null or empty. Full mode checks every
+    row's covering the same way, streams one LOD column of one row group at
+    a time, decoding it in batches, and checks a row group at a time that
+    the covering and the Hilbert key are null on the same rows.
     """
     if not isinstance(sample_rows, int) or sample_rows < 0:
         raise ValueError('sample_rows must be a nonnegative integer')
@@ -118,7 +121,7 @@ def validate(path: str | Path, sample_rows: int = 2000, *, full: bool = False) -
                     raise ValidationError(f'row group {g}: {c.path_in_schema} has no column index')
             if not c.has_offset_index:
                 raise ValidationError(f'row group {g}: {c.path_in_schema} has no offset index')
-    _check_sample_covering(f, geometry, sample_rows)
+    _check_coverings(f, geometry, 0, sample_rows)
     # every LOD's packed rows: non-empty parts, rings of three or more vertices, valid copies
     fields, dictionaries = carried(lod)
     checked = dict.fromkeys(lods, 0)
@@ -126,6 +129,7 @@ def validate(path: str | Path, sample_rows: int = 2000, *, full: bool = False) -
     for group in groups:
         if full:
             _check_key_covering(f, group, key_column)
+            _check_coverings(f, geometry, group)
         for name, child in lods.items():
             values = lod_values(f, group, column, name)
             if not full:
@@ -205,30 +209,68 @@ def _check_attributes(attributes) -> None:
             )
 
 
-def _check_sample_covering(parquet: pq.ParquetFile, geometry: str, rows: int) -> None:
-    """Raise unless, in the first `rows` rows of the first row group, the
-    covering is null exactly where the primary geometry is null or empty."""
-    if not rows:
+def _check_coverings(
+    parquet: pq.ParquetFile, geometry: str, group: int, rows: int | None = None
+) -> None:
+    """Raise unless, in the first `rows` rows of row group `group`, or all of
+    them, each row's covering is its primary geometry's bounds rounded
+    outward to float32, and null exactly where the geometry is null or
+    empty. Reads COVERING_BATCH_ROWS rows at a time."""
+    if rows == 0:
         return
-    batch = next(parquet.iter_batches(rows, row_groups=[0], columns=['bbox', geometry]), None)
-    if batch is None:
-        return
-    wkb = batch.column(geometry)
-    null = wkb.is_null().to_numpy(zero_copy_only=False)
-    shapes = shapely.from_wkb(wkb.to_numpy(zero_copy_only=False), on_invalid='ignore')
-    invalid = np.flatnonzero(shapely.is_missing(shapes) & ~null)
-    if len(invalid):
-        raise ValidationError(f'row group 0, row {invalid[0]}: primary geometry is not valid WKB')
-    present = ~null & ~shapely.is_empty(shapes)
-    covered = batch.column('bbox').is_valid().to_numpy(zero_copy_only=False)
-    wrong = np.flatnonzero(covered != present)
-    if len(wrong):
-        row = wrong[0]
-        if present[row]:
-            message = 'null bbox covering on a non-empty geometry'
-        else:
-            message = f'bbox covering on {"a null" if null[row] else "an empty"} geometry'
-        raise ValidationError(f'row group 0, row {row}: {message}')
+    size = COVERING_BATCH_ROWS if rows is None else min(rows, COVERING_BATCH_ROWS)
+    start = 0
+    for batch in parquet.iter_batches(size, row_groups=[group], columns=['bbox', geometry]):
+        if rows is not None:
+            batch = batch.slice(0, rows - start)
+        wkb = batch.column(geometry)
+        null = wkb.is_null().to_numpy(zero_copy_only=False)
+        shapes = shapely.from_wkb(wkb.to_numpy(zero_copy_only=False), on_invalid='ignore')
+        invalid = np.flatnonzero(shapely.is_missing(shapes) & ~null)
+        if len(invalid):
+            row = start + invalid[0]
+            raise ValidationError(
+                f'row group {group}, row {row}: primary geometry is not valid WKB'
+            )
+        present = ~null & ~shapely.is_empty(shapes)
+        bbox = batch.column('bbox')
+        covered = bbox.is_valid().to_numpy(zero_copy_only=False)
+        wrong = np.flatnonzero(covered != present)
+        if len(wrong):
+            row = wrong[0]
+            if present[row]:
+                message = 'null bbox covering on a non-empty geometry'
+            else:
+                message = f'bbox covering on {"a null" if null[row] else "an empty"} geometry'
+            raise ValidationError(f'row group {group}, row {start + row}: {message}')
+        stored = np.column_stack([bbox.field(k).to_numpy(zero_copy_only=False) for k in BOUNDS])
+        exact = shapely.bounds(shapes[present])
+        expected = _outward(exact)
+        stored = stored[present]
+        differs = (stored != expected) & ~(np.isnan(stored) & np.isnan(expected))
+        bad = np.flatnonzero(differs.any(axis=1))
+        if len(bad):
+            i = bad[0]
+            k = int(np.argmax(differs[i]))
+            row = start + np.flatnonzero(present)[i]
+            raise ValidationError(
+                f'row group {group}, row {row}: bbox.{BOUNDS[k]} is {float(stored[i, k])!r}, '
+                f"not its geometry's {float(exact[i, k])!r} rounded outward to float32, "
+                f'{float(expected[i, k])!r}'
+            )
+        start += len(batch)
+        if rows is not None and start >= rows:
+            break
+
+
+def _outward(bounds: np.ndarray) -> np.ndarray:
+    """Rows of float64 `xmin, ymin, xmax, ymax` rounded outward to float32:
+    each minimum to the greatest float32 at most it, each maximum to the
+    least float32 at least it."""
+    rounded = bounds.astype(np.float32)
+    outward = np.array([-np.inf, -np.inf, np.inf, np.inf], np.float32)
+    past = np.where(outward < 0, rounded > bounds, rounded < bounds)
+    return np.where(past, np.nextafter(rounded, outward), rounded)
 
 
 def _check_key_covering(parquet: pq.ParquetFile, group: int, key_column: str) -> None:

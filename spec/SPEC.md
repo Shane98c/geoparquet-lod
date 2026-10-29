@@ -80,9 +80,14 @@ A conforming file MUST satisfy:
    geometry's GeoParquet 1.1 bbox covering at the paths `["bbox", "xmin"]`
    and so on, with column statistics on
    every row group, and a column index (page statistics) and offset index on
-   each of its four leaves. Values are rounded outward. A row whose primary
-   geometry is null or empty has a null covering, so statistics hold only
-   real bounds and a page of such rows is a null page of the column index.
+   each of its four leaves. A row's covering MUST be its primary geometry's
+   bounds, the least and greatest x and y of its coordinates with NaN values
+   left out, rounded outward to float32: `xmin` and `ymin` to the greatest
+   float32 at most them, `xmax` and `ymax` to the least at least them. A
+   row whose primary geometry is null or empty has a null covering, so
+   statistics hold only real bounds and a page of such rows is a null page of
+   the column index. A reader may therefore take a row's bbox from its WKB
+   or its covering and select the same rows.
 3. **Page indexes.** Every column has an offset index.
 4. **LOD columns.** A top-level required struct column named by `column`
    with one nullable binary child per LOD, named by the LOD. The child is
@@ -95,12 +100,14 @@ A conforming file MUST satisfy:
 
 The validator checks the version, encoding and per-LOD metadata, the schema
 shapes and covering declaration, covering statistics, page indexes, and a
-sample from the first row group: every LOD's values there decode, and the
-covering is null on exactly the rows whose primary geometry is null or empty.
-In full mode it decodes every LOD value and copy, checks in every row group
-that the covering and the key are null on the same rows, and, when the file
-has the [spatial index](SPATIAL-INDEX.md), checks it and
-the key order against the footer. It does not check the rules on `zooms`
+sample from the first row group: every LOD's values there decode, and each
+row's covering is its primary geometry's bounds rounded outward, null on
+exactly the rows whose geometry is null or empty. In full mode it decodes
+every LOD value and copy, checks the covering of every row against its
+geometry, checks in every row group that the covering and the key are null
+on the same rows, and, when the file has the
+[spatial index](SPATIAL-INDEX.md), checks it and the key order against the
+footer. It does not check the rules on `zooms`
 below, nor that every row is shown at the finest LOD; that is what the
 reference writer does, and a conformance suite with fixtures for it is open
 work.

@@ -303,12 +303,14 @@ z14 and overzooms beyond it.
 
 `geoparquet-lod validate file.parquet` checks the layout metadata, the bbox
 covering's schema and declaration, required page indexes, and up to 2,000 rows
-of the first row group: their overview values decode, and their covering is null
-exactly where their geometry is null or empty. Use `--sample-rows N` to change
-that quick sample. Use `geoparquet-lod validate file.parquet --full` (Python:
+of the first row group: their overview values decode, and each one's covering
+is its geometry's bounds rounded outward to float32, null exactly where the
+geometry is null or empty. Use `--sample-rows N` to change that quick sample.
+Use `geoparquet-lod validate file.parquet --full` (Python:
 `validate(path, full=True)`) to decode every overview value in every row group,
-including boundary copies. Full mode checks that the covering and the Hilbert
-key are null on the same rows, that polygon rings store
+including boundary copies. Full mode checks every row's covering the same
+way, that the covering and the Hilbert key are null on the same rows, that
+polygon rings store
 at least three vertices (the closing one is implicit), that grid coordinates fit
 int32 and carried values their declared types, packed byte consumption, copy
 source ids and tile tags, finite transforms,
@@ -326,9 +328,9 @@ says. Files without a spatial directory get the packed-value and offset-index
 checks. This is a storage and reader contract check; it does not
 prove polygon topology or compare simplification accuracy with primary WKB. Full
 mode reads the complete data, holds one LOD column of one row group at a time,
-decoding it two megabytes of packed values at a time, and holds one row group's
-covering and keys at a time, checking the spatial directory, held in memory,
-against those keys. The returned
+decoding it two megabytes of packed values at a time, parses the geometry
+65,536 rows at a time, and holds one row group's covering and keys at a time,
+checking the spatial directory, held in memory, against those keys. The returned
 `mode` and `checked_non_null` describe the work performed.
 
 ### Overviews in Python

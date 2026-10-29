@@ -208,10 +208,10 @@ Read each page once, adjacent pages together. Decode each page with the
 primary's codec and schema element; a page is any data page but a
 dictionary-encoded one, of exactly its runs' rows. Keep the rows of the taken
 runs whose geometry is present and whose bbox intersects the query: the
-reference reader takes it from the WKB, rounded outward to float32 as the
-covering is, so it keeps the rows the covering would. Alongside the geometry,
-read the pages of each needed attribute that the same leaves locate over the
-taken runs' rows.
+reference reader takes it from the WKB, rounded outward to float32, which
+[Layout](SPEC.md#layout) 2 makes the covering, so it keeps the rows the
+covering would. Alongside the geometry, read the pages of each needed
+attribute that the same leaves locate over the taken runs' rows.
 
 ## Analytical access and publishing
 

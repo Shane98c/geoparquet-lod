@@ -802,7 +802,8 @@ def test_carried_attribute_types_are_checked(indexed, tmp_path, kind, message):
 )
 def test_sampled_coverings_follow_their_geometry(indexed, tmp_path, mutation, message):
     """A sampled row's covering is null exactly where its primary geometry is
-    null or empty, in either mode; a row past the sample is not checked."""
+    null or empty, in either mode; quick mode leaves a row past the sample
+    unchecked."""
     row = 1
 
     def change(table, geo):
@@ -819,6 +820,33 @@ def test_sampled_coverings_follow_their_geometry(indexed, tmp_path, mutation, me
     for full in (False, True):
         with pytest.raises(ValidationError, match=f'row group 0, row {row}: {message}'):
             validate(bad, sample_rows=row + 1, full=full)
+
+
+@pytest.mark.parametrize('bound, outward', [('xmin', True), ('ymax', True), ('xmax', False)])
+@pytest.mark.parametrize('group, row', [(0, 1), (2, 5)])
+def test_coverings_are_their_geometry_bounds(indexed, tmp_path, bound, outward, group, row):
+    """A covering is its geometry's bounds rounded outward to float32, so one
+    a float32 step wider or narrower is refused: in the sample in either
+    mode, and past it in full mode."""
+
+    def change(table, geo):
+        bbox = table['bbox'].combine_chunks()
+        values = {k: bbox.field(k).to_numpy(zero_copy_only=False).copy() for k in BOUNDS}
+        away = -np.inf if (bound in ('xmin', 'ymin')) == outward else np.inf
+        at = group * 64 + row
+        values[bound][at] = np.nextafter(values[bound][at], np.float32(away))
+        children = [pa.array(values[k], pa.float32()) for k in BOUNDS]
+        moved = pa.StructArray.from_arrays(children, fields=list(bbox.type), mask=bbox.is_null())
+        return _replace(table, 'bbox', moved)
+
+    bad = _rewritten(indexed, tmp_path / 'moved.parquet', change)
+    message = f'row group {group}, row {row}: bbox.{bound} is '
+    validate(bad, sample_rows=row if group == 0 else 2000)
+    if group == 0:
+        with pytest.raises(ValidationError, match=message):
+            validate(bad, sample_rows=row + 1)
+    with pytest.raises(ValidationError, match=message):
+        validate(bad, full=True)
 
 
 @pytest.mark.parametrize(
