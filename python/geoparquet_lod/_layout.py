@@ -622,23 +622,15 @@ def _index_pages(index, rows, start):
     return part, bounds
 
 
-def _lod_top(level, entries):
-    return _node(level, *(entries[k] for k in ('low', 'high', 'offset', 'length')))
-
-
-def _lod_union(batch):
-    return {'low': batch['low'][0], 'high': batch['high'][-1]}
-
-
-def _branches(target, level, entries, top, union):
+def _branches(target, level, entries):
     """Write nodes of up to BRANCH_ENTRIES of a tree's top `entries` at
     `level`, and return the next level's entries."""
     parents = {k: [] for k in entries}
-    for first in range(0, len(entries['offset']), BRANCH_ENTRIES):
+    for first in range(0, len(entries['low']), BRANCH_ENTRIES):
         batch = {k: v[first : first + BRANCH_ENTRIES] for k, v in entries.items()}
-        raw = _json(top(level, batch))
-        for k, v in union(batch).items():
-            parents[k].append(v)
+        raw = _json(_node(level, **batch))
+        parents['low'].append(batch['low'][0])
+        parents['high'].append(batch['high'][-1])
         parents['offset'].append(target.tell())
         parents['length'].append(len(raw))
         target.write(raw)
@@ -1008,7 +1000,8 @@ def finalize_layout(src, out, *, leaf_pages=1024, page_bytes=65536, compression_
                     set_value(chunk, length_field, len(raw))
                     target.write(raw)
                 directory_start = target.tell()
-                # Each LOD's tree starts as one level of leaves. Keep the first
+                # Each tree starts as one level of leaves below a top node in the
+                # root; the primary directory's is under None. Keep the first
                 # request bounded even for very large datasets: while the root is
                 # too large, group the largest top node's entries under a new
                 # level of branches, fetched lazily and then shared by a pan.
@@ -1024,7 +1017,7 @@ def finalize_layout(src, out, *, leaf_pages=1024, page_bytes=65536, compression_
                         shards['offset'].append(target.tell())
                         shards['length'].append(len(raw))
                         target.write(raw)
-                    trees[name] = (1, shards, _lod_top, _lod_union)
+                    trees[name] = (1, shards)
                 zoom = directory_zoom(lod)
                 first_cells, entries, members = primary_leaves(
                     parquet,
@@ -1039,52 +1032,31 @@ def finalize_layout(src, out, *, leaf_pages=1024, page_bytes=65536, compression_
                     {k: np.concatenate([part[k] for part in runs[name]]) for k in SOURCE_FIELDS}
                     for name in attributes
                 ]
-                leaves = [
-                    primary_leaf({k: v[m] for k, v in entries.items()}, sources) for m in members
-                ]
-
-                def write_leaves():
-                    shards = {
-                        'low': first_cells,
-                        'high': np.r_[first_cells[1:], 4**zoom] - 1,
-                        'offset': [],
-                        'length': [],
-                    }
-                    for leaf in leaves:
-                        raw = _json(leaf)
-                        shards['offset'].append(target.tell())
-                        shards['length'].append(len(raw))
-                        target.write(raw)
-                    return 1, shards
-
-                # A single leaf stays in the root while it fits.
-                primary_tree = None if len(leaves) == 1 else write_leaves()
+                shards = {
+                    'low': first_cells,
+                    'high': np.r_[first_cells[1:], 4**zoom] - 1,
+                    'offset': [],
+                    'length': [],
+                }
+                for m in members:
+                    raw = _json(primary_leaf({k: v[m] for k, v in entries.items()}, sources))
+                    shards['offset'].append(target.tell())
+                    shards['length'].append(len(raw))
+                    target.write(raw)
+                trees[None] = (1, shards)
                 while True:
-                    root['directories'] = {
-                        name: top(level, shards) for name, (level, shards, top, _) in trees.items()
-                    }
-                    primary_top = leaves[0] if primary_tree is None else _lod_top(*primary_tree)
-                    root['primary_index']['directory'] = primary_top
+                    tops = {name: _node(level, **shards) for name, (level, shards) in trees.items()}
+                    root['directories'] = {name: tops[name] for name in names}
+                    root['primary_index']['directory'] = tops[None]
                     if len(_json(root)) <= _ROOT_TARGET_BYTES:
                         break
-                    # the top nodes that can shrink, the primary directory's under None
-                    tops = {
-                        name: root['directories'][name]
-                        for name, (_, shards, _, _) in trees.items()
-                        if len(shards['offset']) > 1
-                    }
-                    if primary_tree is None or len(primary_tree[1]['offset']) > 1:
-                        tops[None] = primary_top
-                    if not tops:
+                    shrinkable = [
+                        name for name, (_, shards) in trees.items() if len(shards['low']) > 1
+                    ]
+                    if not shrinkable:
                         raise ValueError('LOD metadata exceeds the 16 KiB bootstrap')
-                    largest = max(tops, key=lambda name: len(_json(tops[name])))
-                    if largest is not None:
-                        level, shards, top, union = trees[largest]
-                        trees[largest] = (*_branches(target, level, shards, top, union), top, union)
-                    elif primary_tree is None:
-                        primary_tree = write_leaves()
-                    else:
-                        primary_tree = _branches(target, *primary_tree, _lod_top, _lod_union)
+                    largest = max(shrinkable, key=lambda name: len(_json(tops[name])))
+                    trees[largest] = _branches(target, *trees[largest])
                 directory_bytes = target.tell() - directory_start
                 for group in groups:
                     chunks = get(group, 1)[1]

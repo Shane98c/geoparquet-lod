@@ -118,16 +118,15 @@ pages whose runs reach it, together, and the pages of the carried attributes'
 source columns over the same rows, one read per attribute alongside. WKB pages
 hold a few hundred features at full precision, about 45 KB each for OCR
 buildings, and features reaching in from a neighbouring tile are often in
-another page, so these tiles cost more than overview tiles. A state the size
-of Delaware fits its one leaf in the 16 KiB root: past a z15 finest LOD, a
-cold z16 OCR building tile there reads about 160 KB in four requests (140 KB
-in one or two without attributes) and the next tile east about 20 KB, where a
-cold z15 tile reads about 10 KB in two. Larger files keep their leaves below
-the root, and a tile reads one, or two when its buffer crosses into another
-leaf's tiles: in California a cold z16 tile reads about 240 KB in five
+another page, so these tiles cost more than overview tiles. A tile reads the
+leaf holding it, or two when its buffer crosses into another leaf's tiles.
+Delaware has one leaf of 7 KB: past a z15 finest LOD, a cold z16 OCR building
+tile there reads about 165 KB in five requests (145 KB in two or three without
+attributes) and the next tile east about 20 KB, where a cold z15 tile reads
+about 10 KB in two. In California a cold z16 tile reads about 240 KB in five
 requests (220 KB in three without attributes) and the next tile east about
-40 KB in one. Ending the zooms one earlier leaves out the finest LOD, 13% of
-the Delaware file, but its z15 tiles then read about 230 KB each. The reader
+40 KB in one. Ending the zooms one earlier leaves out the finest LOD, 12% of
+the Delaware file, but its z15 tiles then read about 240 KB each. The reader
 keeps the pages it fetched (16 MiB by default), so zooming further in over
 the same place, or across tiles of one large feature, reuses them instead of
 fetching them again. To overzoom instead, as PMTiles does, set the MapLibre

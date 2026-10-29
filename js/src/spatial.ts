@@ -403,8 +403,8 @@ export class SpatialReader implements TileReader {
   readonly finestZoom: number
   private readonly fields: AttributeField[]
   private readonly trees: Record<string, DirectoryNode>
-  /** The primary directory's top node, a leaf when it is the only one */
-  private readonly exact: DirectoryNode | PrimaryLeaf
+  /** The primary directory's top node */
+  private readonly exact: DirectoryNode
   /** Keys per primary directory cell */
   private readonly exactSpan: number
   /** Decoders of the primary geometry, then of each indexed attribute */
@@ -459,11 +459,8 @@ export class SpatialReader implements TileReader {
     )
       throw new Error('malformed primary directory')
     this.exactSpan = 4 ** Math.max(0, this.lod.key!.depth - this.finestZoom)
-    const top = index.directory as unknown[]
-    this.exact =
-      Array.isArray(top) && top[0] === 0
-        ? decodePrimaryLeaf(top, index.attributes.length)
-        : decodeNode(top, this.exactSpan)
+    this.exact = decodeNode(index.directory, this.exactSpan)
+    if (!this.exact.level) throw new Error('the primary directory must start above its leaves')
     const schema = parquetSchema(
       metadataFrom(Uint8Array.from(atob(index.schema), (c) => c.charCodeAt(0)).buffer),
     )
@@ -632,19 +629,18 @@ export class SpatialReader implements TileReader {
    * `intervals`. `reached` holds the offsets of the nodes already descended
    * into; a tree reaches each node once. */
   private async exactLeaves(
-    node: DirectoryNode | PrimaryLeaf,
+    node: DirectoryNode,
     intervals: Interval[],
     reached: Set<number>,
     signal?: AbortSignal,
   ): Promise<PrimaryLeaf[]> {
-    if ('pages' in node) return [node]
     const shards = (node.entries as Shard[]).filter(([low, high]) =>
       intervals.some(([start, end]) => low < end && high >= start),
     )
+    const attributes = this.root.primary_index.attributes.length
     const selected = await Promise.all(
       shards.map(async (shard) => {
         const [, , offset, length, level] = shard
-        const attributes = this.root.primary_index.attributes.length
         const child = level
           ? await this.directory(shard, this.exactSpan, signal)
           : await this.load(
@@ -656,7 +652,7 @@ export class SpatialReader implements TileReader {
             )
         if (reached.has(offset)) throw new Error('spatial directory node referenced twice')
         reached.add(offset)
-        return this.exactLeaves(child, intervals, reached, signal)
+        return 'pages' in child ? [child] : this.exactLeaves(child, intervals, reached, signal)
       }),
     )
     return selected.flat()

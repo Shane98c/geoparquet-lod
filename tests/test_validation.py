@@ -316,17 +316,20 @@ def carried(tmp_path_factory):
         ('schema', 'schema disagrees with footer'),
         ('attributes', 'distinct flat source columns'),
         ('level', 'malformed directory node'),
+        ('top', 'must start above its leaves'),
         ('missing', 'no primary directory'),
     ],
 )
 def test_primary_directory_corruption(carried, tmp_path, mutation, message):
     """A primary leaf lists geometry pages as runs of their rows, each boxed
     by the union of its rows' coverings, and each attribute's pages over
-    those rows."""
+    those rows; the root holds a node above the leaves."""
     raw, root = _root(carried[0])
     index = root['primary_index']
-    leaf = index['directory']
-    assert leaf[0] == 0 and index['attributes'] == ['height'], 'one leaf, in the root'
+    level, top = read_node(index['directory'])
+    assert level == 1 and len(top['low']) == 1 and index['attributes'] == ['height'], 'one leaf'
+    start, length = int(top['offset'][0]), int(top['length'][0])
+    leaf = json.loads(gzip.decompress(raw[start : start + length]))
     if mutation == 'box':
         leaf[3][1] += 1
     elif mutation == 'rows':
@@ -344,10 +347,15 @@ def test_primary_directory_corruption(carried, tmp_path, mutation, message):
         index['attributes'] = ['bbox']
     elif mutation == 'level':
         leaf[0] = 1
-    else:
+    store = _Appended(raw)
+    offset, size = store(leaf)
+    index['directory'] = _node(1, top['low'], top['high'], [offset], [size])
+    if mutation == 'top':
+        index['directory'] = leaf
+    elif mutation == 'missing':
         del root['primary_index']
     bad = tmp_path / 'bad.parquet'
-    _write_root(bad, raw, root)
+    store.write(bad, root)
     validate(bad, sample_rows=3)
     with pytest.raises(ValidationError, match=message):
         validate(bad, full=True)

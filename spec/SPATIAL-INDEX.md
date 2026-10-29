@@ -137,14 +137,13 @@ boundary copies. The root's `primary_index` holds:
   element, then the elements of the primary geometry and of each column in
   `attributes`, with no row groups. With `codecs` it decodes their pages
   without the footer.
-- `directory`: the top node.
+- `directory`: the top node, at level one or above.
 
 Its cells are Hilbert cells at `z = min(key.depth, finest zoom)`, the finest
 LOD's. The nodes above its leaves are directory nodes as above,
 `[level, cells, spans, gaps, lengths]`, and the leaves' cells, in order, are
-every cell at `z` from 0 to `4^z - 1`, each in one leaf; a directory of one
-leaf may have it as its top node. A leaf's _region_ is its cells' tiles
-at zoom `z`.
+every cell at `z` from 0 to `4^z - 1`, each in one leaf. A leaf's _region_ is
+its cells' tiles at zoom `z`.
 
 Boxes are whole cells of 2^-12 degrees, about 27 m of latitude: a longitude
 `x` lies in cell column `floor((x + 180) * 4096)` and a latitude `y` in cell

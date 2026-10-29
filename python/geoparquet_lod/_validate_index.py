@@ -236,8 +236,10 @@ def check_index(path, parquet, lod):
                 leaves += walk_primary(child_level, child, low, high)
             return leaves
 
-        top = read_primary_node(index.get('directory'), attributes)
-        found = walk_primary(*top, 0, 4**zoom - 1)
+        level, top = read_primary_node(index.get('directory'), attributes)
+        if level < 1:
+            raise ValueError('a directory tree must start above its leaves')
+        found = walk_primary(level, top, 0, 4**zoom - 1)
         firsts = np.array([low for low, _ in found], np.int64)
         leaves = [leaf for _, leaf in found]
         geometry = {

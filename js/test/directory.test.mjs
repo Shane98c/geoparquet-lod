@@ -7,8 +7,8 @@ import { SpatialReader, hilbertIndex } from '../dist/index.js'
 const PAGES = 60000
 // Thrift metadata whose schema holds an optional binary `geometry`
 const SCHEMA = 'FQIZLEgGc2NoZW1hFQIAFQwlAhgIZ2VvbWV0cnkAFgAZDAA='
-const EMPTY_LEAF = [0, [], [], [], [], [], [], [], [], []]
-const reader = (bytes, top, exact = EMPTY_LEAF, reads = []) =>
+const EMPTY_TOP = [1, [], [], [], []]
+const reader = (bytes, top, exact = EMPTY_TOP, reads = []) =>
   new SpatialReader(
     {
       byteLength: bytes.length,
@@ -309,8 +309,10 @@ const cellBranch = (level, children) => [
     ],
   }
   const leaf = primaryLeaf([pageA, pageB])
+  // a top node over one leaf of every cell, located as [offset, length]
+  const whole = ([offset, length]) => cellBranch(1, [{ low: 0, high: 15, offset, length }])
   const reads = []
-  const r = reader(file.bytes, [1, [], [], [], []], leaf, reads)
+  const r = reader(file.bytes, [1, [], [], [], []], whole(file.add(leaf)), reads)
   const rows = async (box) => (await r.readPrimary(box)).rows
   assert.deepEqual(await rows([9, 9, 11, 11]), [0, 1])
   assert.deepEqual(await rows([49, 49, 51, 51]), [2])
@@ -339,11 +341,9 @@ const cellBranch = (level, children) => [
   assert.deepEqual((await two.readPrimary([-180, -85, 180, 85])).rows, [0, 1, 2, 4])
 
   // a branch's cells must be its children's
-  const [offset, length] = east
-  const loose = cellBranch(1, [{ low: 0, high: 15, offset, length }])
-  const ok = reader(file.bytes, [1, [], [], [], []], loose)
+  const ok = reader(file.bytes, [1, [], [], [], []], whole(east))
   assert.deepEqual((await ok.readPrimary([9, 9, 11, 11])).rows, [0, 1])
-  const node = file.add(cellBranch(1, [{ low: 8, high: 15, offset, length }]))
+  const node = file.add(cellBranch(1, [{ low: 8, high: 15, offset: east[0], length: east[1] }]))
   const above = (low) => cellBranch(2, [{ low, high: 15, offset: node[0], length: node[1] }])
   await assert.rejects(
     reader(file.bytes, [1, [], [], [], []], above(0)).readPrimary([9, 9, 11, 11]),
@@ -358,7 +358,7 @@ const cellBranch = (level, children) => [
     reader(
       file.bytes,
       [1, [], [], [], []],
-      cellBranch(2, [{ low: 8, high: 15, offset, length }]),
+      cellBranch(2, [{ low: 8, high: 15, offset: east[0], length: east[1] }]),
     ).readPrimary([9, 9, 11, 11]),
     /malformed spatial directory node/,
     'a leaf located as a level-one node',
@@ -373,7 +373,16 @@ const cellBranch = (level, children) => [
     [leaf.with(9, [[[], [], [], []]]), 'runs for an attribute the root lacks'],
     [leaf.with(1, [0.5, 0, 0]), 'a fractional cell'],
   ])
-    assert.throws(() => reader(file.bytes, [1, [], [], [], []], bad), /malformed/, why)
+    await assert.rejects(
+      reader(file.bytes, [1, [], [], [], []], whole(file.add(bad))).readPrimary([-9, -9, 9, 9]),
+      /malformed/,
+      why,
+    )
+  for (const [top, error] of [
+    [leaf, /malformed spatial directory node/],
+    [[0, [], [], [], [], [], [], [], []], /must start above its leaves/],
+  ])
+    assert.throws(() => reader(file.bytes, [1, [], [], [], []], top), error, 'a leaf as the top')
 }
 
 {
