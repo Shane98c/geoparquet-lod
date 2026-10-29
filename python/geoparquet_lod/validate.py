@@ -244,7 +244,7 @@ def _check_coverings(
                 message = f'bbox covering on {"a null" if null[row] else "an empty"} geometry'
             raise ValidationError(f'row group {group}, row {start + row}: {message}')
         stored = np.column_stack([bbox.field(k).to_numpy(zero_copy_only=False) for k in BOUNDS])
-        exact = shapely.bounds(shapes[present])
+        exact = _bounds(shapes[present])
         expected = _outward(exact)
         stored = stored[present]
         differs = (stored != expected) & ~(np.isnan(stored) & np.isnan(expected))
@@ -261,6 +261,21 @@ def _check_coverings(
         start += len(batch)
         if rows is not None and start >= rows:
             break
+
+
+def _bounds(shapes: np.ndarray) -> np.ndarray:
+    """Rows of each geometry's `xmin, ymin, xmax, ymax`: the least and
+    greatest x and y of its coordinates, NaN values left out one axis at a
+    time, and NaN for an axis with none."""
+    coords, index = shapely.get_coordinates(shapes, return_index=True)
+    out = np.full((len(shapes), 4), np.nan)
+    if len(coords):
+        starts = np.flatnonzero(np.r_[True, index[1:] != index[:-1]])
+        for k, (reduce, axis) in enumerate(
+            ((np.fmin, 0), (np.fmin, 1), (np.fmax, 0), (np.fmax, 1))
+        ):
+            out[index[starts], k] = reduce.reduceat(coords[:, axis], starts)
+    return out
 
 
 def _outward(bounds: np.ndarray) -> np.ndarray:

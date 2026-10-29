@@ -26,7 +26,7 @@ from geoparquet_lod._layout import (
     row_metadata,
 )
 from geoparquet_lod.cli import cli
-from geoparquet_lod.validate import BOUNDS, ValidationError
+from geoparquet_lod.validate import BOUNDS, ValidationError, _outward
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -847,6 +847,60 @@ def test_coverings_are_their_geometry_bounds(indexed, tmp_path, bound, outward, 
             validate(bad, sample_rows=row + 1)
     with pytest.raises(ValidationError, match=message):
         validate(bad, full=True)
+
+
+def _among(tmp_path, kind, odd, n=60):
+    """A source of `n` small `kind` geometries near Denver with `odd` at row 25."""
+    x, y = -105 + np.arange(n) % 10 * 0.01, 39.7 + np.arange(n) // 10 * 0.01
+    corners = np.stack([np.column_stack([x, y]), np.column_stack([x, y]) + 0.004], axis=1)
+    if kind == 'Polygon':
+        shapes = shapely.box(x, y, x + 0.004, y + 0.004)
+    else:
+        shapes = shapely.multipoints(corners)
+    wkb = shapely.to_wkb(shapes).tolist()
+    wkb.insert(25, odd if isinstance(odd, bytes) else shapely.to_wkb(odd))
+    geo = {
+        'version': '1.1.0',
+        'primary_column': 'geometry',
+        'columns': {'geometry': {'encoding': 'WKB', 'geometry_types': [kind]}},
+    }
+    table = pa.table({'id': range(n + 1), 'geometry': pa.array(wkb, pa.binary())})
+    src = tmp_path / f'{kind}.parquet'
+    pq.write_table(table.replace_schema_metadata({b'geo': json.dumps(geo).encode()}), src)
+    return src
+
+
+@pytest.mark.parametrize(
+    'kind, odd, bounds',
+    [
+        # a hole outside its shell reaches past the shell
+        (
+            'Polygon',
+            shapely.Polygon(
+                [(-105, 39.7), (-104.99, 39.7), (-104.99, 39.71), (-105, 39.71)],
+                [[(-104.9, 39.8), (-104.895, 39.8), (-104.895, 39.805)]],
+            ),
+            (-105, 39.7, -104.895, 39.805),
+        ),
+        # a NaN x or y is left out of its own axis alone
+        (
+            'MultiPoint',
+            shapely.MultiPoint([(np.nan, 39.75), (-104.95, np.nan)]),
+            (-104.95, 39.75, -104.95, 39.75),
+        ),
+    ],
+)
+def test_written_coverings_bound_every_coordinate(tmp_path, kind, odd, bounds):
+    """The writer's covering is the least and greatest x and y of all of a
+    geometry's coordinates, NaN left out one axis at a time, rounded
+    outward, and validation takes a geometry's bounds the same way."""
+    src = _among(tmp_path, kind, odd)
+    out = write(src, tmp_path / 'out.parquet', zooms=[8, 10, 12], workers=1, log=lambda *_: None)
+    validate(out, full=True)
+    table = pq.read_table(out, columns=['id', 'bbox'])
+    row = table['id'].to_pylist().index(25)
+    covering = table['bbox'][row].as_py()
+    assert [covering[k] for k in BOUNDS] == _outward(np.array([bounds])).tolist()[0]
 
 
 @pytest.mark.parametrize(
