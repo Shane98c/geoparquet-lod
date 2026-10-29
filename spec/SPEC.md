@@ -79,7 +79,7 @@ A conforming file MUST satisfy:
 2. **Covering.** A nullable `bbox` struct column of four required float32
    values, `xmin`, `ymin`, `xmax` and `ymax`, declared as the primary
    geometry's GeoParquet bbox covering at the paths `["bbox", "xmin"]`
-   and so on, in `geo` metadata of version 1.1.0 or later, with column
+   and so on, in `geo` metadata of GeoParquet 1.1 or a later 1.x, with column
    statistics on
    every row group, and a column index (page statistics) and offset index on
    each of its four leaves. A geometry's bounds are the least and greatest x
@@ -376,11 +376,12 @@ this layout is in which rows a coarse view reads and how it finds them.
   so coarse views read many pages; the reference reader skips geometries that
   collapse at the level's resolution and stops at 650,000 features per query.
   This layout drops features per zoom instead, as tippecanoe does.
-- **GeoParquet 2.0**: orthogonal. The primary geometry is WKB in both 1.1 and
-  2.0; 2.0 annotates it with Parquet's `GEOMETRY` type and gains row-group
-  geospatial statistics. 2.0 allows no other primary encoding, which is why
-  the GeoArrow-shaped layout appears only in the LOD columns. Page pruning
-  still needs the bbox covering under either version.
+- **GeoParquet 2.0** (2.0.0-rc.1): the primary geometry is WKB in both 1.1
+  and 2.0; 2.0 requires Parquet's `GEOMETRY` or `GEOGRAPHY` type on it and
+  allows no other encoding, which is why the GeoArrow-shaped layout appears
+  only in the LOD columns. 2.0 also drops the bbox covering for Parquet's
+  geospatial statistics, which bound a row group but not a page, so this
+  layout stays on 1.1, whose covering lets a reader prune pages.
 
 ## Open questions
 

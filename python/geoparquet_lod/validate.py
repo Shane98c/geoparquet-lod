@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from pathlib import Path
 
 import numpy as np
@@ -14,7 +15,7 @@ import shapely
 from .encoding import ENCODING, INT32, PACK_VERSION, is_carried_type
 from .pack import FAMILY_DEPTH
 from .unpack import Unpacked, UnpackError, carried, lod_values, unpack_batches
-from .writer import COVERING_SINCE, LOD_KEY, LOD_VERSION, geoparquet_version
+from .writer import LOD_KEY, LOD_VERSION
 
 BOUNDS = ('xmin', 'ymin', 'xmax', 'ymax')
 # rows of covering and primary geometry parsed at a time
@@ -70,9 +71,11 @@ def validate(path: str | Path, sample_rows: int = 2000, *, full: bool = False) -
     covering = geo.get('columns', {}).get(geometry, {}).get('covering')
     if not covering:
         raise ValidationError(f'geo.columns.{geometry}.covering missing')
-    if geoparquet_version(geo.get('version')) < COVERING_SINCE:
+    version = tuple(int(part) for part in re.findall(r'\d+', str(geo.get('version', '')))[:2])
+    if not (1, 1) <= version < (2,):
         raise ValidationError(
-            f'geo version {geo.get("version")!r} predates the bbox covering, which needs 1.1.0'
+            f'geo version {geo.get("version")!r} is not GeoParquet 1.1 or a later 1.x, '
+            'which define the bbox covering'
         )
     _check_covering(f.schema_arrow.field('bbox'), covering, geometry)
     key = lod.get('key')

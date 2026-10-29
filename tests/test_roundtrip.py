@@ -12,7 +12,7 @@ import pyarrow.parquet as pq
 import pytest
 import shapely
 from geoparquet_lod import cluster, drop_rate, importance, only, size_threshold, validate, write
-from geoparquet_lod.writer import DICTIONARY_MAX
+from geoparquet_lod.writer import DICTIONARY_MAX, is_native_crs84
 from unpacker import Unpacker
 
 GEO = {
@@ -787,6 +787,66 @@ def test_other_crs_and_spherical_edges_are_refused(buildings, tmp_path):
         ['node', str(script), str(out), *refused], capture_output=True, text=True, check=True
     )
     assert f'crs tests passed, {len(refused)} files refused' in result.stdout
+
+
+class _GeoArrowWKB(pa.ExtensionType):
+    """geoarrow.wkb, which Arrow writes as Parquet's GEOMETRY or GEOGRAPHY type."""
+
+    def __init__(self, metadata: str):
+        self._metadata = metadata
+        super().__init__(pa.binary(), 'geoarrow.wkb')
+
+    def __arrow_ext_serialize__(self):
+        return self._metadata.encode()
+
+    @classmethod
+    def __arrow_ext_deserialize__(cls, storage_type, serialized):
+        return cls(serialized.decode())
+
+
+@pytest.mark.parametrize(
+    'metadata, refused',
+    [
+        ('{}', None),
+        ('{"crs": "EPSG:4326"}', None),
+        ('{"crs": "EPSG:3857"}', 'must be OGC:CRS84'),
+        ('{"edges": "spherical"}', 'has spherical edges'),
+    ],
+)
+def test_parquet_geometry_types_are_checked_without_geo_metadata(tmp_path, metadata, refused):
+    """A source with no geo metadata declares its CRS and edges on Parquet's
+    GEOMETRY or GEOGRAPHY type alone."""
+    source, output = tmp_path / 'source.parquet', tmp_path / 'output.parquet'
+    wkb = pa.array(shapely.to_wkb(shapely.points([-105, -104.99], [39.7, 39.71])))
+    geometry = pa.ExtensionArray.from_storage(_GeoArrowWKB(metadata), wkb)
+    pq.write_table(pa.table({'id': [1, 2], 'geometry': geometry}), source)
+    assert b'geo' not in (pq.read_schema(source).metadata or {})
+    if refused:
+        with pytest.raises(NotImplementedError, match=refused):
+            write(source, output, workers=1, log=lambda *_: None)
+    else:
+        write(source, output, zooms=[10, 11, 12], complete_from=12, workers=1, log=lambda *_: None)
+        validate(output)
+
+
+@pytest.mark.parametrize(
+    'crs, metadata, crs84',
+    [
+        (None, {}, True),
+        ('OGC:CRS84', {}, True),
+        ('epsg:4326', {}, True),
+        ('EPSG:3857', {}, False),
+        ('srid:0', {}, False),
+        ('{"id": {"authority": "EPSG", "code": 4326}}', {}, True),
+        ('{"id": {"authority": "EPSG", "code": 3857}}', {}, False),
+        ('projjson:crs', {b'crs': b'{"id": {"authority": "OGC", "code": "CRS84"}}'}, True),
+        ('projjson:missing', {}, False),
+    ],
+)
+def test_parquet_crs_forms(crs, metadata, crs84):
+    """Parquet's `crs` is an authority:code, inline PROJJSON, or a projjson:
+    reference to PROJJSON in the file metadata."""
+    assert is_native_crs84(crs, metadata) is crs84
 
 
 def test_thinnings_see_projected_area(tmp_path):

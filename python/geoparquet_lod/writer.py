@@ -12,7 +12,6 @@ import contextlib
 import inspect
 import json
 import os
-import re
 import tempfile
 import time
 from collections.abc import Iterable, Mapping
@@ -63,8 +62,10 @@ KEY_FIELD = pa.field(KEY_COLUMN, pa.int64(), nullable=True)
 # columns the writer computes carry a prefix no source column uses; thinnings see them unprefixed
 THINNING_COLUMNS = ('id', 'cx', 'cy', 'diag', 'area', 'nv', 'u')
 LOD_VERSION = '0.1.0'
-# the first GeoParquet version with a bbox covering
-COVERING_SINCE = (1, 1)
+# 1.1 defines the bbox covering; 2.0 drops it for Parquet's row-group statistics
+GEOPARQUET_VERSION = '1.1.0'
+# OGC:CRS84 and EPSG:4326, both read as x/y
+CRS84_IDS = (('OGC', 'CRS84'), ('EPSG', '4326'))
 BBOX_FIELD = pa.field(
     'bbox',
     pa.struct(
@@ -95,11 +96,6 @@ STAGED_LOD_LEVEL = 1
 # The unsorted copy is only read in ways that ignore its order, so its row groups can be
 # small, which bounds what DuckDB buffers per thread while writing it.
 UNSORTED_ROW_GROUP_ROWS = 122_880
-
-
-def geoparquet_version(version: object) -> tuple[int, ...]:
-    """Major and minor of a GeoParquet version string, empty when it has neither."""
-    return tuple(int(part) for part in re.findall(r'\d+', str(version or ''))[:2])
 
 
 def _sort_by_key(
@@ -384,9 +380,10 @@ def _full_detail_bytes(con, sorted_path, geometry, family, finest_zoom, origin, 
 GLOB_CHARS = '*?['
 
 
-def _read_schema(src: str) -> pa.Schema:
-    """Arrow schema with geo metadata of a local path or a URI Arrow's
-    filesystems open, such as s3://; a glob reads its first match."""
+def _read_schema(src: str) -> tuple[pa.Schema, dict[str, dict]]:
+    """Arrow schema with geo metadata, and each column's Parquet logical type,
+    of a local path or a URI Arrow's filesystems open, such as s3://; a glob
+    reads its first match."""
     import fnmatch
 
     from pyarrow import fs
@@ -410,7 +407,11 @@ def _read_schema(src: str) -> pa.Schema:
         if not matches:
             raise FileNotFoundError(src)
         path = matches[0]
-    return pq.read_schema(path, filesystem=filesystem)
+    schema = pq.read_metadata(path, filesystem=filesystem).schema
+    logical_types = {
+        c.path: json.loads(c.logical_type.to_json()) for c in map(schema.column, range(len(schema)))
+    }
+    return schema.to_arrow_schema(), logical_types
 
 
 def _attach_source(con, src: str) -> None:
@@ -535,7 +536,22 @@ def is_crs84(column) -> bool:
         return False
     ident = crs.get('id') or {}
     authority, code = str(ident.get('authority', '')).upper(), str(ident.get('code', ''))
-    return (authority, code) in (('OGC', 'CRS84'), ('EPSG', '4326'))
+    return (authority, code) in CRS84_IDS
+
+
+def is_native_crs84(crs: str | None, metadata: Mapping[bytes, bytes] | None) -> bool:
+    """Parquet's GEOMETRY `crs`: omitted is OGC:CRS84; otherwise an authority:code,
+    inline PROJJSON, or projjson:<key> naming PROJJSON in the file metadata."""
+    if not crs:
+        return True
+    if crs.startswith('projjson:'):
+        crs = (metadata or {}).get(crs.removeprefix('projjson:').encode(), b'').decode()
+    if crs.lstrip().startswith('{'):
+        try:
+            return is_crs84({'crs': json.loads(crs)})
+        except json.JSONDecodeError:
+            return False
+    return tuple(crs.upper().split(':', 1)) in CRS84_IDS
 
 
 def _render(args):
@@ -712,16 +728,23 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
     workers = o.workers or min(os.cpu_count() or 1, DEFAULT_WORKERS)
     con = held.enter_context(connect(o.memory_limit, o.temp_dir))
     _attach_source(con, src)
-    source_schema = _read_schema(src)
+    source_schema, logical_types = _read_schema(src)
     attributes = infer_attributes(source_schema, o.carry)
     geo = json.loads(dict(source_schema.metadata or {}).get(b'geo', b'{}') or b'{}')
     column = geo.get('columns', {}).get(geometry, {})
-    if not is_crs84(column):
+    # Parquet's GEOMETRY and GEOGRAPHY types declare a CRS and edges too, the only
+    # ones a file without geo metadata has
+    native = logical_types.get(geometry, {})
+    if not (is_crs84(column) and is_native_crs84(native.get('crs'), source_schema.metadata)):
         raise NotImplementedError(
             'the primary geometry must be OGC:CRS84 or EPSG:4326 (crs omitted or declared); reproject first'
         )
-    if column.get('edges', 'planar') != 'planar':
-        raise NotImplementedError(f'the primary geometry has {column["edges"]} edges; only planar')
+    if native.get('Type') == 'Geography':
+        edges = native.get('algorithm', 'spherical')
+    else:
+        edges = column.get('edges', 'planar')
+    if edges != 'planar':
+        raise NotImplementedError(f'the primary geometry has {edges} edges; only planar')
     types = [t.lower() for t in column.get('geometry_types', [])]
     if not types:
         sample = con.execute(
@@ -1031,8 +1054,7 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
     )
     rest = [f for f in source_schema if f.name not in ('bbox', geometry)]
     schema = pa.schema([BBOX_FIELD, KEY_FIELD, lod_field, *rest, source_schema.field(geometry)])
-    if geoparquet_version(geo.get('version')) < COVERING_SINCE:
-        geo['version'] = '1.1.0'
+    geo['version'] = GEOPARQUET_VERSION
     geo.setdefault('primary_column', geometry)
     geo.setdefault('columns', {}).setdefault(geometry, {'encoding': 'WKB', 'geometry_types': []})
     geo['columns'][geometry]['covering'] = {
