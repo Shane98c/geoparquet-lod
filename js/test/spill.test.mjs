@@ -1,26 +1,33 @@
-// straddler copies reach the tiles they belong to through the key interval read
+// straddler copies reach the tiles they belong to through the key interval
+// read and, given the file laid out with a spatial directory, through that
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { LodReader, coalescing, renderTile } from '../dist/index.js'
+import { LodReader, SpatialReader, coalescing, openReader, renderTile } from '../dist/index.js'
 import { nested } from './columnar.mjs'
 
-const [path, casesPath] = process.argv.slice(2)
+const [path, casesPath, laidOutPath] = process.argv.slice(2)
 if (!path) {
   console.log('spill test skipped: no fixture given')
   process.exit(0)
 }
-const parquet = await readFile(path)
-const source = {
-  byteLength: parquet.length,
-  slice: async (a, b) => Uint8Array.from(parquet.subarray(a, b)).buffer,
+const open = async (path) => {
+  const parquet = await readFile(path)
+  return {
+    byteLength: parquet.length,
+    slice: async (a, b) => Uint8Array.from(parquet.subarray(a, b)).buffer,
+  }
 }
+const source = await open(path)
 const reader = await LodReader.open(coalescing(source))
 assert.ok(reader.lod.key, 'fixture stores a key')
+const spatial = laidOutPath && (await openReader(coalescing(await open(laidOutPath))))
+if (spatial) assert.ok(spatial instanceof SpatialReader, 'the laid-out file has a directory')
 const cases = JSON.parse(await readFile(casesPath, 'utf8'))
 let copies = 0
 for (const { z, x, y, id, attribute = 'h' } of cases) {
   const lod = reader.lodForZoom(z)
-  const { rows, columns, geometry } = await reader.readLodByTile(lod, z, x, y, [attribute])
+  const found = await reader.readLodByTile(lod, z, x, y, [attribute])
+  const { rows, columns, geometry } = found
   const at = rows.indexOf(id)
   assert.ok(at >= 0, `row ${id} reaches tile ${z}/${x}/${y} but was not read`)
   assert.ok(nested(geometry, at, lod.geometry_type).length, 'the copy carries geometry')
@@ -29,6 +36,14 @@ for (const { z, x, y, id, attribute = 'h' } of cases) {
   copies++
   const mvt = await renderTile(reader, z, x, y)
   assert.ok(mvt.byteLength > 0)
+  if (spatial) {
+    assert.deepEqual(
+      await spatial.readLodByTile(spatial.lodForZoom(z), z, x, y, [attribute]),
+      found,
+      `the directory reads the same rows and copies for ${z}/${x}/${y}`,
+    )
+    assert.deepEqual(new Uint8Array(await renderTile(spatial, z, x, y)), new Uint8Array(mvt))
+  }
 }
 // the layout requires key statistics: a row group without them fails the read
 const stripped = await LodReader.open(coalescing(source))

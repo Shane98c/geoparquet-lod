@@ -1,4 +1,5 @@
-"""The footer reader of a file without the spatial index finds every tile's copies."""
+"""Readers find every tile's copies: the footer reader of a file without the
+spatial index, and the spatial reader once the file is laid out."""
 
 import json
 import math
@@ -10,6 +11,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 import shapely
+from geoparquet_lod._layout import finalize_layout
 from geoparquet_lod.writer import _write_unindexed as write
 from geoparquet_lod.writer import hilbert_key
 from unpacker import Unpacker
@@ -21,7 +23,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_copies_past_every_key_reach_their_tile(tmp_path, nulls):
     """A tile later on the curve than every key has its copies on the last
     keyed row, ahead of the null-geometry rows that sort last, whether or not
-    those fill the final row groups."""
+    those fill the final row groups. The spatial reader takes them from the
+    last page of the LOD's directory."""
     z, n = 14, 2**14
     tx = int((-104.99 + 180) / 360 * n)
     ty = int((1 - math.asinh(math.tan(math.radians(39.7))) / math.pi) / 2 * n)
@@ -90,8 +93,15 @@ def test_copies_past_every_key_reach_their_tile(tmp_path, nulls):
                     )
     assert cases, 'the fixture puts copies on tiles past every key'
     (tmp_path / 'cases.json').write_text(json.dumps(cases))
+    laid_out = finalize_layout(out, tmp_path / 'laid-out.parquet', log=lambda *_: None)
     result = subprocess.run(
-        ['node', str(ROOT / 'js/test/spill.test.mjs'), str(out), str(tmp_path / 'cases.json')],
+        [
+            'node',
+            str(ROOT / 'js/test/spill.test.mjs'),
+            str(out),
+            str(tmp_path / 'cases.json'),
+            str(laid_out),
+        ],
         capture_output=True,
         text=True,
     )
