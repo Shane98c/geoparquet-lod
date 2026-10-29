@@ -27,10 +27,48 @@ BOOTSTRAP_BYTES = 16384
 _ROOT_TARGET_BYTES = BOOTSTRAP_BYTES - 128
 MAGIC = b'LODIDX01'
 CODECS = ['UNCOMPRESSED', 'SNAPPY', 'GZIP', 'LZO', 'BROTLI', 'LZ4', 'ZSTD', 'LZ4_RAW']
+PAGE_FIELDS = ('low', 'high', 'offset', 'length', 'first', 'count', 'valid')
+FENCE_FIELDS = ('fence_page', 'fence_row', 'fence_cell')
 
 
 def _json(value):
     return gzip.compress(json.dumps(value, separators=(',', ':')).encode(), mtime=0)
+
+
+def grid_zoom(lod, name):
+    """Zoom of the cells an LOD's directory uses: its finest, at most the key depth."""
+    return min(lod['key']['depth'], max(lod['lods'][name]['zooms']))
+
+
+def page_cells(keys, bounds, present, depth, zoom):
+    """Directory values of one row group's pages. Page i holds rows
+    `bounds[i]:bounds[i + 1]` of the sorted Hilbert `keys`, null keys stored as
+    4**depth, and `present` marks the rows with a value. Pages without a value
+    are left out. For the rest: their index among the row group's pages, first
+    row and row count, valid (non-null) key rows, and their fences as flat
+    arrays: the page, relative row and cell at `zoom` of each page's first row
+    and of every later row whose cell differs from the row before.
+    """
+    keys = np.asarray(keys, np.uint64)
+    filled = np.r_[0, np.cumsum(present, dtype=np.int64)]
+    shown = filled[bounds[1:]] > filled[bounds[:-1]]
+    firsts, ends = bounds[:-1][shown], bounds[1:][shown]
+    cells = (keys >> np.uint64(2 * (depth - zoom))).astype(np.int64)
+    starts = np.union1d(firsts, np.flatnonzero(cells[1:] != cells[:-1]) + 1)
+    page = np.searchsorted(firsts, starts, side='right') - 1
+    inside = page >= 0
+    inside[inside] = starts[inside] < ends[page[inside]]
+    starts, page = starts[inside], page[inside]
+    valid = np.clip(np.searchsorted(keys, np.uint64(4**depth)) - firsts, 0, ends - firsts)
+    return {
+        'pages': np.flatnonzero(shown),
+        'first': firsts,
+        'count': ends - firsts,
+        'valid': valid,
+        'fence_page': page,
+        'fence_row': starts - firsts[page],
+        'fence_cell': cells[starts],
+    }
 
 
 def _root_json(root):
@@ -129,8 +167,7 @@ def _tile_pages(parquet, group, name, lod, keys, work, target, page_bytes, compr
     table = parquet.read_row_group(group, columns=[f'{lod["column"]}.{name}'])
     array = table.column(0).combine_chunks().field(name)
     present = array.is_valid().to_numpy(zero_copy_only=False)
-    shift = 2 * max(0, lod['key']['depth'] - max(lod['lods'][name]['zooms']))
-    cells = keys >> shift
+    cells = keys >> np.uint64(2 * (lod['key']['depth'] - grid_zoom(lod, name)))
     boundaries = np.r_[0, np.flatnonzero(cells[1:] != cells[:-1]) + 1, len(keys)]
     # A sparse overview may contain only a handful of values per 2048 source
     # rows. Give its compression pages a useful value budget while retaining
@@ -336,39 +373,38 @@ def finalize_layout(src, out, *, leaf_pages=1024, page_bytes=65536, compression_
                         if index is not None:
                             pages = get(index, 1)[1]
                             if name:
-                                for p, page in enumerate(pages):
-                                    local_first = get(page, 3)
-                                    local_end = (
-                                        get(pages[p + 1], 3)
-                                        if p + 1 < len(pages)
-                                        else get(group, 3)
+                                bounds = np.array(
+                                    [get(page, 3) for page in pages] + [get(group, 3)], np.int64
+                                )
+                                found = page_cells(
+                                    local_keys,
+                                    bounds,
+                                    present,
+                                    lod['key']['depth'],
+                                    grid_zoom(lod, name),
+                                )
+                                if not found['valid'].all():
+                                    raise ValueError('a displayed row has a null Hilbert key')
+                                fences = np.split(
+                                    np.column_stack((found['fence_cell'], found['fence_row'])),
+                                    np.searchsorted(
+                                        found['fence_page'], np.arange(1, len(found['pages']))
+                                    ),
+                                )
+                                for i, p in enumerate(found['pages']):
+                                    first, valid = int(found['first'][i]), int(found['valid'][i])
+                                    directory[name].append(
+                                        [
+                                            int(local_keys[first]),
+                                            int(local_keys[first + valid - 1]),
+                                            get(pages[p], 1),
+                                            get(pages[p], 2),
+                                            starts[g] + first,
+                                            int(found['count'][i]),
+                                            fences[i].ravel().tolist(),
+                                            valid,
+                                        ]
                                     )
-                                    if not present[local_first:local_end].any():
-                                        continue
-                                    first, end = starts[g] + local_first, starts[g] + local_end
-                                    valid_rows = int(
-                                        np.searchsorted(keys[first:end], 4 ** lod['key']['depth'])
-                                    )
-                                    if not valid_rows:
-                                        raise ValueError('a displayed row has a null Hilbert key')
-                                    zoom = max(lod['lods'][name]['zooms'])
-                                    shift = 2 * max(0, lod['key']['depth'] - zoom)
-                                    cells = keys[first:end] >> shift
-                                    changes = np.r_[0, np.flatnonzero(cells[1:] != cells[:-1]) + 1]
-                                    fences = (
-                                        np.column_stack((cells[changes], changes)).ravel().tolist()
-                                    )
-                                    entry = [
-                                        int(keys[first]),
-                                        int(keys[first + valid_rows - 1]),
-                                        get(page, 1),
-                                        get(page, 2),
-                                        first,
-                                        end - first,
-                                        fences,
-                                        valid_rows,
-                                    ]
-                                    directory[name].append(entry)
                             pending_indexes.append(((4, g, c), chunk, 4, 5, dumps(index)))
                         elif name:
                             raise ValueError('LOD column has no offset index')

@@ -9,7 +9,16 @@ import numpy as np
 import pyarrow as pa
 
 from ._compact import dumps, get, loads
-from ._layout import BOOTSTRAP_BYTES, MAGIC, row_metadata
+from ._layout import (
+    BOOTSTRAP_BYTES,
+    CODECS,
+    FENCE_FIELDS,
+    MAGIC,
+    PAGE_FIELDS,
+    grid_zoom,
+    page_cells,
+    row_metadata,
+)
 
 
 def check_index(path, parquet, lod):
@@ -22,15 +31,19 @@ def check_index(path, parquet, lod):
         source.seek(footer_start)
         metadata = loads(source.read(footer_size))
 
-        def read(start, length):
+        def within(start, length):
+            start, length = np.asarray(start), np.asarray(length)
             if (
-                not isinstance(start, int)
-                or not isinstance(length, int)
-                or start < 4
-                or length <= 0
-                or start + length > footer_start
+                start.dtype.kind not in 'iu'
+                or length.dtype.kind not in 'iu'
+                or (start < 4).any()
+                or (length <= 0).any()
+                or (start + length > footer_start).any()
             ):
                 raise ValueError('index byte range outside data region')
+
+        def read(start, length):
+            within(start, length)
             source.seek(start)
             raw = source.read(length)
             if len(raw) != length:
@@ -38,31 +51,29 @@ def check_index(path, parquet, lod):
             return raw
 
         # Validate all standard offset indexes, including source columns.
-        starts, first, pages_by_lod = [], 0, {name: {} for name in lod['lods']}
-        for g, group in enumerate(get(metadata, 4)[1]):
+        groups = get(metadata, 4)[1]
+        starts, first, locations = [], 0, {name: [] for name in lod['lods']}
+        for g, group in enumerate(groups):
             starts.append(first)
             count = get(group, 3)
             for chunk in get(group, 1)[1]:
                 cm = get(chunk, 3)
                 path_parts = [part.decode() for part in get(cm, 3)[1]]
-                offset, length = get(chunk, 4), get(chunk, 5)
-                pages = get(loads(read(offset, length)), 1)[1]
-                previous_row, previous_end = -1, -1
-                for p, page in enumerate(pages):
-                    byte, length, row = get(page, 1), get(page, 2), get(page, 3)
-                    read(byte, length)
-                    end = get(pages[p + 1], 3) if p + 1 < len(pages) else count
-                    if (
-                        row < previous_row
-                        or end < row
-                        or end > count
-                        or byte < previous_end
-                        or (p == 0 and row != 0)
-                    ):
-                        raise ValueError(f'row group {g}: invalid offset-index page ordering')
-                    previous_row, previous_end = row, byte + length
-                    if len(path_parts) == 2 and path_parts[0] == lod['column']:
-                        pages_by_lod[path_parts[1]][byte] = (length, first + row, end - row, g)
+                pages = get(loads(read(get(chunk, 4), get(chunk, 5))), 1)[1]
+                byte, length, row = (
+                    np.array([get(page, k) for page in pages], np.int64) for k in (1, 2, 3)
+                )
+                within(byte, length)
+                # page i holds rows bounds[i]:bounds[i + 1]
+                bounds = np.r_[row, count]
+                if (
+                    bounds[0] != 0
+                    or (np.diff(bounds) < 0).any()
+                    or (byte[1:] < (byte + length)[:-1]).any()
+                ):
+                    raise ValueError(f'row group {g}: invalid offset-index page ordering')
+                if len(path_parts) == 2 and path_parts[0] == lod['column']:
+                    locations[path_parts[1]].append((byte, length, bounds, CODECS[get(cm, 4)]))
             first += count
 
         source.seek(4)
@@ -97,37 +108,27 @@ def check_index(path, parquet, lod):
             raise ValueError('invalid Hilbert depth')
         sentinel = 4**depth
         keys = np.memmap(key_store, dtype=np.uint64, mode='w+', shape=(parquet.metadata.num_rows,))
-        key_row, last = 0, None
-        for g in range(parquet.metadata.num_row_groups):
-            values = parquet.read_row_group(g, columns=[key['column']]).column(0).to_pylist()
-            for value in values:
-                value = sentinel if value is None else value
-                if (
-                    not isinstance(value, int)
-                    or not 0 <= value <= sentinel
-                    or (last is not None and value < last)
-                ):
-                    raise ValueError('Hilbert keys out of range or unsorted')
-                keys[key_row] = value
-                key_row += 1
-                last = value
+        last = 0
+        for g in range(len(groups)):
+            column = parquet.read_row_group(g, columns=[key['column']]).column(0)
+            if not pa.types.is_integer(column.type):
+                raise ValueError('Hilbert keys must be integers')
+            values = column.fill_null(sentinel).to_numpy()
+            if len(values) and (
+                (values < 0).any()
+                or (values > sentinel).any()
+                or values[0] < last
+                or (values[1:] < values[:-1]).any()
+            ):
+                raise ValueError('Hilbert keys out of range or unsorted')
+            keys[starts[g] : starts[g] + len(values)] = values
+            last = values[-1] if len(values) else last
         seen_ranges = set()
         for name, sections in root['streams'].items():
             span = 4 ** max(0, depth - max(lod['lods'][name]['zooms']))
-            seen_pages = set()
-            present_pages = set()
-            for g in range(parquet.metadata.num_row_groups):
-                values = (
-                    parquet.read_row_group(g, columns=[f'{lod["column"]}.{name}'])
-                    .column(0)
-                    .combine_chunks()
-                    .field(name)
-                )
-                for byte, (_, first, count, group) in pages_by_lod[name].items():
-                    if group == g and values.slice(first - starts[g], count).null_count < count:
-                        present_pages.add(byte)
+            records = []
 
-            def visit(entries, level, bounds=None, *, name=name, span=span, seen_pages=seen_pages):
+            def visit(entries, level, bounds=None, *, records=records):
                 if not isinstance(level, int) or not 0 <= level <= 32:
                     raise ValueError('invalid directory depth')
                 previous = -1
@@ -150,48 +151,9 @@ def check_index(path, parquet, lod):
                             raise ValueError('directory bounds do not cover children exactly')
                         visit(child, level - 1, (low, high))
                         continue
-                    if len(entry) != 8:
+                    if len(entry) != 8 or len(entry[6]) % 2:
                         raise ValueError('invalid leaf entry shape')
-                    expected = pages_by_lod[name].get(byte)
-                    if (
-                        expected is None
-                        or (length, entry[4], entry[5]) != expected[:3]
-                        or byte in seen_pages
-                    ):
-                        raise ValueError('spatial leaf disagrees with Parquet page index')
-                    codec = (
-                        parquet.metadata.row_group(expected[3])
-                        .column(
-                            next(
-                                i
-                                for i in range(parquet.metadata.row_group(expected[3]).num_columns)
-                                if parquet.metadata.row_group(expected[3]).column(i).path_in_schema
-                                == f'{lod["column"]}.{name}'
-                            )
-                        )
-                        .compression
-                    )
-                    if root.get('codecs', {}).get(name) != codec:
-                        raise ValueError('spatial root codec disagrees with footer')
-                    seen_pages.add(byte)
-                    first, count, fences, valid = entry[4:8]
-                    page_keys = keys[first : first + count]
-                    actual_valid = sum(k < sentinel for k in page_keys)
-                    if (
-                        valid != actual_valid
-                        or not valid
-                        or (low, high) != (page_keys[0], page_keys[valid - 1])
-                    ):
-                        raise ValueError('spatial leaf key bounds or valid-row count incorrect')
-                    expected_fences = []
-                    last_cell = None
-                    for row, k in enumerate(page_keys):
-                        cell = k // span
-                        if cell != last_cell:
-                            expected_fences.extend([cell, row])
-                            last_cell = cell
-                    if fences != expected_fences:
-                        raise ValueError('spatial leaf fences disagree with source keys')
+                    records.append(entry)
 
             if not sections:
                 raise ValueError('missing directory series')
@@ -220,5 +182,82 @@ def check_index(path, parquet, lod):
                         visit(child, rest[0] if rest else 0, (low, high))
                 else:
                     raise ValueError('unknown directory encoding')
-            if seen_pages != present_pages:
+            actual = _records(records)
+            order = np.argsort(actual['first'], kind='stable')
+            position = np.empty_like(order)
+            position[order] = np.arange(len(order))
+            actual = {k: actual[k][order] for k in PAGE_FIELDS} | _fences(actual, position)
+            expected, zoom = [], grid_zoom(lod, name)
+            for g, (byte, length, bounds, codec) in enumerate(locations[name]):
+                if root.get('codecs', {}).get(name) != codec:
+                    raise ValueError('spatial root codec disagrees with footer')
+                values = (
+                    parquet.read_row_group(g, columns=[f'{lod["column"]}.{name}'])
+                    .column(0)
+                    .combine_chunks()
+                    .field(name)
+                )
+                present = values.is_valid().to_numpy(zero_copy_only=False)
+                local = keys[starts[g] : starts[g] + len(present)]
+                found = page_cells(local, bounds, present, depth, zoom)
+                shown = found.pop('pages')
+                found['offset'], found['length'] = byte[shown], length[shown]
+                last_valid = found['first'] + np.maximum(found['valid'], 1) - 1
+                found['low'] = local[found['first']].astype(np.int64)
+                found['high'] = local[last_valid].astype(np.int64)
+                found['first'] += starts[g]
+                expected.append(found)
+            expected = _concat(expected)
+            if len(actual['low']) != len(expected['low']) or not np.array_equal(
+                actual['offset'], expected['offset']
+            ):
                 raise ValueError('spatial directory omits or adds overview pages')
+            if not expected['valid'].all():
+                raise ValueError('a displayed row has a null Hilbert key')
+            for fields, message in (
+                (('length', 'first', 'count'), 'spatial leaf disagrees with Parquet page index'),
+                (('low', 'high', 'valid'), 'spatial leaf key bounds or valid-row count incorrect'),
+                (FENCE_FIELDS, 'spatial leaf fences disagree with source keys'),
+            ):
+                if any(not np.array_equal(actual[k], expected[k]) for k in fields):
+                    raise ValueError(message)
+
+
+def _records(records):
+    """Leaf page records as one table with flat fences."""
+    fences = [entry[6] for entry in records]
+    flat = np.array([value for fence in fences for value in fence], np.int64)
+    return {
+        **{
+            k: np.array([entry[i] for entry in records], np.int64)
+            for i, k in zip((0, 1, 2, 3, 4, 5, 7), PAGE_FIELDS, strict=True)
+        },
+        'fence_page': np.repeat(np.arange(len(fences)), [len(f) // 2 for f in fences]),
+        'fence_row': flat[1::2],
+        'fence_cell': flat[0::2],
+    }
+
+
+def _concat(parts):
+    """Page tables in order, as one table with fences numbered across it."""
+    pages = {
+        k: np.concatenate([np.zeros(0, np.int64)] + [p[k] for p in parts]) for k in PAGE_FIELDS
+    }
+    counts = np.cumsum([0] + [len(p['low']) for p in parts])
+    for k in FENCE_FIELDS:
+        pages[k] = np.concatenate(
+            [np.zeros(0, np.int64)]
+            + [p[k] + (counts[i] if k == 'fence_page' else 0) for i, p in enumerate(parts)]
+        )
+    return pages
+
+
+def _fences(pages, position):
+    """Fences renumbered for pages moved to `position`, in page and row order."""
+    page = position[pages['fence_page']]
+    order = np.lexsort((pages['fence_row'], page))
+    return {
+        'fence_page': page[order],
+        'fence_row': pages['fence_row'][order],
+        'fence_cell': pages['fence_cell'][order],
+    }
