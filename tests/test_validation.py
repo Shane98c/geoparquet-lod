@@ -15,7 +15,15 @@ import shapely
 from click.testing import CliRunner
 from geoparquet_lod import _validate_index, validate, write
 from geoparquet_lod._compact import dumps, get, loads, set_value
-from geoparquet_lod._layout import _node, finalize_layout, read_node, row_metadata
+from geoparquet_lod._layout import (
+    _box_node,
+    _node,
+    finalize_layout,
+    primary_schema,
+    read_box_node,
+    read_node,
+    row_metadata,
+)
 from geoparquet_lod.cli import cli
 from geoparquet_lod.validate import BOUNDS, ValidationError
 
@@ -257,6 +265,120 @@ def test_directory_nodes_are_reached_once(leafy, tmp_path, monkeypatch):
     with pytest.raises(ValidationError, match='referenced twice'):
         validate(bad, full=True)
     assert len(decoded) < 20
+
+
+@pytest.fixture(scope='module')
+def carried(tmp_path_factory):
+    """A file carrying an attribute, so primary leaves locate its pages too,
+    and the same laid out again with one page per leaf."""
+    work = tmp_path_factory.mktemp('carried')
+    n = 240
+    boxes = [
+        shapely.box(x, y, x + 0.08, y + 0.08)
+        for x, y in ((-105 + i % 20 * 0.06, 39.7 + i // 20 * 0.06) for i in range(n))
+    ]
+    geo = {
+        'version': '1.1.0',
+        'primary_column': 'geometry',
+        'columns': {'geometry': {'encoding': 'WKB', 'geometry_types': ['Polygon']}},
+    }
+    table = pa.table(
+        {
+            'height': pa.array([i % 37 for i in range(n)], pa.int32()),
+            'geometry': shapely.to_wkb(boxes),
+        }
+    )
+    src = work / 'source.parquet'
+    pq.write_table(table.replace_schema_metadata({b'geo': json.dumps(geo).encode()}), src)
+    out = write(
+        src,
+        work / 'carried.parquet',
+        zooms=[6, 8],
+        complete_from=8,
+        carry=['height'],
+        row_group_rows=64,
+        page_rows=16,
+        workers=1,
+        log=lambda *_: None,
+    )
+    return out, finalize_layout(out, work / 'leafy.parquet', leaf_pages=1, log=lambda *_: None)
+
+
+@pytest.mark.parametrize(
+    'mutation, message',
+    [
+        ('box', "box is not the union of its rows' covering"),
+        ('rows', 'disagrees with the geometry page index'),
+        ('offset', 'disagrees with the geometry page index'),
+        ('pieces', "piece is not the union of its rows' covering"),
+        ('piece_rows', 'pieces disagree with their page rows'),
+        ('runs', 'misplaces height pages'),
+        ('codecs', 'codecs disagree with footer'),
+        ('schema', 'schema disagrees with footer'),
+        ('attributes', 'distinct flat source columns'),
+        ('level', 'malformed primary directory node'),
+        ('missing', 'no primary directory'),
+    ],
+)
+def test_primary_directory_corruption(carried, tmp_path, mutation, message):
+    """The primary directory's pages are exactly the geometry pages holding a
+    row with an extent, each boxed by the union of its rows' coverings."""
+    raw, root = _root(carried[0])
+    index = root['primary_index']
+    leaf = index['directory']
+    assert leaf[0] == 0 and index['attributes'] == ['height'], 'one leaf, in the root'
+    page = leaf[9].index([])
+    rows, width, height = leaf[8][page], leaf[3][page], leaf[4][page]
+    if mutation == 'box':
+        leaf[3][page] += 1
+    elif mutation == 'rows':
+        leaf[8][page] -= 1
+    elif mutation == 'offset':
+        leaf[5][page + 1] += 1
+    elif mutation == 'pieces':
+        leaf[9][page] = [rows - 1, 0, 0, width, height, 1, 0, 0, width, height]
+    elif mutation == 'piece_rows':
+        leaf[9][page] = [rows, 0, 0, width, height, 1, 0, 0, width, height]
+    elif mutation == 'runs':
+        leaf[10][0][1][0] += 1
+    elif mutation == 'codecs':
+        index['codecs'][0] = 'SNAPPY'
+    elif mutation == 'schema':
+        footer = len(raw) - 8 - int.from_bytes(raw[-8:-4], 'little')
+        index['schema'] = primary_schema(loads(raw[footer:-8]), [root['primary']])
+    elif mutation == 'attributes':
+        index['attributes'] = ['bbox']
+    elif mutation == 'level':
+        leaf[0] = 1
+    else:
+        del root['primary_index']
+    bad = tmp_path / 'bad.parquet'
+    _write_root(bad, raw, root)
+    validate(bad, sample_rows=3)
+    with pytest.raises(ValidationError, match=message):
+        validate(bad, full=True)
+
+
+def test_primary_nodes_are_reached_once(carried, tmp_path):
+    """A primary directory node shared by two parents fails before its
+    subtree is read again, however deep the sharing goes."""
+    raw, root = _root(carried[1])
+    index = root['primary_index']
+    level, entries = read_box_node(index['directory'], index['attributes'])
+    assert level == 1 and len(entries['offset']) > 2
+    start, length = int(entries['offset'][0]), int(entries['length'][0])
+    box = [int(entries[k][0]) for k in ('x0', 'y0', 'x1', 'y1')]
+    store = _Appended(raw)
+    node = raw[start : start + length]
+    for level in range(1, 13):
+        # two copies of the node below, both referring to its children
+        copies = store(node), store(node)
+        node = _box_node(level, *([v, v] for v in box), *zip(*copies, strict=True))
+    index['directory'] = node
+    bad = tmp_path / 'shared.parquet'
+    store.write(bad, root)
+    with pytest.raises(ValidationError, match='referenced twice'):
+        validate(bad, full=True)
 
 
 @pytest.mark.parametrize(

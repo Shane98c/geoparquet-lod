@@ -1,6 +1,9 @@
 import { SharedLoad } from './shared-load.js'
-import type { ProjectionExecutor } from './projection.js'
-import { parquetMetadata } from 'hyparquet'
+import type { ProjectionExecutor, ProjectionTask } from './projection.js'
+import { parquetMetadata, parquetSchema } from 'hyparquet'
+import { readColumn } from 'hyparquet/src/column.js'
+import { DEFAULT_PARSERS } from 'hyparquet/src/convert.js'
+import { compressors } from './compressors.js'
 import { attributeKind, decodeSelectedRow, type AttributeField } from './decode.js'
 import { visitPlainPage } from './pages.js'
 import { GeometryBuilder } from './geometry.js'
@@ -13,19 +16,56 @@ import {
   type Lod,
   type LodMetadata,
   type LodRows,
+  type PrimaryRows,
   type RangeSource,
 } from './reader.js'
+import { float32Outward, wkbBounds } from './wkb.js'
 
 export const BOOTSTRAP_BYTES = 16384
 const MAGIC = 'LODIDX01'
-const VERSION = 2
+const VERSION = 3
 const MAX_LEVEL = 32
+/** Primary directory boxes are whole cells of 2^-12 degrees. */
+const BOX_CELLS_PER_DEGREE = 4096
 // [minimum key, maximum key, offset, length, first global row, row count, fences, valid key rows]
 type Page = [number, number, number, number, number, number, number[], number?]
 // [minimum key, maximum key, offset, length, level of the node located]
 type Shard = [number, number, number, number, number]
 /** A node's entries: pages in a leaf, else the nodes one level down. */
 type DirectoryNode = { level: 0; entries: Page[] } | { level: number; entries: Shard[] }
+/** Columns x0..x1 and rows y0..y1 of cells, inclusive. */
+type Box = [number, number, number, number]
+/** A page of a column chunk: byte range and global rows. */
+interface SourcePage {
+  offset: number
+  length: number
+  first: number
+  count: number
+}
+/** A primary directory entry: a geometry page in a leaf, else a node one level down. */
+interface BoxEntry {
+  box: Box
+  offset: number
+  length: number
+}
+/** A geometry page; a page whose rows lie in distant places has pieces,
+ * runs of its rows each with its own box. */
+type ExactPage = BoxEntry & SourcePage & { pieces?: (SourcePage & { box: Box })[] }
+/** A leaf adds, per indexed attribute, that column's pages over the leaf's rows. */
+type BoxNode =
+  { level: 0; entries: ExactPage[]; runs: SourcePage[][] } | { level: number; entries: BoxEntry[] }
+interface PrimaryIndex {
+  /** Carried attributes whose source pages each leaf locates */
+  attributes: string[]
+  /** Codecs of the primary geometry, then of each indexed attribute */
+  codecs: string[]
+  /** Base64 Thrift metadata whose schema holds those columns */
+  schema: string
+  /** The top node of the primary geometry's page tree */
+  directory: unknown
+}
+/** What decodes one indexed column's pages without the footer. */
+type ColumnDecoder = ProjectionTask['decoder'] & { codec: string }
 interface SpatialRoot {
   columns?: string[]
   bounds?: Bbox
@@ -39,10 +79,193 @@ interface SpatialRoot {
   codecs: Record<string, string>
   /** The top node of each LOD's directory tree, at level one or above */
   directories: Record<string, unknown>
+  primary_index: PrimaryIndex
 }
 
 const integers = (values: unknown): values is number[] =>
   Array.isArray(values) && values.every(Number.isSafeInteger)
+
+/** Cells of a WGS84 bbox, rounded outward, as the primary directory's boxes are. */
+const cellBox = ([west, south, east, north]: Bbox): Box => [
+  Math.floor((west + 180) * BOX_CELLS_PER_DEGREE),
+  Math.floor((south + 90) * BOX_CELLS_PER_DEGREE),
+  Math.floor((east + 180) * BOX_CELLS_PER_DEGREE),
+  Math.floor((north + 90) * BOX_CELLS_PER_DEGREE),
+]
+
+const overlaps = (a: Box | Bbox, b: Box | Bbox) =>
+  a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1]
+
+/** Pages stored as `[gaps, lengths, rows, counts]`: each page's bytes after
+ * the previous page's end, length, first row after the previous page's end
+ * row, and rows, the first counted from zero. */
+function decodeRuns(stored: unknown): SourcePage[] {
+  const [gaps, lengths, rows, counts] = (Array.isArray(stored) ? stored : []) as number[][]
+  if (
+    !Array.isArray(stored) ||
+    stored.length !== 4 ||
+    ![gaps, lengths, rows, counts].every(
+      (column) => integers(column) && column.length === gaps.length,
+    )
+  )
+    throw new Error('malformed primary directory page run')
+  const pages: SourcePage[] = []
+  let end = 0,
+    row = 0
+  for (let i = 0; i < gaps.length; i++) {
+    if (gaps[i] < 0 || lengths[i] <= 0 || rows[i] < 0 || counts[i] <= 0)
+      throw new Error('malformed primary directory page run')
+    const offset = end + gaps[i],
+      first = row + rows[i]
+    end = offset + lengths[i]
+    row = first + counts[i]
+    if (!Number.isSafeInteger(end) || !Number.isSafeInteger(row))
+      throw new Error('malformed primary directory page run')
+    pages.push({ offset, length: lengths[i], first, count: counts[i] })
+  }
+  return pages
+}
+
+/**
+ * Decode a stored primary directory node: its level, then one column per
+ * field with a value per entry. Every entry holds its minimum cell column and
+ * row minus the previous entry's, its width and height in cells, its byte gap
+ * after the previous entry's end, and its length; a leaf, at level 0, adds
+ * each page's row gap after the previous page's end and row count, then one
+ * page run per indexed attribute. The first entry counts from zero.
+ */
+function decodeBoxNode(stored: unknown, attributes: number): BoxNode {
+  const node: unknown[] = Array.isArray(stored) ? stored : []
+  const [level, wests, souths, widths, heights, gaps, lengths, rows, counts, pieces, runs] =
+    node as [number, ...number[][]]
+  if (
+    !Number.isSafeInteger(level) ||
+    level < 0 ||
+    level > MAX_LEVEL ||
+    node.length !== (level ? 7 : 11) ||
+    ![wests, souths, widths, heights, gaps, lengths, ...(level ? [] : [rows, counts])].every(
+      (column) => integers(column) && column.length === wests.length,
+    ) ||
+    (!level &&
+      (!Array.isArray(pieces) ||
+        pieces.length !== wests.length ||
+        !Array.isArray(runs) ||
+        runs.length !== attributes))
+  )
+    throw new Error('malformed primary directory node')
+  const entries: ExactPage[] = []
+  let x = 0,
+    y = 0,
+    end = 0,
+    row = 0
+  for (let i = 0; i < wests.length; i++) {
+    if (
+      widths[i] < 0 ||
+      heights[i] < 0 ||
+      gaps[i] < 0 ||
+      lengths[i] <= 0 ||
+      (!level && (rows[i] < 0 || counts[i] <= 0))
+    )
+      throw new Error('malformed primary directory node')
+    x += wests[i]
+    y += souths[i]
+    const offset = end + gaps[i]
+    end = offset + lengths[i]
+    const first = level ? 0 : row + rows[i]
+    row = level ? 0 : first + counts[i]
+    if (![x, y, x + widths[i], y + heights[i], end, row].every(Number.isSafeInteger))
+      throw new Error('malformed primary directory node')
+    const box: Box = [x, y, x + widths[i], y + heights[i]]
+    const page: ExactPage = { box, offset, length: lengths[i], first, count: level ? 0 : counts[i] }
+    if (!level && (pieces as unknown as unknown[][])[i].length)
+      page.pieces = decodePieces((pieces as unknown as unknown[])[i], page)
+    entries.push(page)
+  }
+  if (level)
+    return { level, entries: entries.map(({ box, offset, length }) => ({ box, offset, length })) }
+  return { level: 0, entries, runs: (runs as unknown as unknown[]).map(decodeRuns) }
+}
+
+/** A page's pieces stored as `[rows, x, y, width, height, ...]` per piece,
+ * x and y from the page box's minimum corner: two or more runs of its rows,
+ * in order, each boxed within the page box. */
+function decodePieces(stored: unknown, page: ExactPage): (SourcePage & { box: Box })[] {
+  if (!integers(stored) || stored.length % 5 || stored.length < 10)
+    throw new Error('malformed primary directory pieces')
+  const out: (SourcePage & { box: Box })[] = []
+  let row = page.first
+  for (let i = 0; i < stored.length; i += 5) {
+    const [count, dx, dy, width, height] = stored.slice(i, i + 5)
+    const box: Box = [
+      page.box[0] + dx,
+      page.box[1] + dy,
+      page.box[0] + dx + width,
+      page.box[1] + dy + height,
+    ]
+    if (
+      count <= 0 ||
+      dx < 0 ||
+      dy < 0 ||
+      width < 0 ||
+      height < 0 ||
+      box[2] > page.box[2] ||
+      box[3] > page.box[3]
+    )
+      throw new Error('malformed primary directory pieces')
+    out.push({ box, offset: page.offset, length: page.length, first: row, count })
+    row += count
+  }
+  if (row !== page.first + page.count) throw new Error('malformed primary directory pieces')
+  return out
+}
+
+/** The box holding every entry's box. */
+const union = (entries: BoxEntry[]): Box => {
+  const out: Box = [Infinity, Infinity, -Infinity, -Infinity]
+  for (const { box } of entries) {
+    out[0] = Math.min(out[0], box[0])
+    out[1] = Math.min(out[1], box[1])
+    out[2] = Math.max(out[2], box[2])
+    out[3] = Math.max(out[3], box[3])
+  }
+  return out
+}
+
+const RAW_GEOMETRY_PARSERS = {
+  ...DEFAULT_PARSERS,
+  geometryFromBytes: (bytes: Uint8Array) => bytes,
+  geographyFromBytes: (bytes: Uint8Array) => bytes,
+}
+
+/** Values at the ascending global `rows` of consecutive `pages` of one
+ * column, each page decoded whole; a page must hold exactly the rows the
+ * directory says, and every requested row lie in a page. */
+function decodePages(
+  decoder: ColumnDecoder,
+  pages: (SourcePage & { bytes: ArrayBuffer })[],
+  rows: number[],
+): unknown[] {
+  const out = new Array<unknown>(rows.length)
+  let next = 0
+  for (const page of pages) {
+    if (next === rows.length) break
+    if (rows[next] < page.first) break
+    if (rows[next] >= page.first + page.count) continue
+    const { data } = readColumn(
+      { view: new DataView(page.bytes), offset: 0 },
+      { groupStart: page.first, selectStart: 0, selectEnd: page.count } as never,
+      { ...decoder, compressors, parsers: RAW_GEOMETRY_PARSERS } as never,
+    )
+    let row = page.first
+    for (const chunk of data)
+      for (let i = 0; i < chunk.length; i++, row++)
+        if (rows[next] === row) out[next++] = chunk[i] ?? null
+    if (row !== page.first + page.count)
+      throw new Error('page rows disagree with the primary directory')
+  }
+  if (next !== rows.length) throw new Error('primary directory pages miss requested rows')
+  return out
+}
 
 /**
  * Decode a stored directory node: its level, then one column per field with a
@@ -196,11 +419,15 @@ export class SpatialReader implements TileReader {
   readonly finestZoom: number
   private readonly fields: AttributeField[]
   private readonly trees: Record<string, DirectoryNode>
+  private readonly exact: BoxNode
+  /** Decoders of the primary geometry, then of each indexed attribute */
+  private readonly decoders: ColumnDecoder[]
   /** Loaded directory nodes by offset, with the length they were read at */
   private readonly directories = new Map<
     number,
     { length: number; node: SharedLoad<DirectoryNode> }
   >()
+  private readonly boxNodes = new Map<number, { length: number; node: SharedLoad<BoxNode> }>()
   private readonly pages = new Map<number, { size: number; data: SharedLoad<ArrayBuffer> }>()
   private pageBytes = 0
   private fallback?: SharedLoad<LodReader>
@@ -230,6 +457,40 @@ export class SpatialReader implements TileReader {
         return [name, top]
       }),
     )
+    const index = root.primary_index
+    const columns = [root.primary, ...(index?.attributes ?? [])]
+    if (
+      !Array.isArray(index?.attributes) ||
+      !index.attributes.every((a) => typeof a === 'string') ||
+      new Set(columns).size !== columns.length ||
+      !Array.isArray(index.codecs) ||
+      index.codecs.length !== columns.length ||
+      typeof index.schema !== 'string'
+    )
+      throw new Error('malformed primary directory')
+    this.exact = decodeBoxNode(index.directory, index.attributes.length)
+    const schema = parquetSchema(
+      metadataFrom(Uint8Array.from(atob(index.schema), (c) => c.charCodeAt(0)).buffer),
+    )
+    this.decoders = columns.map((name, i) => {
+      const column = schema.children.find((c) => c.element.name === name)
+      if (!column || column.children.length || !column.element.type)
+        throw new Error(`primary directory schema lacks ${name}`)
+      const { element } = column
+      return {
+        type: element.type!,
+        codec: String(index.codecs[i]),
+        element,
+        schemaPath: [schema, column],
+        pathInSchema: [name],
+        utf8:
+          i > 0 &&
+          (element.converted_type === 'UTF8' ||
+            (element.logical_type as { type?: string } | undefined)?.type === 'STRING'),
+      }
+    })
+    if (this.decoders[0].type !== 'BYTE_ARRAY')
+      throw new Error('the primary geometry is not a binary column')
   }
 
   /** Keys per directory cell: cells are at the LOD's finest zoom, at most the key depth. */
@@ -293,8 +554,160 @@ export class SpatialReader implements TileReader {
     return (await this.rowReader(columns, signal)).readColumns(rows, columns, signal, execute)
   }
 
-  async readPrimary(bbox: Bbox, attributes: string[] = [], signal?: AbortSignal) {
-    return (await this.analytical(signal)).readPrimary(bbox, attributes, signal)
+  /**
+   * Rows whose geometry's bbox intersects `bbox`, with their exact primary
+   * geometry as WKB and the named source attributes. The primary directory
+   * selects the geometry pages whose boxes reach the query; their WKB gives
+   * each row's extent, rounded outward to float32 as the covering stores it.
+   * Indexed attributes come from the pages the same leaves locate, fetched
+   * alongside the geometry; others through `readColumns`.
+   */
+  async readPrimary(
+    bbox: Bbox,
+    attributes: string[] = [],
+    signal?: AbortSignal,
+  ): Promise<PrimaryRows> {
+    signal?.throwIfAborted()
+    const indexed = this.root.primary_index.attributes
+    const located = attributes.filter((a) => indexed.includes(a))
+    const query = cellBox(bbox)
+    const hits = await this.lookupBoxes(this.exact, query, new Set(), signal)
+    const pages = hits.flatMap((hit) => hit.pages)
+    // per located attribute, its pages over the rows of the selected geometry pages
+    const sources = located.map((name) => {
+      const column = indexed.indexOf(name)
+      const wanted = new Map<number, SourcePage>()
+      for (const hit of hits)
+        for (const page of hit.runs[column])
+          if (
+            hit.pages.some(
+              (p) => page.first < p.first + p.count && page.first + page.count > p.first,
+            )
+          )
+            wanted.set(page.offset, page)
+      return [...wanted.values()].sort((a, b) => a.first - b.first)
+    })
+    const [payloads, sourcePayloads] = await Promise.all([
+      this.pageData(pages, signal),
+      Promise.all(sources.map((list) => this.pageData(list, signal))),
+    ])
+    signal?.throwIfAborted()
+    const out: PrimaryRows = {
+      rows: [],
+      wkb: [],
+      columns: Object.fromEntries(attributes.map((a) => [a, []])),
+    }
+    // rows of pieces whose boxes miss the query have coverings that miss it too
+    const live = pages.flatMap((page) =>
+      (page.pieces ?? [page])
+        .filter((piece) => overlaps(piece.box, query))
+        .flatMap((piece) => Array.from({ length: piece.count }, (_, i) => piece.first + i)),
+    )
+    const wkb = decodePages(
+      this.decoders[0],
+      pages.map((page, i) => ({ ...page, bytes: payloads[i] })),
+      live,
+    )
+    for (const [i, value] of wkb.entries()) {
+      if (!(value instanceof Uint8Array)) continue
+      const extent = wkbBounds(value)
+      if (!extent || !overlaps(float32Outward(extent), bbox)) continue
+      out.rows.push(live[i])
+      out.wkb.push(value)
+    }
+    for (const [i, name] of located.entries())
+      out.columns[name] = decodePages(
+        this.decoders[indexed.indexOf(name) + 1],
+        sources[i].map((page, j) => ({ ...page, bytes: sourcePayloads[i][j] })),
+        out.rows,
+      )
+    const others = attributes.filter((a) => !located.includes(a))
+    if (others.length) Object.assign(out.columns, await this.readColumns(out.rows, others, signal))
+    signal?.throwIfAborted()
+    return out
+  }
+
+  /** The geometry pages under a primary directory node whose boxes reach
+   * `query`, with their leaf's attribute runs, in row order. `reached` holds
+   * the offsets of the nodes already descended into; a tree reaches each node
+   * once. */
+  private async lookupBoxes(
+    node: BoxNode,
+    query: Box,
+    reached: Set<number>,
+    signal?: AbortSignal,
+  ): Promise<{ pages: ExactPage[]; runs: SourcePage[][] }[]> {
+    if ('runs' in node) {
+      const pages = node.entries.filter(
+        (page) =>
+          overlaps(page.box, query) &&
+          (!page.pieces || page.pieces.some((piece) => overlaps(piece.box, query))),
+      )
+      return pages.length ? [{ pages, runs: node.runs }] : []
+    }
+    const level = node.level
+    const selected = await Promise.all(
+      node.entries
+        .filter((entry) => overlaps(entry.box, query))
+        .map(async (entry) => {
+          const child = await this.boxNode(entry, level - 1, signal)
+          if (reached.has(entry.offset)) throw new Error('spatial directory node referenced twice')
+          reached.add(entry.offset)
+          return this.lookupBoxes(child, query, reached, signal)
+        }),
+    )
+    return selected.flat()
+  }
+
+  /** A node from `cache` or loaded and decoded, read at `length` bytes. */
+  private load<T>(
+    cache: Map<number, { length: number; node: SharedLoad<T> }>,
+    offset: number,
+    length: number,
+    decode: (stored: unknown) => T,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    let cached = cache.get(offset)
+    if (!cached || cached.node.abandoned) {
+      const current = {
+        length,
+        node: new SharedLoad(async (signal) =>
+          decode(await gunzipJson(await this.file.slice(offset, offset + length, signal))),
+        ),
+      }
+      while (cache.size >= 128) cache.delete(cache.keys().next().value!)
+      cache.set(offset, current)
+      current.node.promise.catch(() => {
+        if (cache.get(offset) === current) cache.delete(offset)
+      })
+      cached = current
+    } else {
+      cache.delete(offset)
+      cache.set(offset, cached)
+    }
+    if (cached.length !== length)
+      return Promise.reject(new Error('spatial directory node disagrees with its parent entry'))
+    return cached.node.get(signal)
+  }
+
+  /** The primary directory node an entry locates, which must be at `level`
+   * with boxes whose union is the entry's box. */
+  private async boxNode(entry: BoxEntry, level: number, signal?: AbortSignal): Promise<BoxNode> {
+    const attributes = this.root.primary_index.attributes.length
+    const node = await this.load(
+      this.boxNodes,
+      entry.offset,
+      entry.length,
+      (stored) => decodeBoxNode(stored, attributes),
+      signal,
+    )
+    if (
+      node.level !== level ||
+      !node.entries.length ||
+      union(node.entries).some((v, i) => v !== entry.box[i])
+    )
+      throw new Error('spatial directory node disagrees with its parent entry')
+    return node
   }
 
   /** The node a parent's entry locates, which must match that entry's
@@ -305,31 +718,13 @@ export class SpatialReader implements TileReader {
     signal?: AbortSignal,
   ): Promise<DirectoryNode> {
     const [low, high, offset, length, level] = shard
-    let cached = this.directories.get(offset)
-    if (!cached || cached.node.abandoned) {
-      const current = {
-        length,
-        node: new SharedLoad(async (signal) =>
-          decodeNode(
-            await gunzipJson(await this.file.slice(offset, offset + length, signal)),
-            span,
-          ),
-        ),
-      }
-      while (this.directories.size >= 128)
-        this.directories.delete(this.directories.keys().next().value!)
-      this.directories.set(offset, current)
-      current.node.promise.catch(() => {
-        if (this.directories.get(offset) === current) this.directories.delete(offset)
-      })
-      cached = current
-    } else {
-      this.directories.delete(offset)
-      this.directories.set(offset, cached)
-    }
-    const mismatch = () => new Error('spatial directory node disagrees with its parent entry')
-    if (cached.length !== length) throw mismatch()
-    const node = await cached.node.get(signal)
+    const node = await this.load(
+      this.directories,
+      offset,
+      length,
+      (stored) => decodeNode(stored, span),
+      signal,
+    )
     const entries: (Page | Shard)[] = node.entries
     if (
       node.level !== level ||
@@ -337,7 +732,7 @@ export class SpatialReader implements TileReader {
       entries[0][0] !== low ||
       entries.at(-1)![1] !== high
     )
-      throw mismatch()
+      throw new Error('spatial directory node disagrees with its parent entry')
     return node
   }
 
@@ -369,57 +764,67 @@ export class SpatialReader implements TileReader {
     return selected.flat()
   }
 
-  private pageData(pages: Page[], signal?: AbortSignal): Promise<ArrayBuffer[]> {
+  /** The bytes of each of `pages`, which may belong to any column, from the
+   * compressed page cache or fetched; pages adjacent in the file share one
+   * range. */
+  private pageData(
+    pages: { offset: number; length: number }[],
+    signal?: AbortSignal,
+  ): Promise<ArrayBuffer[]> {
     signal?.throwIfAborted()
-    const runs: Page[][] = []
-    for (const p of [...pages].sort((a, b) => a[2] - b[2])) {
-      const cached = this.pages.get(p[2])
+    const runs: { offset: number; length: number }[][] = []
+    for (const p of [...pages].sort((a, b) => a.offset - b.offset)) {
+      const cached = this.pages.get(p.offset)
       if (cached && !cached.data.abandoned) continue
       if (cached) {
-        this.pages.delete(p[2])
+        this.pages.delete(p.offset)
         this.pageBytes -= cached.size
       }
-      const last = runs.at(-1)
-      if (last && last.at(-1)![2] + last.at(-1)![3] === p[2]) last.push(p)
-      else runs.push([p])
+      const last = runs.at(-1)?.at(-1)
+      if (last && last.offset + last.length === p.offset) runs.at(-1)!.push(p)
+      else if (!last || last.offset !== p.offset) runs.push([p])
     }
     const wanted = new Map<number, Promise<ArrayBuffer>>()
     for (const p of pages) {
-      const cached = this.pages.get(p[2])
+      const cached = this.pages.get(p.offset)
       if (cached) {
-        this.pages.delete(p[2])
-        this.pages.set(p[2], cached)
-        wanted.set(p[2], cached.data.get(signal))
+        this.pages.delete(p.offset)
+        this.pages.set(p.offset, cached)
+        wanted.set(p.offset, cached.data.get(signal))
       }
     }
     for (const run of runs) {
-      const start = run[0][2],
+      const start = run[0].offset,
         last = run.at(-1)!
       // Each page subscribes to the run; the last departing page aborts I/O.
-      const fetched = new SharedLoad((signal) => this.file.slice(start, last[2] + last[3], signal))
+      const fetched = new SharedLoad((signal) =>
+        this.file.slice(start, last.offset + last.length, signal),
+      )
       for (const p of run) {
         const data = new SharedLoad((signal) =>
-          fetched.get(signal).then((bytes) => bytes.slice(p[2] - start, p[2] - start + p[3])),
+          fetched
+            .get(signal)
+            .then((bytes) => bytes.slice(p.offset - start, p.offset - start + p.length)),
         )
-        wanted.set(p[2], data.get(signal))
-        while (this.pages.size && this.pageBytes + p[3] > 16 * 1024 * 1024) {
+        wanted.set(p.offset, data.get(signal))
+        while (this.pages.size && this.pageBytes + p.length > 16 * 1024 * 1024) {
           const oldest = this.pages.keys().next().value!
           this.pageBytes -= this.pages.get(oldest)!.size
           this.pages.delete(oldest)
         }
-        if (p[3] <= 16 * 1024 * 1024) {
-          this.pages.set(p[2], { size: p[3], data })
-          this.pageBytes += p[3]
+        if (p.length <= 16 * 1024 * 1024) {
+          this.pages.set(p.offset, { size: p.length, data })
+          this.pageBytes += p.length
           data.promise.catch(() => {
-            if (this.pages.get(p[2])?.data === data) {
-              this.pages.delete(p[2])
-              this.pageBytes -= p[3]
+            if (this.pages.get(p.offset)?.data === data) {
+              this.pages.delete(p.offset)
+              this.pageBytes -= p.length
             }
           })
         }
       }
     }
-    return Promise.all(pages.map((p) => wanted.get(p[2])!))
+    return Promise.all(pages.map((p) => wanted.get(p.offset)!))
   }
 
   async readLodByTile(
@@ -468,7 +873,10 @@ export class SpatialReader implements TileReader {
           ? fences[fence + 1]
           : (hostPage[7] ?? hostPage[5]) - 1)
     }
-    const payloads = await this.pageData(pages, signal)
+    const payloads = await this.pageData(
+      pages.map((p) => ({ offset: p[2], length: p[3] })),
+      signal,
+    )
     signal?.throwIfAborted()
     return {
       lod,

@@ -15,12 +15,7 @@ import { readColumn } from 'hyparquet/src/column.js'
 import { DEFAULT_PARSERS } from 'hyparquet/src/convert.js'
 import { isListLike, isMapLike, getSchemaPath } from 'hyparquet/src/schema.js'
 import { compressors } from './compressors.js'
-import {
-  attributeKind,
-  decodeAttributes,
-  decodeSelectedRow,
-  type AttributeField,
-} from './decode.js'
+import { attributeKind, decodeSelectedRow, type AttributeField } from './decode.js'
 import { decodeProjection, type ProjectionExecutor, type ProjectionTask } from './projection.js'
 import { GeometryBuilder, type GeometryType, type LodGeometry } from './geometry.js'
 import { tileInterval } from './key.js'
@@ -86,7 +81,7 @@ export interface LodRows {
   geometry: LodGeometry
 }
 
-/** Rows for a tile finer than any LOD: exact WKB plus attributes from the finest LOD. */
+/** Rows for a tile finer than any LOD: exact WKB plus source attributes. */
 export interface PrimaryRows {
   rows: number[]
   wkb: Uint8Array[]
@@ -413,23 +408,16 @@ export class LodReader {
 
   /**
    * Rows whose covering bbox intersects `bbox`, with their exact primary
-   * geometry as WKB and the named attributes from the finest LOD, for tiles
-   * finer than any LOD. Every row is shown at the finest LOD, so the bbox
-   * pages alone choose the rows.
+   * geometry as WKB and the named source attributes, for tiles finer than
+   * any LOD. The covering's page index and pages choose the rows; a row
+   * whose covering is not a finite box has no geometry to show.
    */
   async readPrimary(
     bbox: Bbox,
     attributes: string[] = [],
     signal?: AbortSignal,
   ): Promise<PrimaryRows> {
-    const out: PrimaryRows = {
-      rows: [],
-      wkb: [],
-      columns: Object.fromEntries(attributes.map((a) => [a, []])),
-    }
-    const finest = this.lodForZoom(this.finestZoom)
-    const wanted = attributes.map((a) => this.fields.findIndex((f) => f.name === a))
-
+    const out: PrimaryRows = { rows: [], wkb: [], columns: {} }
     const groups = this.metadata.row_groups
       .map((_, g) => g)
       .filter((g) => intersects(this.rowGroupBbox(g), bbox))
@@ -437,23 +425,13 @@ export class LodReader {
       groups.map(async (g) => {
         let { ranges } = await this.candidateRows(g, bbox, signal)
         if (ranges.length) ranges = await this.refineRows(g, ranges, bbox, signal)
-        if (!ranges.length)
-          return {
-            g,
-            ranges,
-            geometry: new Map<number, unknown>(),
-            packed: new Map<number, unknown>(),
-          }
-        const [geometry, packed] = await Promise.all([
-          this.readLeafValues(g, this.primary, ranges, signal),
-          wanted.some((i) => i >= 0)
-            ? this.readLeafRows(g, this.lodLeaf(finest), ranges, signal)
-            : Promise.resolve(new Map<number, unknown>()),
-        ])
-        return { g, ranges, geometry, packed }
+        const geometry = ranges.length
+          ? await this.readLeafValues(g, this.primary, ranges, signal)
+          : new Map<number, unknown>()
+        return { g, ranges, geometry }
       }),
     )
-    for (const { g, ranges, geometry, packed } of perGroup) {
+    for (const { g, ranges, geometry } of perGroup) {
       const start = this.rowGroupStarts[g]
       for (const [a, b] of ranges) {
         for (let row = a; row < b; row++) {
@@ -461,17 +439,10 @@ export class LodReader {
           if (!(wkb instanceof Uint8Array)) continue
           out.rows.push(start + row)
           out.wkb.push(wkb)
-          if (!attributes.length) continue
-          const raw = packed.get(row)
-          const attrs =
-            raw instanceof Uint8Array
-              ? decodeAttributes(raw, finest.geometry_type, this.fields)
-              : []
-          attributes.forEach((name, i) => out.columns[name].push(attrs[wanted[i]] ?? null))
         }
       }
     }
-    await this.hydrateColumns(out, attributes, signal)
+    out.columns = await this.readColumns(out.rows, attributes, signal)
     return out
   }
 
@@ -844,6 +815,7 @@ export class LodReader {
         // a null covering, as for null or empty geometry, matches nothing
         if (!box.every(Number.isFinite)) continue
         const [xmin, ymin, xmax, ymax] = box as number[]
+        if (!(xmin <= xmax && ymin <= ymax)) continue
         if (xmin > bbox[2] || xmax < bbox[0] || ymin > bbox[3] || ymax < bbox[1]) continue
         const last = hits[hits.length - 1]
         if (last && last[1] === row) last[1] = row + 1

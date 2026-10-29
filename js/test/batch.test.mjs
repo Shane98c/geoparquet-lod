@@ -183,11 +183,13 @@ const wkbRows = new Map([
 ])
 const exact = await readFeatures(
   {
-    async readPrimary() {
-      return { rows: [...wkbRows.keys()], wkb: [...wkbRows.values()], columns: {} }
-    },
-    async readColumns(rows, columns) {
-      return Object.fromEntries(columns.map((n) => [n, rows.map((r) => `${n}${r}`)]))
+    async readPrimary(_box, columns) {
+      const rows = [...wkbRows.keys()]
+      return {
+        rows,
+        wkb: [...wkbRows.values()],
+        columns: Object.fromEntries(columns.map((n) => [n, rows.map((r) => `${n}${r}`)])),
+      }
     },
   },
   { bbox: [179, 35, -179, 36], resolution: 1e-5, columns: ['name'], geometry: 'primary' },

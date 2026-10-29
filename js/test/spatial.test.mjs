@@ -42,19 +42,20 @@ const canonical = (buffer) => {
 }
 const { cases, expected } = JSON.parse(await readFile(casesPath, 'utf8'))
 
-// Exact-geometry neighbours share bbox pages. Abort the caller that starts a
-// read while a second caller still needs those bytes, as during rapid zooming.
+// Exact-geometry neighbours share primary geometry pages. Abort the caller
+// that starts a read while a second caller still needs those bytes, as
+// during rapid zooming.
+const geometryRanges = footer.metadata.row_groups.flatMap((group) =>
+  group.columns
+    .filter((c) => c.meta_data.path_in_schema.join('.') === fast.primary)
+    .map((c) => {
+      const start = Number(c.meta_data.data_page_offset)
+      return [start, start + Number(c.meta_data.total_compressed_size)]
+    }),
+)
+const footerStart = (await readFile(newPath)).length - 8 - footer.metadata.metadata_length
 for (const cancelBoth of [false, true]) {
   const data = await readFile(newPath)
-  const bboxRanges = footer.metadata.row_groups.flatMap((group) =>
-    group.columns
-      .filter((c) => c.meta_data.path_in_schema[0] === 'bbox')
-      .map((c) => {
-        const m = c.meta_data
-        const start = Number(m.dictionary_page_offset ?? m.data_page_offset)
-        return [start, start + Number(m.total_compressed_size)]
-      }),
-  )
   let hold = true
   let abortedReads = 0
   let started
@@ -66,7 +67,7 @@ for (const cancelBoth of [false, true]) {
     byteLength: data.length,
     async slice(a, b = data.length, signal) {
       signal?.throwIfAborted()
-      if (hold && bboxRanges.some(([lo, hi]) => a < hi && b > lo)) {
+      if (hold && geometryRanges.some(([lo, hi]) => a < hi && b > lo)) {
         started()
         await new Promise((resolve, reject) => {
           const abort = () => {
@@ -99,17 +100,41 @@ for (const cancelBoth of [false, true]) {
   for (const release of releases) release()
   const [, live] = await Promise.all([rejected, secondRejected ?? b])
   const control = await footer.readPrimary(footer.bounds)
-  if (cancelBoth) assert.ok(abortedReads > 0, 'last neighbour departure stops shared bbox reads')
+  if (cancelBoth) assert.ok(abortedReads > 0, 'last neighbour departure stops shared page reads')
   else {
     assert.equal(abortedReads, 0, 'live neighbour keeps shared reads alive')
     assert.ok(live.rows.length, 'live neighbour retains exact features')
-    assert.deepEqual(live, control, 'cancelled neighbour cannot poison shared bbox pages')
+    assert.deepEqual(live, control, 'cancelled neighbour cannot poison shared geometry pages')
   }
   assert.deepEqual(await reader.readPrimary(footer.bounds), control, 'cache remains reusable')
 }
 
-// Leaving exact-detail view while its analytical footer opens must stop that
-// work too, and a later inspection must be able to open it afresh.
+// Exact reads through the primary directory never open the footer, and give
+// the rows, geometry and source attributes the footer's covering selects.
+{
+  const source = await makeSource(newPath)
+  const reader = await openReader(coalescing(source))
+  // carried attributes come with the geometry pages, the key through row metadata
+  const attrs = [...reader.lod.attributes.map((a) => a.name), reader.lod.key.column]
+  const [w, s, e, n] = footer.bounds
+  for (const box of [
+    footer.bounds,
+    [w, s, (w + e) / 2, (s + n) / 2],
+    [(w + e) / 2, (s + n) / 2, e, n],
+    [w + (e - w) * 0.3, s + (n - s) * 0.3, w + (e - w) * 0.35, s + (n - s) * 0.32],
+    [e + 1, n + 1, e + 2, n + 2],
+  ]) {
+    const exact = await reader.readPrimary(box, attrs)
+    assert.deepEqual(exact, await footer.readPrimary(box, attrs), `primary rows in ${box}`)
+  }
+  assert.ok(
+    source.reads.every(([, b]) => b <= footerStart),
+    'exact reads use the primary directory, not the footer',
+  )
+}
+
+// Leaving a view while its analytical footer opens must stop that work too,
+// and a later inspection must be able to open it afresh.
 {
   const data = await readFile(newPath)
   let hold = true,
@@ -141,7 +166,8 @@ for (const cancelBoth of [false, true]) {
     },
   })
   const controller = new AbortController()
-  const request = reader.readPrimary(footer.bounds, [], controller.signal)
+  // a nested column is only in the footer
+  const request = reader.readColumns([0, 5], ['bbox'], controller.signal)
   const rejected = assert.rejects(request, { name: 'AbortError' })
   await trailer
   controller.abort()
@@ -149,7 +175,10 @@ for (const cancelBoth of [false, true]) {
   release()
   await rejected
   assert.ok(aborted, 'abandoned analytical opening aborts its transport')
-  assert.deepEqual(await reader.readPrimary(footer.bounds), await footer.readPrimary(footer.bounds))
+  assert.deepEqual(
+    await reader.readColumns([0, 5], ['bbox']),
+    await footer.readColumns([0, 5], ['bbox']),
+  )
 }
 
 for (const [i, [z, x, y]] of cases.entries()) {

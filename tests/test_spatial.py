@@ -9,13 +9,24 @@ from pathlib import Path
 import duckdb
 import numpy as np
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import pytest
 import shapely
 from geoparquet_lod import chain, drop_rate, validate
 from geoparquet_lod import write as build
 from geoparquet_lod._compact import dumps, get, loads
-from geoparquet_lod._layout import finalize_layout, page_cells, read_node
+from geoparquet_lod._layout import (
+    PIECE_SAVING,
+    PIECE_TILE,
+    covering_cells,
+    finalize_layout,
+    page_cells,
+    page_pieces,
+    read_box_node,
+    read_node,
+)
+from geoparquet_lod._validate_index import check_index
 from geoparquet_lod.writer import _write_unindexed as write
 from geoparquet_lod.writer import hilbert_key
 from unpacker import Unpacker
@@ -132,6 +143,8 @@ def test_spatial_roundtrip(tmp_path, monkeypatch, family, sparse, leaf_pages, pa
         assert any(top[0] > 1 for top in root['directories'].values()), (
             'fixture exercises directory branches'
         )
+        assert root['primary_index']['directory'][0] > 1, 'and primary directory branches'
+    assert root['primary_index']['attributes'] == ['height', 'name']
     assert old.read_bytes() == before, 'source is immutable'
     assert validate(new, full=True)['rows'] == n
     a, b = pq.read_table(old), pq.read_table(new)
@@ -357,3 +370,225 @@ def test_zooming_past_the_finest_lod_reuses_exact_geometry(tmp_path):
         text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def _cheapest_cuts(cells, bounds, rounds=2):
+    """The cut rows of a direct search: each round cuts every piece where its
+    halves' cost is least, when that is at most PIECE_SAVING of its own."""
+
+    def cost(rows):
+        x0, y0, x1, y1 = (c[rows] for c in cells)
+        return (x1.max() - x0.min() + PIECE_TILE) * (y1.max() - y0.min() + PIECE_TILE)
+
+    rows = np.flatnonzero(~np.isnan(cells[0]))
+    page = np.searchsorted(bounds, rows, side='right') - 1
+    pieces, cuts = [rows[page == p] for p in np.unique(page)], []
+    for _ in range(rounds):
+        cut = []
+        for r in pieces:
+            costs = [cost(r[:i]) + cost(r[i:]) for i in range(1, len(r))]
+            if costs and min(costs) <= PIECE_SAVING * cost(r):
+                i = int(np.argmin(costs)) + 1
+                cuts.append(int(r[i]))
+                cut += [r[:i], r[i:]]
+            else:
+                cut.append(r)
+        pieces = cut
+    return sorted(cuts)
+
+
+def test_page_pieces_cut_where_a_box_spans_empty_space():
+    """Pieces cut a page where its halves' boxes cover far fewer tiles, as a
+    direct search over every cut finds; rows without an extent never start
+    a piece."""
+    rng = np.random.default_rng(2)
+    found = 0
+    for _ in range(300):
+        n = int(rng.integers(2, 60))
+        x = np.cumsum(rng.choice([1, 1, 1, 200], n)) + rng.integers(0, 5, n)
+        y = rng.integers(0, 50, n) + np.where(rng.random(n) < 0.1, 500, 0)
+        cells = [x, y, x + rng.integers(0, 4, n), y + rng.integers(0, 4, n)]
+        cells = [c.astype(float) for c in cells]
+        gone = rng.random(n) < 0.1
+        for c in cells:
+            c[gone] = np.nan
+        bounds = np.unique(np.r_[0, rng.integers(1, n, 3), n])
+        cuts = page_pieces(cells, bounds)
+        assert cuts.tolist() == _cheapest_cuts(cells, bounds)
+        assert not np.isnan(cells[0][cuts]).any() and not np.isin(cuts, bounds).any()
+        found += len(cuts)
+    assert found > 100, 'the fixture cuts pages'
+
+
+def test_covering_cells():
+    """Cells round a covering outward, and a row without four finite, ordered
+    bounds, or with a null covering or bound, has no extent."""
+    rows = [
+        (-105.00001, 39.7, -104.99, 39.70001),
+        (179.9999, -90.0, 180.0, -89.99),
+        (float('nan'),) * 4,
+        None,
+        (None, 39.7, -104.99, 39.71),
+        (float('-inf'), 39.7, -104.99, 39.71),
+        (-104.99, 39.7, -105.0, 39.71),
+    ]
+    struct = pa.struct([(k, pa.float32()) for k in ('xmin', 'ymin', 'xmax', 'ymax')])
+    bbox = pa.array([None if r is None else dict(zip(struct.names, r, strict=True)) for r in rows])
+    x0, y0, x1, y1 = covering_cells(bbox.cast(struct))
+    assert np.isnan(x0[2:]).all() and np.isnan(y1[2:]).all()
+    xmin, ymin, xmax, ymax = (np.float32(np.array(c, float)) for c in zip(*rows[:2], strict=True))
+    np.testing.assert_array_equal(x0[:2], np.floor((xmin.astype(float) + 180) * 4096))
+    np.testing.assert_array_equal(y1[:2], np.floor((ymax.astype(float) + 90) * 4096))
+    for low, high, cell0, cell1, origin in ((xmin, xmax, x0, x1, 180), (ymin, ymax, y0, y1, 90)):
+        assert (cell0[:2] / 4096 - origin <= low).all() and (
+            (cell1[:2] + 1) / 4096 - origin > high
+        ).all()
+
+
+@pytest.mark.parametrize('missing', ['nan', 'null'])
+def test_rows_without_an_extent_stay_out_of_the_primary_directory(tmp_path, missing):
+    """Null and empty geometries sort last and fill whole pages. The writer
+    gives them a null covering, and another producer might write NaN; either
+    way they have no extent, so no page of theirs is indexed, and exact reads
+    find every other row."""
+    rng = np.random.default_rng(8)
+    shapes = 300
+    x, y = -105 + rng.random(shapes) * 0.2, 39.6 + rng.random(shapes) * 0.2
+    geometry = [*shapely.box(x, y, x + 0.001, y + 0.001), *[None] * 50, *[shapely.Polygon()] * 50]
+    geo = {
+        'version': '1.1.0',
+        'primary_column': 'geometry',
+        'columns': {'geometry': {'encoding': 'WKB', 'geometry_types': ['Polygon']}},
+    }
+    table = pa.table(
+        {'geometry': shapely.to_wkb(np.array(geometry, dtype=object)), 'height': range(400)}
+    )
+    src, packed = tmp_path / 'source.parquet', tmp_path / 'packed.parquet'
+    pq.write_table(table.replace_schema_metadata({b'geo': json.dumps(geo).encode()}), src)
+    write(
+        src,
+        packed,
+        zooms=range(10, 13),
+        complete_from=12,
+        carry=['height'],
+        row_group_rows=128,
+        page_rows=16,
+        batch_rows=16,
+        workers=1,
+        log=lambda *_: None,
+    )
+    written = pq.read_table(packed)
+    keyed = written.column('hilbert').is_valid().to_numpy(zero_copy_only=False)
+    assert keyed.sum() == shapes and keyed[:shapes].all(), 'rows without geometry sort last'
+    bbox = written.column('bbox').combine_chunks()
+    assert bbox.is_valid().to_numpy(zero_copy_only=False).tolist() == keyed.tolist()
+    if missing == 'nan':
+        bbox = pa.StructArray.from_arrays(
+            [pc.fill_null(child, float('nan')) for child in bbox.flatten()], fields=list(bbox.type)
+        )
+        written = written.set_column(written.schema.get_field_index('bbox'), 'bbox', bbox)
+        pq.write_table(
+            written,
+            packed,
+            row_group_size=128,
+            max_rows_per_page=16,
+            use_dictionary=False,
+            data_page_version='1.0',
+            write_page_index=True,
+        )
+    out = finalize_layout(packed, tmp_path / 'laid.parquet', leaf_pages=4, log=lambda *_: None)
+    parquet = pq.ParquetFile(out)
+    lod = json.loads(parquet.schema_arrow.metadata[b'geo'])['lod_columns']
+    check_index(out, parquet, lod)
+    raw = out.read_bytes()
+    root = _root(raw)
+    index = root['primary_index']
+    pages = [leaf for leaf in _box_leaves(raw, index['directory'], index['attributes'])]
+    first = np.concatenate([leaf['first'] for leaf in pages])
+    assert first.max() < shapes, 'no page of rows without an extent is indexed'
+    covering = written.column('bbox').combine_chunks()
+    values = {k: covering.field(k).to_numpy(zero_copy_only=False) for k in covering.type.names}
+    cases = []
+    for box in ([-180, -85, 180, 85], [-105, 39.6, -104.9, 39.7], [-104.95, 39.65, -104.94, 39.66]):
+        hit = (
+            keyed
+            & (values['xmin'] <= box[2])
+            & (values['xmax'] >= box[0])
+            & (values['ymin'] <= box[3])
+            & (values['ymax'] >= box[1])
+        )
+        cases.append({'bbox': box, 'rows': np.flatnonzero(hit).tolist()})
+    assert len(cases[0]['rows']) == shapes and 0 < len(cases[2]['rows']) < len(cases[1]['rows'])
+    path = tmp_path / 'cases.json'
+    path.write_text(json.dumps(cases))
+    result = subprocess.run(
+        ['node', str(ROOT / 'js/test/primary.test.mjs'), str(out), str(path)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def _box_leaves(raw, node, attributes):
+    """The decoded leaves under a primary directory node, in order."""
+    level, entries = read_box_node(node, attributes)
+    if not level:
+        return [entries]
+    return [
+        leaf
+        for offset, length in zip(entries['offset'], entries['length'], strict=True)
+        for leaf in _box_leaves(
+            raw, json.loads(gzip.decompress(raw[offset : offset + length])), attributes
+        )
+    ]
+
+
+def test_root_shrinks_its_largest_top_node_first(tmp_path, monkeypatch):
+    """While the root exceeds its target, the largest top node gains a level
+    of branches, the primary directory's included; a root that does not fit
+    once every top is a single entry is refused."""
+    rng = np.random.default_rng(1)
+    n = 3000
+    x, y = -105 + rng.random(n) * 0.3, 39.6 + rng.random(n) * 0.3
+    geo = {
+        'version': '1.1.0',
+        'primary_column': 'geometry',
+        'columns': {'geometry': {'encoding': 'WKB', 'geometry_types': ['Polygon']}},
+    }
+    table = pa.table(
+        {'geometry': shapely.to_wkb(shapely.box(x, y, x + 1e-3, y + 1e-3)), 'h': range(n)}
+    )
+    src, packed = tmp_path / 'source.parquet', tmp_path / 'packed.parquet'
+    pq.write_table(table.replace_schema_metadata({b'geo': json.dumps(geo).encode()}), src)
+    write(
+        src,
+        packed,
+        zooms=range(10, 13),
+        complete_from=12,
+        carry=['h'],
+        row_group_rows=512,
+        page_rows=16,
+        batch_rows=16,
+        workers=1,
+        log=lambda *_: None,
+    )
+    layout = importlib.import_module('geoparquet_lod._layout')
+    sizes = {}
+    for target in (16256, 3000, 1400):
+        monkeypatch.setattr(layout, '_ROOT_TARGET_BYTES', target)
+        out = finalize_layout(
+            packed, tmp_path / f'{target}.parquet', leaf_pages=2, log=lambda *_: None
+        )
+        root = _root(out.read_bytes())
+        sizes[target] = int.from_bytes(out.read_bytes()[12:16], 'little')
+        assert sizes[target] <= target
+        assert validate(out, full=True)['rows'] == n
+        levels = [top[0] for top in root['directories'].values()]
+        exact = root['primary_index']['directory']
+        if target == 16256:
+            assert exact[0] == 1 and max(levels) == 1, 'a roomy root keeps every tree shallow'
+        if target == 1400:
+            assert exact[0] > 1, 'the primary directory gains branches too'
+    monkeypatch.setattr(layout, '_ROOT_TARGET_BYTES', 200)
+    with pytest.raises(ValueError, match='exceeds the 16 KiB bootstrap'):
+        finalize_layout(packed, tmp_path / 'tiny.parquet', leaf_pages=2, log=lambda *_: None)

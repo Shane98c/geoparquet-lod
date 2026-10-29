@@ -55,21 +55,23 @@ export async function readFeatures(
   const rows: number[] = []
   if (query.geometry === 'primary') {
     const wkb: Uint8Array[] = []
-    // Primary queries explicitly project original source values, including for
-    // names that also have overridden display values in the overview profile.
+    // Primary queries project original source values, including for names
+    // that also have overridden display values in the overview profile.
+    const values: Record<string, unknown[]> = Object.fromEntries(columns.map((n) => [n, []]))
     for (const box of boxes) {
-      const part = await reader.readPrimary(box, [], signal)
+      const part = await reader.readPrimary(box, columns, signal)
       for (let i = 0; i < part.rows.length; i++) {
         if (seen.has(part.rows[i])) continue
         seen.add(part.rows[i])
         rows.push(part.rows[i])
         wkb.push(part.wkb[i])
+        for (const name of columns) values[name].push(part.columns[name][i])
       }
     }
     return {
       geometry: geometryColumnFromWkb(wkb),
       rowIndex: rows,
-      columns: await reader.readColumns(rows, columns, signal),
+      columns: values,
       source: 'primary',
     }
   }

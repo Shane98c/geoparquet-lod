@@ -110,14 +110,21 @@ spec. When the full-detail shapes of the whole dataset are small (16 MB by
 default) a single LOD serves every zoom from the complete zoom up instead of
 copies, which is what happens for things like counties. Finer than the finest
 zoom the reader draws the exact primary geometry, so full detail is always
-reachable and costs nothing to store, but those tiles read the WKB and bbox
-pages rather than one LOD range: for OCR buildings in Delaware, four z16 tiles
-past a z15 finest LOD read about 1 MB in 40 requests, where four z15 tiles read
-about 60 KB in 5. The reader keeps the exact geometry pages it fetched (16 MiB
-by default), so zooming further in over the same place, or across tiles of
-one large feature, reuses them instead of fetching them again. To overzoom
-instead, as PMTiles does, set the MapLibre source's `maxzoom` to the finest
-zoom in the file's `lod_columns` metadata.
+reachable and costs nothing to store. A box tree over the primary geometry's
+own pages finds the WKB pages whose boxes reach the tile, read together, and
+the pages of the carried attributes' source columns over the same rows, one
+read per attribute alongside; the tree's top sits in the 16 KiB root, and a
+national file adds one leaf request. WKB pages hold a few hundred features at
+full precision, about 45 KB each for OCR buildings, so these tiles cost more
+than overview tiles: for OCR buildings in Delaware past a z15 finest LOD, a
+cold z16 tile reads about 200 KB in four requests (190 KB in two without
+attributes) and the next tile east about 30 KB, where a cold z15 tile reads
+13 KB in two. Ending the zooms one earlier leaves out the finest LOD, 13% of
+the Delaware file, but its z15 tiles then read about 350 KB each. The reader
+keeps the pages it fetched (16 MiB by default), so zooming further in over
+the same place, or across tiles of one large feature, reuses them instead of
+fetching them again. To overzoom instead, as PMTiles does, set the MapLibre
+source's `maxzoom` to the finest zoom in the file's `lod_columns` metadata.
 
 ## Install
 
@@ -230,16 +237,17 @@ three times slower.
 The server must answer HTTP range requests with CORS and expose
 `Content-Range`, which a suitably configured object store can do. `tileUrl`
 also takes `pointLayer` for point datasets. Opening probes the first 16 KiB for
-the spatial index. Indexed files need only that request. A row read of flat
-columns then fetches the index's compact copy of those columns' metadata, and
-exact geometry or other columns the footer, each in one more request; files
-without the index then read a 64 KiB tail and any missing footer bytes. A HEAD is needed
-only when CORS hides `Content-Range`.
+the spatial index. Indexed files need only that request, and no tile, exact
+geometry included, reads their footer. A row read of flat columns fetches the
+index's compact copy of those columns' metadata, and other columns the
+footer, each in one more request; files without the index then read a 64 KiB
+tail and any missing footer bytes. A HEAD is needed only when CORS hides
+`Content-Range`.
 
 ### Reader behaviour
 
-The coordinator caches up to 16 MiB of compressed data pages and 128 directory
-nodes, and retains up to 64 decoded tiles within an estimated 32 MiB, so a
+The coordinator caches up to 16 MiB of compressed data pages and 128 nodes of
+each directory kind, and retains up to 64 decoded tiles within an estimated 32 MiB, so a
 style change on a loaded view reuses decoded geometry and only projects the new
 attribute. Neighbouring tiles share pending fetches. When the last consumer of a
 pending fetch or decode leaves, that work is cancelled; completed cache entries
@@ -300,7 +308,13 @@ int32 and carried values their declared types, packed byte consumption, copy
 source ids and tile tags, finite transforms,
 standard page ranges, and the complete spatial directory against the footer and
 source keys: metadata, codecs, v1 PLAIN overview page headers, page membership
-and order, row spans, cell bounds, fences, and branch bounds. Files without a
+and order, row spans, cell bounds, fences, and branch bounds. The primary
+directory is checked against the geometry's page index and covering, one row
+group at a time: its pages are exactly those with a row with an extent, each
+page and piece box is the union of its rows' covering boxes, branch boxes are
+the union of their nodes', attribute page runs match their offset indexes,
+codecs and schema match the footer, and every indexed page is a data page,
+not dictionary encoded, of the rows its index says. Files without a
 spatial directory get the packed-value and offset-index checks. This is a storage and reader contract check; it does not
 prove polygon topology or compare simplification accuracy with primary WKB. Full
 mode reads the complete data, holds one LOD column of one row group at a time,

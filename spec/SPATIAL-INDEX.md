@@ -1,12 +1,13 @@
-# GeoParquet LOD spatial page index, version 2
+# GeoParquet LOD spatial page index, version 3
 
 An optional physical profile of a packed LOD file. The logical
 `geo.lod_columns` metadata and all table values are unchanged; the profile
-decides where column chunks and pages sit and adds a directory over the
-overview pages so a reader finds a tile's pages from the first 16 KiB of the
-file without reading the footer. It is not a standardized GeoParquet
-extension. Compatibility has been exercised with PyArrow, DuckDB, and the
-hyparquet-based reader in this repository.
+decides where column chunks and pages sit and adds directories over the
+overview pages and over the primary geometry's own pages, so a reader finds a
+tile's pages from the first 16 KiB of the file without reading the footer,
+at every zoom and past the finest overview. It is not a standardized
+GeoParquet extension. Compatibility has been exercised with PyArrow, DuckDB,
+and the hyparquet-based reader in this repository.
 
 ## File layout
 
@@ -23,7 +24,7 @@ standard Parquet footer | footer_length:u32le | PAR1
 The footer retains the original row groups, columns, schema, statistics, and
 GeoParquet metadata, with relocated offsets and updated physical sizes.
 `lod_spatial_index` in its key/value metadata advertises the profile version
-and bootstrap location, `{"version":2,"offset":4,"length":16380}`. Primary
+and bootstrap location, `{"version":3,"offset":4,"length":16380}`. Primary
 geometry and source attribute chunks are copied byte for byte. LOD chunks are
 re-encoded in the original row order, with the same nullable binary schema and
 zstd, with page breaks at the LOD's finest tile grid. Every LOD page is a v1
@@ -46,7 +47,7 @@ directory boundaries can add reads.
 
 The compressed root is bounded by the first 16 KiB and contains:
 
-- `version: 2`, `file_bytes`: format and full file length checks.
+- `version: 3`, `file_bytes`: format and full file length checks.
 - `footer_bytes`: the length of the standard footer's metadata, so a reader
   fetches the footer and its trailer in one request.
 - `row_metadata`: `[byte_offset, compressed_length]` of the row metadata, see
@@ -58,6 +59,8 @@ The compressed root is bounded by the first 16 KiB and contains:
 - `codecs`: LOD name to its Parquet compression codec.
 - `directories`: LOD name to the top node of its directory, at level one or
   above.
+- `primary_index`: the [primary directory](#primary-directory) and what
+  decodes the pages it locates.
 
 ## Directory nodes
 
@@ -100,7 +103,8 @@ Page fences enforce exact tile membership without fetching the key column;
 tile-aligned pages have only the implied fence. Rows past `counts - nulls`
 have null keys: they remain in the analytical table and have null LODs. The
 reference writer puts 1,024 pages in a leaf and, while the root would exceed
-the bootstrap, adds a level of branches of 64 entries to each tree.
+the bootstrap, adds a level of branches of 64 entries to the tree whose top
+node is largest, the primary directory included.
 
 ## Lookup
 
@@ -115,12 +119,86 @@ interval, and the host row for its copies tagged with the requested tile.
 Global row indices are the feature ids. The directory stores no geometry or
 styling payload and is not an MVT archive.
 
+## Primary directory
+
+Past the finest LOD a map draws the primary geometry itself, which no
+overview copies. Its pages, copied byte for byte and never re-paged, are
+indexed by a packed Hilbert R-tree: rows are in Hilbert key order, so
+consecutive geometry pages are spatially compact, and each page is located
+by the box of its rows. A feature reaching into a tile from outside it is
+found by its box, so the primary geometry needs no boundary copies. The
+root's `primary_index` holds:
+
+- `attributes`: carried attributes that are flat source columns, whose pages
+  each leaf also locates. The reference writer lists those whose chunks have
+  offset indexes, no dictionary page and one codec.
+- `codecs`: the Parquet codec of the primary geometry, then of each column in
+  `attributes`, the same in every row group.
+- `schema`: base64 of a Thrift `FileMetaData` whose schema holds the root
+  element, then the elements of the primary geometry and of each column in
+  `attributes`, with no row groups. With `codecs` it decodes their pages
+  without the footer.
+- `directory`: the top node.
+
+Boxes are whole cells of 2^-12 degrees, about 27 m of latitude: a longitude
+`x` lies in cell column `floor((x + 180) * 4096)` and a latitude `y` in cell
+row `floor((y + 90) * 4096)`, computed in IEEE double precision, for a
+covering value from its float32. A row's box is the cells of its covering's
+minimum and maximum, inclusive, so it contains the covering. A row has an
+extent when its four covering values are present and finite with each
+minimum at most its maximum; null and empty geometries have none, whether
+their covering is null or NaN. A page's box is the union of its rows' boxes;
+a page with no row with an extent is not indexed.
+
+Every node is a JSON array of its level and parallel columns with one value
+per entry, the first entry's values against zero:
+
+```text
+[level, wests, souths, widths, heights, gaps, lengths]                         level > 0
+[0, wests, souths, widths, heights, gaps, lengths, rows, counts, pieces, runs]  a leaf
+```
+
+- `wests`, `souths`: the entry's minimum cell column and row minus the
+  previous entry's.
+- `widths`, `heights`: its maximum cell column and row minus its minimum.
+- `gaps`, `lengths`, `rows`, `counts`: as in the LOD directory.
+- `pieces`: per page, nothing, or two or more runs of its rows, in order, as
+  a flat array of `[rows, x, y, width, height]` per run, `x` and `y` from the
+  page box's minimum corner. A run's box is the union of its rows' boxes, and
+  the runs' rows add up to the page's.
+- `runs`: per column in `attributes`, its pages overlapping the leaf's rows,
+  from the row of the leaf's first page to the end of its last, as
+  `[gaps, lengths, rows, counts]` coded as the leaf's own.
+
+Entries are in row and byte order. A branch entry's box is the union of the
+boxes of the node it locates, whose level is one less. When the Hilbert
+curve leaves the data and re-enters it far away, one page can hold rows of
+distant places; its pieces keep the empty space between them out of the
+lookup. The reference writer cuts a page in two at the row where the halves'
+boxes cover the fewest tiles of 32 cells, when they cover at most 70% of the
+page box's, then each half once more the same way. A primary directory of a
+single leaf that fits stays in the root as its top node.
+
+To read the rows whose bbox intersects a WGS84 query, a tile's buffered
+bounds for an MVT tile, take the cells of the query's corners as above and
+descend from the top node into every entry whose box intersects them; in a
+leaf take each page whose box, and one of whose pieces when it has them,
+intersects them. A cell is monotone in its degrees, so every page holding a
+row whose covering intersects the query is taken. Read adjacent pages
+together. Decode each page with the primary's codec and schema element; a
+page is any data page but a dictionary-encoded one, of exactly the rows the
+leaf says. Keep the rows of intersecting pieces whose geometry is present and
+whose bbox intersects the query: the reference reader takes it from the WKB,
+rounded outward to float32 as the covering is, so it keeps the rows the
+covering would. Alongside the geometry, read the pages of each needed
+attribute that the same leaves locate over the selected pages' rows.
+
 ## Analytical access and publishing
 
-Exact source-row reads and tiles beyond the finest LOD open the normal Parquet
-footer lazily; the standard page indexes describe every page, so ordinary
-Parquet readers see an ordinary file. A row group's offset indexes are
-adjacent, so a row read across columns fetches them in one request.
+Exact source-row reads open the normal Parquet footer lazily; the standard
+page indexes describe every page, so ordinary Parquet readers see an
+ordinary file. A row group's offset indexes are adjacent, so a row read
+across columns fetches them in one request.
 
 The row metadata is the footer's Thrift `FileMetaData`, gzip-compressed and
 cut down to the flat (non-nested, non-repeated) top-level columns, the primary
