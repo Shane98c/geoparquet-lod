@@ -586,7 +586,8 @@ def write(
 ) -> Path:
     """Build a GeoParquet LOD file in one call.
 
-    Rows use one global Hilbert order.
+    Rows use one global Hilbert order. ``zooms`` lie in 0..24, the depth of
+    its key, so every tile is one interval of keys.
     ``thinning`` chooses displayed rows at each zoom. ``complete_from`` sets
     the zoom from which every feature is shown, whatever the thinning says,
     and the base zoom a rate-based thinning counts from; 'auto' derives it
@@ -645,6 +646,11 @@ def _write_unindexed(src: str, out: str | Path, **options) -> Path:
 
 def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) -> Path:
     """`_write_unindexed`'s work, leaving what it opens with `held` to close."""
+    if o.zooms != 'auto' and not all(0 <= z <= KEY_DEPTH for z in o.zooms):
+        raise ValueError(
+            f'zooms must lie in 0..{KEY_DEPTH}, the Hilbert key depth, so every tile is one '
+            f'interval of keys; got {list(o.zooms)}'
+        )
     out.parent.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
     geometry, log = o.geometry, o.log

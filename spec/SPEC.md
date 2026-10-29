@@ -127,7 +127,8 @@ Under the `geo` key, a `lod_columns` object:
 | `lods`         | object   | LOD name to `{zooms, geometry_type, scale, offset, placeholder}`; `scale` and `offset` are `[x, y]` pairs in EPSG:3857 metres, `placeholder` the width in grid cells of the square drawn for a shape too small for the grid |
 
 All fields are required; readers MUST ignore fields they do not know. Every
-zoom in `zooms` MUST appear in exactly one LOD, `zooms` MUST be contiguous,
+zoom in `zooms` MUST appear in exactly one LOD and lie in `0..key.depth`, so
+each tile is one interval of keys (Layout 1); `zooms` MUST be contiguous,
 and `scale` and `offset` MUST be finite. Every row with a non-null, non-empty
 primary geometry MUST
 be shown at the finest LOD. Membership at the other LODs is the writer's

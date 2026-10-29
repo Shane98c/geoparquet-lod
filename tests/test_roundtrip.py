@@ -578,6 +578,42 @@ def test_an_extent_too_wide_for_the_grid_is_refused_before_sorting(tmp_path):
     assert not list(tmp_path.glob('**/*.sorted.parquet'))
 
 
+def test_zooms_past_the_key_depth_are_refused_before_sorting(tmp_path):
+    """A tile finer than the key's cells is no interval of keys, so the
+    writer refuses it; the key's own depth serves, a copy across a tile edge
+    included."""
+    from geoparquet_lod.key import KEY_DEPTH
+
+    n = 2**KEY_DEPTH
+    west, east = ((5_000_000 + d) / n * 360 - 180 for d in (-0.3, 0.3))
+    north, south = (
+        float(np.degrees(np.arctan(np.sinh(np.pi * (1 - 2 * (6_000_000 + d) / n)))))
+        for d in (0.2, 0.8)
+    )
+    box = shapely.box(west, south, east, north)
+    source = geoparquet(
+        tmp_path / 'deep.parquet',
+        pa.table({'geometry': pa.array([shapely.to_wkb(box)], pa.binary())}),
+        ['Polygon'],
+    )
+    for zooms in ([KEY_DEPTH, KEY_DEPTH + 1], [-1, 0]):
+        with pytest.raises(ValueError, match='Hilbert key depth'):
+            write(source, tmp_path / 'deep.lod.parquet', zooms=zooms, log=print)
+    assert list(tmp_path.iterdir()) == [source]
+    out = write(
+        source,
+        tmp_path / 'deep.lod.parquet',
+        zooms=[KEY_DEPTH],
+        complete_from=KEY_DEPTH,
+        workers=1,
+        log=lambda *_: None,
+    )
+    validate(out, full=True)
+    (blob,) = pq.read_table(out).column('lod').combine_chunks().field(f'f{KEY_DEPTH}').to_pylist()
+    (copy,) = Unpacker(blob, 'MultiPolygon', []).row()['spill']
+    assert copy['tile'] >> 48 == KEY_DEPTH
+
+
 def test_placeholder_pixels_sets_the_square_size(buildings, tmp_path):
     from geoparquet_lod.quantize import SUBPIXELS
 

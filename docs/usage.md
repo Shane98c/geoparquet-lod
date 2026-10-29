@@ -58,7 +58,9 @@ coarser than where the dataset's whole extent spans about a pixel, the base
 zoom a rate-based thinning counts from is where the median feature spans a
 pixel, and the finest zoom is where the median vertex spacing spans four
 pixels. The writer logs the guess and records which zooms actually keep every
-row; pass `zooms=` or `complete_from=` to override.
+row; pass `zooms=` or `complete_from=` to override. Zooms run from 0 to 24,
+the depth of the Hilbert key, so every tile is one interval of keys; the
+writer refuses others before it starts.
 
 ### Attributes
 

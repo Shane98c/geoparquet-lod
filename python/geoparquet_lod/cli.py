@@ -71,7 +71,7 @@ def cli():
     '--zooms',
     default='auto',
     show_default=True,
-    help="inclusive range such as 2-16, or 'auto' to derive from the data",
+    help="inclusive range within 0-24, such as 2-16, or 'auto' to derive from the data",
 )
 @click.option(
     '--complete-from',
