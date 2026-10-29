@@ -1,10 +1,6 @@
 import { SharedLoad } from './shared-load.js'
 import type { ProjectionExecutor } from './projection.js'
-import { readColumn } from 'hyparquet/src/column.js'
-import { DEFAULT_PARSERS } from 'hyparquet/src/convert.js'
-import { getSchemaPath } from 'hyparquet/src/schema.js'
 import { parquetMetadata } from 'hyparquet'
-import { compressors } from './compressors.js'
 import { attributeKind, decodeSelectedRow, type AttributeField } from './decode.js'
 import { visitPlainPage } from './pages.js'
 import { GeometryBuilder } from './geometry.js'
@@ -479,7 +475,6 @@ export class SpatialReader implements TileReader {
       x,
       y,
       fields: this.fields,
-      column: this.lod.column,
       codec: this.root.codecs[lod.name],
       pages,
       firstCell,
@@ -496,7 +491,6 @@ export interface PreparedTile {
   x: number
   y: number
   fields: AttributeField[]
-  column: string
   codec: string
   pages: Page[]
   firstCell: number
@@ -512,31 +506,13 @@ export function decodeTile(
   signal?: AbortSignal,
 ): LodRows {
   signal?.throwIfAborted()
-  const { lod, z, x, y, fields, column, codec, pages, firstCell, endCell, hostRow, payloads } = task
+  const { lod, z, x, y, fields, codec, pages, firstCell, endCell, hostRow, payloads } = task
   const wanted = attributes.map((a) => fields.findIndex((f) => f.name === a))
   for (const [i, name] of attributes.entries())
     if (wanted[i] < 0) throw new Error(`attribute ${name} is not carried`)
   const rows: number[] = []
   const columns: Record<string, unknown[]> = Object.fromEntries(attributes.map((a) => [a, []]))
   const builder = new GeometryBuilder()
-  const element = { name: lod.name, type: 'BYTE_ARRAY', repetition_type: 'OPTIONAL' }
-  const decoder = {
-    type: 'BYTE_ARRAY',
-    codec,
-    element,
-    pathInSchema: [column, lod.name],
-    schemaPath: getSchemaPath(
-      [
-        { name: 'schema', num_children: 1 },
-        { name: column, repetition_type: 'REQUIRED', num_children: 1 },
-        element,
-      ] as never,
-      [column, lod.name],
-    ),
-    compressors,
-    parsers: DEFAULT_PARSERS,
-    utf8: false,
-  }
   const tile = z * 2 ** 48 + x * 2 ** z + y
   const add = (id: number, attrs: unknown[]) => {
     rows.push(id)
@@ -545,7 +521,7 @@ export function decodeTile(
   for (let i = 0; i < pages.length; i++) {
     const page = pages[i]
     let fence = 0
-    const visit = (relative: number, value: Uint8Array) => {
+    visitPlainPage(payloads[i], codec, page[5], (relative, value) => {
       const row = page[4] + relative
       while (fence + 2 < page[6].length && page[6][fence + 3] <= relative) fence += 2
       const cell = page[6][fence]
@@ -562,20 +538,7 @@ export function decodeTile(
         add,
         wanted.length > 0,
       )
-    }
-    if (visitPlainPage(payloads[i], codec, page[5], visit)) continue
-    const { data } = readColumn(
-      { view: new DataView(payloads[i]), offset: 0 },
-      { groupStart: page[4], selectStart: 0, selectEnd: page[5] } as never,
-      decoder as never,
-    )
-    let row = 0
-    for (const values of data)
-      for (let value of values) {
-        while (Array.isArray(value)) value = value[0]
-        if (value instanceof Uint8Array) visit(row, value)
-        row++
-      }
+    })
   }
   return { rows, columns, geometry: builder.finish(lod.scale, lod.offset) }
 }

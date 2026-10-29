@@ -13,7 +13,7 @@ const i32 = (value) => {
   new DataView(b.buffer).setUint32(0, value, true)
   return [...b]
 }
-const page = (rows, levels, values, type = 0) => {
+const page = (rows, levels, values, type = 0, encoding = 0) => {
   const payload = [
     ...i32(levels.length),
     ...levels,
@@ -31,7 +31,7 @@ const page = (rows, levels, values, type = 0) => {
     0x15,
     ...varint(rows * 2),
     0x15,
-    0,
+    encoding * 2,
     0x15,
     6,
     0x15,
@@ -51,10 +51,7 @@ for (const [rows, levels, indices] of [
   const values = indices.map((_, i) => [i, 0, 255])
   const bytes = page(rows, levels, values),
     found = []
-  assert.equal(
-    visitPlainPage(bytes, 'UNCOMPRESSED', rows, (row, value) => found.push([row, [...value]])),
-    true,
-  )
+  visitPlainPage(bytes, 'UNCOMPRESSED', rows, (row, value) => found.push([row, [...value]]))
   assert.deepEqual(
     found,
     indices.map((row, i) => [row, values[i]]),
@@ -65,15 +62,19 @@ for (const [rows, levels, indices] of [
     /page length/,
   )
 }
-assert.equal(
-  visitPlainPage(page(1, [2, 1], [[42]], 3), 'UNCOMPRESSED', 1, () => assert.fail()),
-  false,
-  'v2 falls back',
-)
+for (const [type, encoding, kind] of [
+  [3, 0, 'v2'],
+  [0, 8, 'dictionary-encoded'],
+])
+  assert.throws(
+    () => visitPlainPage(page(1, [2, 1], [[42]], type, encoding), 'UNCOMPRESSED', 1, () => {}),
+    /v1 data pages of PLAIN values/,
+    `a ${kind} page is rejected`,
+  )
 assert.throws(
   () => visitPlainPage(page(1, [0], []), 'UNCOMPRESSED', 1, () => {}),
   /empty definition run/,
 )
 console.log(
-  'sparse pages: long null runs, mixed bitpacking, partial bytes, corruption and fallback',
+  'sparse pages: long null runs, mixed bitpacking, partial bytes, corruption, other page kinds',
 )

@@ -26,9 +26,11 @@ GeoParquet metadata, with relocated offsets and updated physical sizes.
 and bootstrap location, `{"version":2,"offset":4,"length":16380}`. Primary
 geometry and source attribute chunks are copied byte for byte. LOD chunks are
 re-encoded in the original row order, with the same nullable binary schema and
-zstd, without dictionary encoding, with page breaks at the LOD's finest tile
-grid. Multiple pages may serve a dense tile, and a row-group boundary can split
-a tile. The row cap scales with the chunk's LOD density to target 2,048
+zstd, with page breaks at the LOD's finest tile grid. Every LOD page is a v1
+data page (a `DATA_PAGE` header) of PLAIN values with RLE/bit-packed hybrid
+definition levels, and LOD chunks have no dictionary page, so each page decodes
+on its own. Multiple pages may serve a dense tile, and a row-group boundary can
+split a tile. The row cap scales with the chunk's LOD density to target 2,048
 present values, up to 262,144 analytical rows per page, alongside an
 uncompressed byte target (64 KiB by default). The target is advisory: write
 batches and individual large values may exceed it. Runs of entirely null tiles
@@ -106,13 +108,12 @@ To read a tile, descend from the LOD's top node: in every node, take the
 entries whose bounds intersect the tile's key interval, plus the first entry
 whose maximum reaches the interval start, or the final entry if none does.
 Among the pages, that first page contains the tile's copy host when any copies
-exist. Read consecutive pages together. Decode the standard Parquet page with
-the root's codec and the required-struct/nullable-binary schema. Use the
-fences to retain own rows inside the tile interval, and the host row for its
-copies tagged with the requested tile. Global row indices are the feature ids.
-A reader can scan definition-level runs in v1 PLAIN pages directly and skip
-null rows, falling back to a general decoder for other encodings. The
-directory stores no geometry or styling payload and is not an MVT archive.
+exist. Read consecutive pages together. Decode each page with the root's codec
+and the required-struct/nullable-binary schema, scanning its definition-level
+runs to skip null rows. Use the fences to retain own rows inside the tile
+interval, and the host row for its copies tagged with the requested tile.
+Global row indices are the feature ids. The directory stores no geometry or
+styling payload and is not an MVT archive.
 
 ## Analytical access and publishing
 

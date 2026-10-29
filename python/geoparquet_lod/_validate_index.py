@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pyarrow as pa
 
-from ._compact import dumps, get, loads
+from ._compact import dumps, get, loads, loads_prefix
 from ._layout import (
     BOOTSTRAP_BYTES,
     CODECS,
@@ -75,7 +75,7 @@ def check_index(path, parquet, lod):
                 ):
                     raise ValueError(f'row group {g}: invalid offset-index page ordering')
                 if len(path_parts) == 2 and path_parts[0] == lod['column']:
-                    locations[path_parts[1]].append((byte, length, bounds, CODECS[get(cm, 4)]))
+                    locations[path_parts[1]].append((byte, length, bounds, cm))
             first += count
 
         source.seek(4)
@@ -169,9 +169,10 @@ def check_index(path, parquet, lod):
                 raise ValueError('a directory tree must start above its leaves')
             actual = _concat(walk(level, entries))
             expected, zoom = [], grid_zoom(lod, name)
-            for g, (byte, length, bounds, codec) in enumerate(locations[name]):
-                if root.get('codecs', {}).get(name) != codec:
+            for g, (byte, length, bounds, cm) in enumerate(locations[name]):
+                if root.get('codecs', {}).get(name) != CODECS[get(cm, 4)]:
                     raise ValueError('spatial root codec disagrees with footer')
+                _check_pages(read, cm, byte, length, np.diff(bounds))
                 values = (
                     parquet.read_row_group(g, columns=[f'{lod["column"]}.{name}'])
                     .column(0)
@@ -213,3 +214,25 @@ def _concat(parts):
             + [p[k] + (counts[i] if k == 'fence_page' else 0) for i, p in enumerate(parts)]
         )
     return pages
+
+
+def _check_pages(read, cm, byte, length, rows):
+    """Check that an LOD chunk holds only the pages its offset index lists,
+    back to back from its first data page to its end, each a v1 data page of
+    PLAIN values with RLE definition levels and as many values as rows."""
+    start = get(cm, 9)
+    if (
+        11 in cm
+        or not len(byte)
+        or byte[0] != start
+        or (byte[1:] != (byte + length)[:-1]).any()
+        or byte[-1] + length[-1] != start + get(cm, 7)
+    ):
+        raise ValueError('LOD chunk holds pages its offset index omits')
+    for offset, size, count in zip(byte.tolist(), length.tolist(), rows.tolist(), strict=True):
+        header, header_size = loads_prefix(read(offset, size))
+        page = get(header, 5)
+        if get(header, 1) != 0 or page is None or get(page, 2) != 0 or get(page, 3) != 3:
+            raise ValueError('LOD pages must be v1 data pages of PLAIN values')
+        if get(page, 1) != count or header_size + get(header, 3) != size:
+            raise ValueError('LOD page header disagrees with its offset index')

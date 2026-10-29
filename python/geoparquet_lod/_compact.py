@@ -130,6 +130,12 @@ def loads(data):
     return _read(io.BytesIO(data), 12)
 
 
+def loads_prefix(data):
+    """The struct at the start of `data` and the bytes it takes."""
+    stream = io.BytesIO(data)
+    return _read(stream, 12), stream.tell()
+
+
 def dumps(value):
     return _write(12, value)
 

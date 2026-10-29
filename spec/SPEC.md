@@ -98,9 +98,10 @@ The following SHOULD hold and are what the reference writer does:
 
 - Row groups of about one million rows; analytical pages target 16 KiB and
   tile-aligned overview pages target 64 KiB uncompressed, with v1 page headers.
-  The [spatial index](SPATIAL-INDEX.md) selects overview pages directly without
-  fetching entire row-group offset indexes. These are writer policies, not
-  requirements on other producers.
+  These are writer policies, not requirements on other producers. The
+  [spatial index](SPATIAL-INDEX.md) selects overview pages directly without
+  fetching entire row-group offset indexes, and requires them to be v1 PLAIN
+  pages.
 - Compression that decodes in a browser (zstd); no dictionary encoding on
   LOD or bbox columns. Packed LODs are binary values rather than separate
   coordinate leaves. The standard footer reader also handles dictionary pages.

@@ -249,6 +249,19 @@ def test_directory_nodes_are_reached_once(leafy, tmp_path, monkeypatch):
     assert len(decoded) < 20
 
 
+def test_overview_pages_are_v1_plain(indexed, tmp_path, monkeypatch):
+    """Readers scan the profile's overview pages directly, so other page
+    kinds fail validation."""
+    writer = pq.ParquetWriter
+    monkeypatch.setattr(
+        pq, 'ParquetWriter', lambda *a, **k: writer(*a, **{**k, 'data_page_version': '2.0'})
+    )
+    out = finalize_layout(indexed, tmp_path / 'v2.parquet', log=lambda *_: None)
+    monkeypatch.undo()
+    with pytest.raises(ValidationError, match='v1 data pages'):
+        validate(out, full=True)
+
+
 @pytest.mark.parametrize(
     'mutation',
     [

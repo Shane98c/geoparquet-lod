@@ -238,9 +238,10 @@ def row_metadata(metadata, columns):
 
 def _tile_pages(parquet, group, name, lod, keys, work, target, page_bytes, compression_level):
     """Use Arrow to encode tile-aligned pages, then concatenate its temporary
-    column chunks into one ordinary chunk in the original row group. Dictionary
-    encoding is disabled so every page is independently decodable. Consecutive
-    all-null tiles share a run; they carry no overview payload.
+    column chunks into one ordinary chunk in the original row group. Pages are
+    v1 data pages of PLAIN values without a dictionary, as the profile
+    requires, so every page is independently decodable. Consecutive all-null
+    tiles share a run; they carry no overview payload.
     """
     table = parquet.read_row_group(group, columns=[f'{lod["column"]}.{name}'])
     array = table.column(0).combine_chunks().field(name)
@@ -258,6 +259,7 @@ def _tile_pages(parquet, group, name, lod, keys, work, target, page_bytes, compr
         compression='zstd',
         compression_level=compression_level,
         use_dictionary=False,
+        data_page_version='1.0',
         write_statistics=False,
         write_page_index=True,
         data_page_size=page_bytes,
