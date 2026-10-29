@@ -185,7 +185,9 @@ them exactly, doubles otherwise, and integers below 2^52 are integers;
 booleans stay booleans and bigints a number holds exactly become that number.
 Other values, such as strings, dates and nested values, are display strings.
 Style expressions therefore compare numbers with numbers, as in
-`['>', ['get', 'risk'], 0.01]`.
+`['>', ['get', 'risk'], 0.01]`. MVT has no null, so a null value leaves its
+property out of the feature: `['has', 'risk']` is false there and
+`['coalesce', ['get', 'risk'], 0]` falls back to 0.
 
 Tiles are fetched through one shared worker and decoded and encoded in a
 small worker pool. `setWorkerCount(1 | 2 | 3 | 4)` from the MapLibre entry point

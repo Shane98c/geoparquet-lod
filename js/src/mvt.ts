@@ -57,7 +57,8 @@ export interface MvtTileOptions {
  * to tile coordinates by one affine transform; lon/lat geometry is projected.
  * Geometry is clipped to the buffered extent and dropped when null or off-tile. IDs must be
  * non-negative safe integers. Numbers, booleans and safe bigints are typed MVT
- * values; other properties are written as display strings.
+ * values; other properties are written as display strings, and a null or
+ * undefined property is left out of its feature, as MVT represents a missing value.
  * Columns are read in place: no GeoJSON or per-row feature object is built.
  */
 export function toMvt(source: FeatureSource, options: MvtTileOptions): ArrayBuffer {
@@ -80,6 +81,7 @@ export function toMvt(source: FeatureSource, options: MvtTileOptions): ArrayBuff
     if (!feature) continue
     tags.reset()
     for (const [key, column] of columns) {
+      if (column[row] == null) continue
       const value = propertyValue(column[row])
       let ids = values.get(value.field)
       if (!ids) values.set(value.field, (ids = new Map()))
@@ -663,7 +665,6 @@ function writePropertyValue(writer: ByteWriter, value: PropertyValue): void {
 }
 
 function formatPropertyValue(value: unknown): string {
-  if (value === null || value === undefined) return ''
   if (typeof value === 'string') return value
   if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
     return String(value)
