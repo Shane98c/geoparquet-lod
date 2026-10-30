@@ -649,7 +649,6 @@ def write(
     batch_rows: int | None = None,
     placeholder_pixels: float | None = None,
     metadata: Mapping[str, str] | None = None,
-    column_metadata: Mapping[str, Mapping[str, str]] | None = None,
     workers: int | None = None,
     memory_limit: str | None = None,
     temp_dir: str | None = None,
@@ -668,9 +667,7 @@ def write(
     speed does not depend on it.
     ``placeholder_pixels`` is the width of the square a shape under a pixel
     draws as; when unset, the thinning's own ``placeholder_pixels`` decides.
-    ``metadata`` is added to the file's key-value metadata, and
-    ``column_metadata``, keyed by output column, to those columns' Arrow
-    field metadata, such as a ``description`` of each.
+    ``metadata`` is added to the file's key-value metadata.
 
     ``src`` is a GeoParquet path or glob, local or a URI such as s3:// that
     DuckDB and Arrow open; S3 credentials come from the usual AWS chain.
@@ -769,11 +766,6 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
     for name in ('lod', KEY_COLUMN):
         if name in source_schema.names:
             raise ValueError(f'source column {name!r} clashes with the output column of that name')
-    unknown = sorted(
-        set(o.column_metadata or {}) - {*source_schema.names, 'bbox', KEY_COLUMN, 'lod'}
-    )
-    if unknown:
-        raise ValueError(f'column_metadata names columns the output does not have: {unknown}')
     bad = [a.name for a in attributes if a.name in THINNING_COLUMNS]
     bad += [c for c in o.columns if c in THINNING_COLUMNS]
     if bad:
@@ -1062,11 +1054,6 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
     )
     rest = [f for f in source_schema if f.name not in ('bbox', geometry)]
     schema = pa.schema([BBOX_FIELD, KEY_FIELD, lod_field, *rest, source_schema.field(geometry)])
-    for name, added in (o.column_metadata or {}).items():
-        i = schema.get_field_index(name)
-        field = schema.field(i)
-        added = {k.encode(): v.encode() for k, v in added.items()}
-        schema = schema.set(i, field.with_metadata({**(field.metadata or {}), **added}))
     geo['version'] = GEOPARQUET_VERSION
     geo.setdefault('primary_column', geometry)
     geo.setdefault('columns', {}).setdefault(geometry, {'encoding': 'WKB', 'geometry_types': []})
