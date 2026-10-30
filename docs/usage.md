@@ -191,7 +191,9 @@ script again unless Python forks them, so a script calls it under an
 The input is any GeoParquet with a WKB geometry column in OGC:CRS84 or
 EPSG:4326 with planar edges, as a path or a `*` glob, local or on S3 (`s3://`, with credentials
 from the usual AWS chain); the output is a local path. `metadata=` adds
-key-value metadata to the file. `write()` builds the overviews, then the tile-aligned pages and
+key-value metadata to the file, and `column_metadata=` to the Arrow fields of
+the columns it names, source or output (`bbox`, `hilbert`, `lod`), such as a
+`description` of each. `write()` builds the overviews, then the tile-aligned pages and
 spatial directory, in one call; `lod_page_bytes` (`--lod-page-bytes`) sets the
 overview page target, 64 KiB by default. Writing a 155.6 million building
 national file (OCR's buildings, two carried attributes) took 43 minutes on a
