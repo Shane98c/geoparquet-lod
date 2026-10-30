@@ -323,7 +323,7 @@ def guess_zooms(con, sorted_path, geometry, family, zooms, complete_from, extent
     auto_zooms = zooms == 'auto'
     auto_from = complete_from == 'auto'
     if auto_zooms or auto_from:
-        sample = con.execute(
+        sample = con.sql(
             f"SELECT __diag AS diag, {_quoted(geometry)} FROM '{sorted_path}' WHERE __cx IS NOT NULL USING SAMPLE 5000 ROWS"
         ).to_arrow_table()
         diag = float(np.median(sample.column('diag').to_numpy())) if sample.num_rows else 0.0
@@ -365,7 +365,7 @@ def _check_grid(extent, finest_zoom: int, dot_cells: float) -> None:
 def _full_detail_bytes(con, sorted_path, geometry, family, finest_zoom, origin, n_rows) -> float:
     """Estimated geometry bytes of the whole dataset at the finest zoom, from a sample:
     two int32 per vertex before compression."""
-    sample = con.execute(
+    sample = con.sql(
         f"SELECT {_quoted(geometry)} FROM '{sorted_path}' WHERE __cx IS NOT NULL USING SAMPLE 2000 ROWS"
     ).to_arrow_table()
     if not sample.num_rows:
@@ -479,7 +479,7 @@ def _value_table(con, path: Path, name: str, overrides: Iterable[pa.Array]) -> l
     or fewer, so at most twice that many are held."""
     values = {
         v
-        for (v,) in con.execute(
+        for (v,) in con.sql(
             f"SELECT DISTINCT {_quoted(name)} FROM '{path}' WHERE {_quoted(name)} IS NOT NULL "
             f'LIMIT {DICTIONARY_MAX + 1}'
         ).fetchall()
@@ -747,7 +747,7 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
         raise NotImplementedError(f'the primary geometry has {edges} edges; only planar')
     types = [t.lower() for t in column.get('geometry_types', [])]
     if not types:
-        sample = con.execute(
+        sample = con.sql(
             f"SELECT ST_GeometryType({quoted}) FROM read_parquet('{src}') LIMIT 1000"
         ).fetchall()
         types = [str(t[0]).lower() for t in sample]
@@ -780,10 +780,10 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
         + ''.join(f'AND isfinite({b}) ' for b in limits)
         + f'AND {limits[0]} <= {limits[2]} AND {limits[1]} <= {limits[3]})'
     )
-    xmin, ymin, xmax, ymax = con.execute(
+    xmin, ymin, xmax, ymax = con.sql(
         f'SELECT min(ST_XMin({quoted})), min(ST_YMin({quoted})), max(ST_XMax({quoted})), max(ST_YMax({quoted})) '
         f"FROM read_parquet('{src}') WHERE {valid}"
-    ).fetchone()
+    ).fetchall()[0]
     if xmin is None:
         raise ValueError(f'{src} has no geometry with finite bounds')
     (mxmin, mxmax), (mymin, mymax) = (
@@ -833,7 +833,7 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
         ) TO '{unsorted_path}' (FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE {UNSORTED_ROW_GROUP_ROWS})
     """
     )
-    cells_table = con.execute(
+    cells_table = con.sql(
         f"SELECT __id, __kx, __ky FROM '{unsorted_path}' WHERE __kx IS NOT NULL"
     ).fetchnumpy()
     key_ids = cells_table['__id'].astype(np.int64)
@@ -845,7 +845,7 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
     con.close()
     con = held.enter_context(connect(o.memory_limit, o.temp_dir))
     pa.default_memory_pool().release_unused()
-    n_rows = con.execute(f"SELECT count(*) FROM '{sorted_path}'").fetchone()[0]
+    n_rows = con.sql(f"SELECT count(*) FROM '{sorted_path}'").fetchall()[0][0]
     log(f'  {n_rows:,} rows sorted, {time.time() - t0:.0f}s')
     forced_complete = o.complete_from if isinstance(o.complete_from, int) else None
     zooms, complete_from = guess_zooms(
@@ -879,7 +879,7 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
     # holding the table beside its Arrow copy.
     con.execute('SET preserve_insertion_order = true')
     rows = pa.Table.from_batches(
-        con.execute(
+        con.sql(
             f'SELECT {slim}, (hash({quoted}) % 1000000007) / 1000000007.0 AS u '
             f"FROM '{sorted_path}' WHERE __cx IS NOT NULL"
         ).to_arrow_reader(1_000_000)
@@ -995,7 +995,7 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
     shape_lods = [b for b in lod_plan if b['geometry_type'] != 'Point']
     # 3b. straddlers: a feature reaching into a tile beyond its own gets a copy of its LOD
     # geometry on the first row of that tile's key interval, so a tile is one interval
-    extent = con.execute(
+    extent = con.sql(
         f'SELECT __id, __bbox.xmin AS xmin, __bbox.ymin AS ymin, __bbox.xmax AS xmax, '
         f"__bbox.ymax AS ymax, __h FROM '{sorted_path}' WHERE __cx IS NOT NULL"
     ).fetchnumpy()
@@ -1178,7 +1178,7 @@ def _build(src: str, out: Path, o: SimpleNamespace, held: contextlib.ExitStack) 
         attr_chunks: dict[str, list] = {a.name: [] for a in attributes}
         attr_ids: list = []
         scanned = 0
-        reader = con.execute(
+        reader = con.sql(
             f'SELECT __id, {quoted} AS g, __cx AS cx, __cy AS cy{attr_select} '
             f"FROM '{sorted_path}' WHERE __cx IS NOT NULL"
         ).to_arrow_reader(1_000_000)

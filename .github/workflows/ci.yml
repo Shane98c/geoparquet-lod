@@ -13,6 +13,7 @@ jobs:
       - run: uv sync --locked --group dev
       - run: uv run ruff check python tests examples benchmarks
       - run: uv run pytest -q
+      - run: uv run --with 'duckdb>=1.5,<2' pytest -q
       - run: uv run python examples/quickstart.py /tmp/lod-quickstart
       - run: uv run geoparquet-lod validate /tmp/lod-quickstart/buildings.lod.parquet
   js:

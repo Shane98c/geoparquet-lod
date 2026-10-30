@@ -304,7 +304,7 @@ def only(predicate: Callable[[pa.Table], np.ndarray] | str, inner: Thin) -> Thin
 
             con = duckdb.connect()
             con.register('rows', rows)
-            keep = next(iter(con.execute(f'SELECT ({predicate}) FROM rows').fetchnumpy().values()))
+            keep = next(iter(con.sql(f'SELECT ({predicate}) FROM rows').fetchnumpy().values()))
             keep = np.asarray(keep, dtype=bool)
         else:
             keep = np.asarray(predicate(rows), dtype=bool)
