@@ -15,10 +15,32 @@ let geometryDecodes = 0,
   projectionJobs = 0
 const readers = new Map<string, Promise<TileReader>>()
 let workerCount = 2
-let pool: TilePool | undefined
+let pool: Promise<TilePool | undefined> | undefined
 let started = false
-const getPool = () =>
-  workerCount === 1 ? undefined : (pool ??= new TilePool(workerCount, scope.location.href))
+// A bundler may emit this worker as a classic script, and only a module worker
+// refuses importScripts, so helpers start the way this worker was started.
+const workerType: WorkerType = (() => {
+  try {
+    scope.importScripts()
+    return 'classic'
+  } catch {
+    return 'module'
+  }
+})()
+/** The helper pool once ready, or none with one worker or when the helpers
+ * cannot start; without one this worker does the CPU work itself. */
+const getPool = (): Promise<TilePool | undefined> => {
+  if (workerCount === 1) return Promise.resolve(undefined)
+  return (pool ??= (async () => {
+    try {
+      const candidate = new TilePool(workerCount, scope.location.href, workerType)
+      await candidate.ready
+      return candidate
+    } catch {
+      return undefined
+    }
+  })())
+}
 const stats: Record<string, Transfer> = {}
 
 const fetched = scope.fetch.bind(scope)
@@ -48,7 +70,7 @@ const getReader = (url: string): Promise<TileReader> => {
 
 scope.addEventListener('message', (event: MessageEvent<WorkerRequest | CpuRequest>) => {
   const request = event.data
-  // CPU workers reuse this same URL, so the pool adds no second JS bundle.
+  // CPU workers run this same script, so the pool adds no second JS bundle.
   // They receive prepared pages or decoded geometry, never their own reader.
   if (request.type === 'cpu-init') {
     zstdReady.then(() => scope.postMessage({ ready: true } satisfies TileReply))
@@ -120,7 +142,7 @@ scope.addEventListener('message', (event: MessageEvent<WorkerRequest | CpuReques
   }
   if (request.type === 'open') {
     started = true
-    Promise.all([getReader(request.url), getPool()?.ready])
+    Promise.all([getReader(request.url), getPool()])
       .then(([reader]) => reader)
       .then((reader) =>
         scope.postMessage({
@@ -158,7 +180,7 @@ scope.addEventListener('message', (event: MessageEvent<WorkerRequest | CpuReques
               properties: request.config.properties,
               signal: controller.signal,
             }
-            const cpu = getPool()
+            const cpu = await getPool()
             const properties =
               options.properties ?? (reader.lod?.attributes ?? []).map((a) => a.name)
             if (reader instanceof SpatialReader && request.z <= reader.finestZoom) {

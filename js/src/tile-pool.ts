@@ -27,15 +27,15 @@ export class TilePool {
   private nextId = 0
   private failure?: Error
 
-  /** `url` is the worker script the helpers run: the coordinator's own, so a
-   * bundler sees no worker that starts itself. */
-  constructor(count: number, url: string | URL) {
+  /** `url` and `type` are the script the helpers run and how: the
+   * coordinator's own, so a bundler sees no worker that starts itself. */
+  constructor(count: number, url: string | URL, type: WorkerType) {
     this.ready = Promise.all(
       Array.from(
         { length: count },
         () =>
           new Promise<void>((resolve, reject) => {
-            const worker = new Worker(url, { type: 'module' })
+            const worker = new Worker(url, { type })
             const slot: Slot = { worker, ready: false }
             this.slots.push(slot)
             worker.addEventListener('message', ({ data }: MessageEvent<TileReply>) => {
@@ -57,6 +57,8 @@ export class TilePool {
               this.pump()
             })
             const fail = (event: ErrorEvent | MessageEvent) => {
+              // Handled here, so it does not also reach the coordinator's owner.
+              event.preventDefault()
               const error = new Error(
                 'message' in event ? event.message : 'Tile worker transport failed',
               )

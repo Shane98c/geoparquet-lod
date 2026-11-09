@@ -7,8 +7,9 @@ const slots = []
 globalThis.Worker = class {
   listeners = new Map()
   sent = []
-  constructor(url) {
+  constructor(url, options) {
     this.url = url
+    this.type = options.type
     slots.push(this)
     queueMicrotask(() => this.emit('message', { data: { ready: true } }))
   }
@@ -30,12 +31,17 @@ globalThis.Worker = class {
     this.emit('message', { data: { id: job.id, data: new ArrayBuffer(3), ...reply } })
   }
 }
-const pool = new TilePool(2, 'https://example.test/worker.js')
+const pool = new TilePool(2, 'https://example.test/worker.js', 'classic')
 await pool.ready
 assert.deepEqual(
   slots.map((s) => s.url),
   ['https://example.test/worker.js', 'https://example.test/worker.js'],
   'helpers run the given script',
+)
+assert.deepEqual(
+  slots.map((s) => s.type),
+  ['classic', 'classic'],
+  'as the given type',
 )
 const bytes = Uint8Array.from([1, 2, 3]).buffer
 const task = { payloads: [bytes] }
@@ -86,8 +92,10 @@ assert.deepEqual([...encoder.sent.at(-1).tile.geometry.x], [5])
 
 const jobs = Array.from({ length: 4 }, () => pool.decode(task))
 const rejected = jobs.map((p) => assert.rejects(p, /load failed/))
-slots[0].emit('error', { message: 'load failed' })
+const loadError = { message: 'load failed', preventDefault: () => (loadError.handled = true) }
+slots[0].emit('error', loadError)
 await Promise.all(rejected)
+assert.ok(loadError.handled, 'a helper error stops at the pool')
 assert.ok(slots.every((s) => s.terminated))
 await assert.rejects(pool.decode(task), /load failed/)
 globalThis.Worker = class {
@@ -95,7 +103,7 @@ globalThis.Worker = class {
     throw new Error('constructor failed')
   }
 }
-const failed = new TilePool(2, 'https://example.test/worker.js')
+const failed = new TilePool(2, 'https://example.test/worker.js', 'classic')
 await assert.rejects(failed.ready, /constructor failed/)
 await assert.rejects(failed.decode(task), /constructor failed/)
 console.log('tile pool transfer ownership, queued/active cancellation and failure cleanup passed')
