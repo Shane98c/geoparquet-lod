@@ -10,7 +10,7 @@ import { visitPlainPage } from './pages.js'
 import { GeometryBuilder } from './geometry.js'
 import { cellInterval, tileInterval, type Interval } from './key.js'
 import {
-  LodReader,
+  GeoParquetReader,
   PACK_VERSION,
   isCompatibleVersion,
   type Bbox,
@@ -403,7 +403,7 @@ export async function rootFileBytes(prefix: ArrayBuffer): Promise<number | null>
 /** Common rendering/inspection API. Full Parquet metadata is loaded only when
  * an analytical row or the exact-geometry fallback is actually requested. */
 export type TileReader = Pick<
-  LodReader,
+  GeoParquetReader,
   | 'scalarColumns'
   | 'bounds'
   | 'lod'
@@ -419,7 +419,7 @@ export type TileReader = Pick<
 
 export async function openReader(file: RangeSource): Promise<TileReader> {
   const head = await file.slice(0, Math.min(BOOTSTRAP_BYTES, file.byteLength))
-  if (!hasSpatialIndex(head)) return LodReader.open(file)
+  if (!hasSpatialIndex(head)) return GeoParquetReader.open(file)
   const length = new DataView(head).getUint32(12, true)
   if (!length || length > head.byteLength - 16) throw new Error('invalid spatial index root length')
   const root = await gunzipJson<SpatialRoot>(head.slice(16, 16 + length))
@@ -465,8 +465,8 @@ export class SpatialReader implements TileReader {
   >()
   private readonly pages = new Map<number, { size: number; data: SharedLoad<ArrayBuffer> }>()
   private pageBytes = 0
-  private fallback?: SharedLoad<LodReader>
-  private rowFallback?: SharedLoad<LodReader>
+  private fallback?: SharedLoad<GeoParquetReader>
+  private rowFallback?: SharedLoad<GeoParquetReader>
 
   constructor(
     private readonly file: RangeSource,
@@ -544,10 +544,10 @@ export class SpatialReader implements TileReader {
     return this.root.columns ?? this.lod.attributes.map((a) => a.name)
   }
 
-  private analytical(signal?: AbortSignal): Promise<LodReader> {
+  private analytical(signal?: AbortSignal): Promise<GeoParquetReader> {
     if (!this.fallback || this.fallback.abandoned) {
       const current = new SharedLoad((signal) =>
-        LodReader.open(this.file, signal, this.root.footer_bytes),
+        GeoParquetReader.open(this.file, signal, this.root.footer_bytes),
       )
       this.fallback = current
       current.promise.catch(() => {
@@ -559,7 +559,7 @@ export class SpatialReader implements TileReader {
 
   /** A reader for `columns` of single rows: from the root's row metadata when
    * it covers them all, so the full footer is never fetched, else the footer. */
-  private rowReader(columns: string[], signal?: AbortSignal): Promise<LodReader> {
+  private rowReader(columns: string[], signal?: AbortSignal): Promise<GeoParquetReader> {
     const covered = (c: string) => c === this.primary || this.root.columns?.includes(c)
     if (!this.root.row_metadata || !columns.every(covered)) return this.analytical(signal)
     if (!this.rowFallback || this.rowFallback.abandoned) {
@@ -568,7 +568,7 @@ export class SpatialReader implements TileReader {
         const bytes = await this.read(offset, length, signal)
         const metadata = metadataFrom(await gunzip(bytes).arrayBuffer())
         signal?.throwIfAborted()
-        return LodReader.fromMetadata(this.file, metadata)
+        return GeoParquetReader.fromMetadata(this.file, metadata)
       })
       this.rowFallback = current
       current.promise.catch(() => {

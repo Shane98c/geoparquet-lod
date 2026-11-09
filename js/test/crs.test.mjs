@@ -1,7 +1,7 @@
 // the reader serves source geometry as longitude/latitude, so it refuses any other CRS
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { LodReader } from '../dist/index.js'
+import { GeoParquetReader } from '../dist/index.js'
 
 const [accepted, ...refused] = process.argv.slice(2)
 if (!accepted) {
@@ -10,7 +10,7 @@ if (!accepted) {
 }
 const open = async (path) => {
   const bytes = await readFile(path)
-  return LodReader.open({
+  return GeoParquetReader.open({
     byteLength: bytes.length,
     slice: async (a, b) => Uint8Array.from(bytes.subarray(a, b)).buffer,
   })

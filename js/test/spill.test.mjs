@@ -2,7 +2,13 @@
 // read and, given the file laid out with a spatial directory, through that
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { LodReader, SpatialReader, coalescing, openReader, renderTile } from '../dist/index.js'
+import {
+  GeoParquetReader,
+  SpatialReader,
+  coalescing,
+  openReader,
+  renderTile,
+} from '../dist/index.js'
 import { nested } from './columnar.mjs'
 
 const [path, casesPath, laidOutPath] = process.argv.slice(2)
@@ -18,7 +24,7 @@ const open = async (path) => {
   }
 }
 const source = await open(path)
-const reader = await LodReader.open(coalescing(source))
+const reader = await GeoParquetReader.open(coalescing(source))
 assert.ok(reader.lod.key, 'fixture stores a key')
 const spatial = laidOutPath && (await openReader(coalescing(await open(laidOutPath))))
 if (spatial) assert.ok(spatial instanceof SpatialReader, 'the laid-out file has a directory')
@@ -59,7 +65,7 @@ for (const r of spatial ? [reader, spatial] : [reader]) {
   assert.deepEqual(rows, [...Array(keyed).keys()], 'a world query reads every row with geometry')
 }
 // the layout requires key statistics: a row group without them fails the read
-const stripped = await LodReader.open(coalescing(source))
+const stripped = await GeoParquetReader.open(coalescing(source))
 const keyChunk = stripped.metadata.row_groups[0].columns.find(
   (c) => c.meta_data.path_in_schema.join('.') === stripped.lod.key.column,
 )

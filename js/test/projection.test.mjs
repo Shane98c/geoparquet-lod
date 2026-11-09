@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { LodReader } from '../dist/index.js'
+import { GeoParquetReader } from '../dist/index.js'
 import { decodeProjection } from '../dist/projection.js'
 const bytes = await readFile(process.argv[2]),
   expected = JSON.parse(await readFile(process.argv[3], 'utf8'))
 let reads = 0
-const reader = await LodReader.open({
+const reader = await GeoParquetReader.open({
   byteLength: bytes.length,
   async slice(a, b = bytes.length) {
     reads++
@@ -29,7 +29,7 @@ for (const c of columns)
     rows.map((i) => expected[i][c]),
     c,
   )
-const scalarReader = await LodReader.open({
+const scalarReader = await GeoParquetReader.open({
   byteLength: bytes.length,
   async slice(a, b = bytes.length) {
     return Uint8Array.from(bytes.subarray(a, b)).buffer

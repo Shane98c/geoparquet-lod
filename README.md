@@ -6,6 +6,8 @@ This experimental layout keeps original feature geometries and source attributes
 alongside compact, thinned overviews. A spatial page index lets a browser
 fetch the relevant Parquet pages without opening the full footer. Ordinary
 GeoParquet tools query the original columns; the map uses a custom reader.
+That reader also maps any WKB GeoParquet without overviews straight from its
+rows, which suits files of a few MB ([plain GeoParquet](docs/usage.md#plain-geoparquet)).
 
 Draft 0.1.0. The format can still change, and the Python and JavaScript
 packages are not published to registries yet.

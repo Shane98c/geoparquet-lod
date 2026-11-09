@@ -3,7 +3,13 @@ import { readFile } from 'node:fs/promises'
 import { workerClient } from './worker-client.mjs'
 import { VectorTile } from '@mapbox/vector-tile'
 import { PbfReader } from 'pbf'
-import { LodReader, SpatialReader, openReader, coalescing, renderTile } from '../dist/index.js'
+import {
+  GeoParquetReader,
+  SpatialReader,
+  openReader,
+  coalescing,
+  renderTile,
+} from '../dist/index.js'
 import { nested } from './columnar.mjs'
 
 const [oldPath, newPath, casesPath] = process.argv.slice(2)
@@ -22,13 +28,13 @@ const makeSource = async (path) => {
 }
 const original = await makeSource(oldPath)
 const optimized = await makeSource(newPath)
-const old = await LodReader.open(coalescing(original))
+const old = await GeoParquetReader.open(coalescing(original))
 const fast = await openReader(coalescing(optimized))
 assert.ok(fast instanceof SpatialReader)
 assert.deepEqual(fast.bounds, old.bounds)
 assert.deepEqual(fast.scalarColumns(), old.scalarColumns())
 assert.deepEqual(optimized.reads, [[0, 16384]], 'one small open, no footer')
-const footer = await LodReader.open(coalescing(await makeSource(newPath)))
+const footer = await GeoParquetReader.open(coalescing(await makeSource(newPath)))
 const canonical = (buffer) => {
   const tile = new VectorTile(new PbfReader(new Uint8Array(buffer)))
   const features = []

@@ -104,13 +104,14 @@ interface DecodedPage {
 }
 
 /**
- * Footer-based access to source columns, exact geometry, and unindexed LOD
- * files. The indexed map path uses SpatialReader and opens this reader lazily
- * for analytical queries. A GeoParquet file without LODs opens too; every
- * zoom then reads its primary geometry, chosen by its bbox covering or, without
- * one, by Parquet's geospatial statistics and each row's WKB.
+ * A WKB GeoParquet file read from its footer: source columns, exact geometry,
+ * and the LODs of a file that has them. Without LODs every zoom reads the
+ * primary geometry, chosen by its bbox covering or, without one, by Parquet's
+ * geospatial statistics and each row's WKB. A file with the spatial index is
+ * drawn by SpatialReader, which opens this reader lazily for analytical
+ * queries.
  */
-export class LodReader {
+export class GeoParquetReader {
   readonly metadata: FileMetaData
   /** Absent for a GeoParquet file without LODs. */
   readonly lod: LodMetadata | undefined
@@ -229,8 +230,8 @@ export class LodReader {
 
   /** A reader over metadata found elsewhere than the footer, such as an
    * index's copy of some columns' metadata; it reads only those columns. */
-  static fromMetadata(file: RangeSource, metadata: FileMetaData): LodReader {
-    return new LodReader(file, metadata)
+  static fromMetadata(file: RangeSource, metadata: FileMetaData): GeoParquetReader {
+    return new GeoParquetReader(file, metadata)
   }
 
   /** `footerBytes`, the footer's length when already known, reads the footer
@@ -239,14 +240,14 @@ export class LodReader {
     file: RangeSource,
     signal?: AbortSignal,
     footerBytes?: number,
-  ): Promise<LodReader> {
+  ): Promise<GeoParquetReader> {
     if (footerBytes && footerBytes + 8 <= file.byteLength) {
       const tail = await file.slice(file.byteLength - footerBytes - 8, file.byteLength, signal)
       const view = new DataView(tail)
       if (view.getUint32(footerBytes, true) === footerBytes) {
         const metadata = parquetMetadata(tail)
         signal?.throwIfAborted()
-        return new LodReader(file, metadata, tail.slice(0, footerBytes))
+        return new GeoParquetReader(file, metadata, tail.slice(0, footerBytes))
       }
     }
     let footer: ArrayBuffer | undefined
@@ -264,7 +265,7 @@ export class LodReader {
       initialFetchSize: 8,
     })
     signal?.throwIfAborted()
-    return new LodReader(file, metadata, footer)
+    return new GeoParquetReader(file, metadata, footer)
   }
 
   /** The LOD whose zooms contain `zoom`, clamped to the coarsest or finest LOD. */

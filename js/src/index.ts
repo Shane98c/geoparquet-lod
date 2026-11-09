@@ -1,4 +1,4 @@
-export { LodReader, LOD_KEY, LOD_VERSION, ENCODING, PACK_VERSION } from './reader.js'
+export { GeoParquetReader, LOD_KEY, LOD_VERSION, ENCODING, PACK_VERSION } from './reader.js'
 export type { Lod, Bbox, LodMetadata, LodRows, PrimaryRows, RangeSource } from './reader.js'
 export { GeometryBuilder } from './geometry.js'
 export type { GeometryType, LodGeometry } from './geometry.js'
