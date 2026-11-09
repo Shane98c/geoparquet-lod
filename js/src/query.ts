@@ -19,9 +19,9 @@ export interface FeatureQuery {
 
 /** Whole, unclipped features selected by their geometry's bounding box, as one
  * columnar batch. Overview results are simplified/quantized and may be thinned.
- * Primary results use original WKB and source bbox selection. Neither is an
- * exact intersection predicate. Row IDs are deduplicated across tiles and
- * wrapped query halves.
+ * Primary results use original WKB and source bbox selection; a file without
+ * LODs always gives them. Neither is an exact intersection predicate. Row IDs
+ * are deduplicated across tiles and wrapped query halves.
  */
 export async function readFeatures(
   reader: TileReader,
@@ -53,7 +53,8 @@ export async function readFeatures(
         ]
   const seen = new Set<number>()
   const rows: number[] = []
-  if (query.geometry === 'primary') {
+  const lodMetadata = reader.lod
+  if (query.geometry === 'primary' || !lodMetadata) {
     const wkb: Uint8Array[] = []
     // Primary queries project original source values, including for names
     // that also have overridden display values in the overview profile.
@@ -77,8 +78,8 @@ export async function readFeatures(
   }
   // Sparse profiles have no payload or spill tags at intervening zooms.
   // Choose the first declared zoom at least as detailed as the requested one.
-  const targetZoom = Math.ceil(Math.log2(360 / (reader.lod.tile_size * resolution)))
-  const declared = [...new Set(reader.lod.zooms)].sort((a, b) => a - b)
+  const targetZoom = Math.ceil(Math.log2(360 / (lodMetadata.tile_size * resolution)))
+  const declared = [...new Set(lodMetadata.zooms)].sort((a, b) => a - b)
   const z = declared.find((zoom) => zoom >= targetZoom) ?? declared[declared.length - 1]
   const lod = reader.lodForZoom(z)
   const n = 2 ** z

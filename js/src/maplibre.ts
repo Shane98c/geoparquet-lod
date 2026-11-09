@@ -69,7 +69,7 @@ export type WorkerResponse =
       id: number
       ok: true
       opened: true
-      metadata: { lod: LodMetadata; bounds: Bbox; columns: string[] }
+      metadata: { lod: LodMetadata | undefined; bounds: Bbox; columns: string[] }
     }
   | { id: number; ok: false; error: string; name: string }
 
@@ -178,7 +178,7 @@ export const prefetch = (url: string): void => {
 /** Map metadata from the same worker/reader that will serve tiles. */
 export const readMetadata = async (
   url: string,
-): Promise<{ lod: LodMetadata; bounds: Bbox; columns: string[] }> => {
+): Promise<{ lod: LodMetadata | undefined; bounds: Bbox; columns: string[] }> => {
   const response = await call({ type: 'open', url })
   if (!('metadata' in response)) throw new Error('worker returned no map metadata')
   return response.metadata

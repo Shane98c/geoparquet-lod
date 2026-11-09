@@ -158,7 +158,8 @@ scope.addEventListener('message', (event: MessageEvent<WorkerRequest | CpuReques
               signal: controller.signal,
             }
             const cpu = getPool()
-            const properties = options.properties ?? reader.lod.attributes.map((a) => a.name)
+            const properties =
+              options.properties ?? (reader.lod?.attributes ?? []).map((a) => a.name)
             if (reader instanceof SpatialReader && request.z <= reader.finestZoom) {
               const source = properties.filter(
                 (name) => !reader.lod.attributes.some((a) => a.name === name),

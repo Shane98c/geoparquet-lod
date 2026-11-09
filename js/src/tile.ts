@@ -13,7 +13,7 @@ export interface TileOptions {
   layer?: string
   /** MVT layer name for point LODs (default: same as `layer`). */
   pointLayer?: string
-  /** Attribute names to copy into MVT properties (default: all carried attributes). */
+  /** Attribute names to copy into MVT properties (default: all carried attributes, none without LODs). */
   properties?: string[]
   signal?: AbortSignal
 }
@@ -44,7 +44,9 @@ const mercatorTileBounds = (z: number, x: number, y: number): Bbox => {
   ]
 }
 
-/** One MVT tile from the LOD that serves zoom `z`. Feature ids are file row indexes. */
+/** One MVT tile from the LOD that serves zoom `z`, or from the primary geometry
+ * past the finest LOD and at every zoom of a file without LODs. Feature ids are
+ * file row indexes. */
 export const renderTile = async (
   reader: TileReader,
   z: number,
@@ -54,17 +56,18 @@ export const renderTile = async (
 ): Promise<ArrayBuffer> => {
   const { signal } = options
   const bbox = tileBounds(z, x, y)
-  const names = options.properties ?? reader.lod.attributes.map((a) => a.name)
-  const lod = reader.lodForZoom(z)
-  const pointFamily = lod.geometry_type === 'Point'
+  const carried = reader.lod?.attributes ?? []
+  const names = options.properties ?? carried.map((a) => a.name)
+  const lod = reader.lod ? reader.lodForZoom(z) : undefined
+  const pointFamily = lod?.geometry_type === 'Point'
   const layer = (pointFamily ? options.pointLayer : undefined) ?? options.layer ?? 'features'
-  if (z > reader.finestZoom) {
+  if (!lod || z > reader.finestZoom) {
     // finer than any LOD: the exact primary geometry of the rows in the tile,
     // with carried attributes as the LODs pack them, so a feature's properties
     // are the same on both sides of the finest zoom
     const { rows, wkb, columns } = await reader.readPrimary(bbox, names, signal)
     signal?.throwIfAborted()
-    for (const { name, type } of reader.lod.attributes) {
+    for (const { name, type } of carried) {
       const kind = attributeKind(type)
       if (columns[name]) columns[name] = columns[name].map((value) => asCarried(value, kind))
     }
