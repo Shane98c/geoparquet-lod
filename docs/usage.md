@@ -263,8 +263,10 @@ attribute. Neighbouring tiles share pending fetches. When the last consumer of a
 pending fetch or decode leaves, that work is cancelled; completed cache entries
 stay reusable. These budgets bound cache accounting, not total browser memory.
 
-The reader also opens a GeoParquet file without LODs, given a `bbox` covering
-column in OGC:CRS84 or EPSG:4326. Every zoom then draws the exact primary
+The reader also opens a GeoParquet file without LODs, given a bbox covering
+in OGC:CRS84 or EPSG:4326: the column the `geo` metadata names (`bbox`,
+GDAL's `geometry_bbox`), or a `bbox` column where it names none, as in
+DuckDB's GeoParquet 2.0. Every zoom then draws the exact primary
 geometry of the rows whose covering meets the tile, with no properties unless
 `properties` names source columns, and `readFeatures` returns primary rows.
 Row groups are chosen by the covering's statistics and pages by its column

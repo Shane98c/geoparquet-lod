@@ -93,7 +93,6 @@ export interface PrimaryRows {
  * finest LOD, at any zoom, reuse geometry an earlier tile fetched. */
 const PAGE_CACHE_BYTES = { bbox: 4 * 1024 * 1024, geometry: 16 * 1024 * 1024 }
 type PageKind = keyof typeof PAGE_CACHE_BYTES
-const BBOX_LEAVES = ['bbox.xmin', 'bbox.ymin', 'bbox.xmax', 'bbox.ymax'] as const
 const WHOLE_COLUMN_BYTES = 32 * 1024 * 1024
 
 /** A decoded page: the value of row `rowStart + i` at `values[i]`. Covering
@@ -106,7 +105,7 @@ interface DecodedPage {
 /**
  * Footer-based access to source columns, exact geometry, and unindexed LOD
  * files. The indexed map path uses SpatialReader and opens this reader lazily
- * for analytical queries. A GeoParquet file with a `bbox` covering and no
+ * for analytical queries. A GeoParquet file with a bbox covering and no
  * LODs opens too; every zoom then reads its primary geometry.
  */
 export class LodReader {
@@ -141,6 +140,8 @@ export class LodReader {
   private wholeColumnBytes = 0
   private readonly schema: SchemaTree
   private readonly elements = new Map<string, SchemaTree['element']>()
+  /** The covering's xmin, ymin, xmax and ymax leaf paths. */
+  private readonly bboxLeaves: string[]
   private readonly footer: ArrayBuffer | undefined
   private digest: Promise<string> | undefined
   private readonly fields: AttributeField[]
@@ -170,6 +171,7 @@ export class LodReader {
       throw new Error(`primary geometry ${this.primary} is not in OGC:CRS84 or EPSG:4326`)
     if ((column?.edges ?? 'planar') !== 'planar')
       throw new Error(`primary geometry ${this.primary} has ${column.edges} edges, not planar`)
+    this.bboxLeaves = coveringLeaves(column)
     this.finestZoom = lod ? Math.max(...lod.zooms) : -Infinity
     let acc = 0
     this.rowGroupStarts = metadata.row_groups.map((rg) => {
@@ -184,7 +186,7 @@ export class LodReader {
     this.schema = parquetSchema(metadata)
     visit(this.schema)
     if (!lod)
-      for (const leaf of BBOX_LEAVES)
+      for (const leaf of this.bboxLeaves)
         if (!this.elements.has(leaf))
           throw new Error(`file has no ${leaf} covering column to select rows by`)
   }
@@ -737,7 +739,7 @@ export class LodReader {
   ): Promise<DecodedPage[]> {
     signal?.throwIfAborted()
     const key = (page: PageLocation) => `p:${g}:${leaf}:${page.byteStart}`
-    const kind: PageKind | null = (BBOX_LEAVES as readonly string[]).includes(leaf)
+    const kind: PageKind | null = this.bboxLeaves.includes(leaf)
       ? 'bbox'
       : leaf === this.primary
         ? 'geometry'
@@ -820,7 +822,7 @@ export class LodReader {
    * everything when they give no bounds. */
   private rowGroupBbox(g: number): Bbox {
     const rows = Number(this.metadata.row_groups[g].num_rows)
-    const stats = BBOX_LEAVES.map((leaf) => this.chunk(g, leaf).meta_data!.statistics)
+    const stats = this.bboxLeaves.map((leaf) => this.chunk(g, leaf).meta_data!.statistics)
     const box = stats.map((stat, i) => (i < 2 ? stat?.min_value : stat?.max_value))
     if (box.every(Number.isFinite)) return box as Bbox
     if (stats.some((stat) => stat?.null_count !== undefined && Number(stat.null_count) === rows))
@@ -845,10 +847,10 @@ export class LodReader {
     signal?: AbortSignal,
   ): Promise<{ ranges: [number, number][] }> {
     const rows = Number(this.metadata.row_groups[g].num_rows)
-    if (BBOX_LEAVES.some((leaf) => this.chunk(g, leaf).column_index_offset == null))
+    if (this.bboxLeaves.some((leaf) => this.chunk(g, leaf).column_index_offset == null))
       return { ranges: [[0, rows]] }
     const loaded = await Promise.all(
-      BBOX_LEAVES.map((leaf) =>
+      this.bboxLeaves.map((leaf) =>
         Promise.all([this.offsetIndex(g, leaf), this.columnIndex(g, leaf)]),
       ),
     )
@@ -877,7 +879,7 @@ export class LodReader {
     signal?: AbortSignal,
   ): Promise<[number, number][]> {
     const columns = await Promise.all(
-      BBOX_LEAVES.map((leaf) => this.leafPages(g, leaf, ranges, signal)),
+      this.bboxLeaves.map((leaf) => this.leafPages(g, leaf, ranges, signal)),
     )
     const [west, south, east, north] = bbox
     const hits: [number, number][] = []
@@ -1103,6 +1105,23 @@ function checkLod(lod: LodMetadata): void {
     }
   }
   if (!lod.key) throw new Error(`${LOD_KEY} file stores no key column`)
+}
+
+const BBOX_KEYS = ['xmin', 'ymin', 'xmax', 'ymax'] as const
+
+/** The leaf paths of a geometry column's bbox covering, one struct column's
+ * fields: as declared, or a `bbox` column's where none is, as DuckDB writes
+ * GeoParquet 2.0. */
+function coveringLeaves(column: { covering?: { bbox?: unknown } } | undefined): string[] {
+  const paths = column?.covering?.bbox as Record<string, unknown> | undefined
+  if (!paths) return BBOX_KEYS.map((k) => `bbox.${k}`)
+  const leaves = BBOX_KEYS.map((k) => paths?.[k])
+  if (
+    !leaves.every((p) => Array.isArray(p) && p.length === 2) ||
+    new Set(leaves.map((p) => (p as string[])[0])).size !== 1
+  )
+    throw new Error('the primary geometry needs a bbox covering of one struct column')
+  return leaves.map((p) => (p as string[]).join('.'))
 }
 
 /** GeoParquet: an omitted `crs` is OGC:CRS84; an explicit null is unknown. */
