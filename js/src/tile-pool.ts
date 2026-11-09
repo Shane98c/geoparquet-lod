@@ -27,15 +27,15 @@ export class TilePool {
   private nextId = 0
   private failure?: Error
 
-  constructor(count: number) {
+  /** `url` is the worker script the helpers run: the coordinator's own, so a
+   * bundler sees no worker that starts itself. */
+  constructor(count: number, url: string | URL) {
     this.ready = Promise.all(
       Array.from(
         { length: count },
         () =>
           new Promise<void>((resolve, reject) => {
-            const worker = new Worker(new URL('./worker.js', import.meta.url), {
-              type: 'module',
-            })
+            const worker = new Worker(url, { type: 'module' })
             const slot: Slot = { worker, ready: false }
             this.slots.push(slot)
             worker.addEventListener('message', ({ data }: MessageEvent<TileReply>) => {

@@ -17,7 +17,8 @@ const readers = new Map<string, Promise<TileReader>>()
 let workerCount = 2
 let pool: TilePool | undefined
 let started = false
-const getPool = () => (workerCount === 1 ? undefined : (pool ??= new TilePool(workerCount)))
+const getPool = () =>
+  workerCount === 1 ? undefined : (pool ??= new TilePool(workerCount, scope.location.href))
 const stats: Record<string, Transfer> = {}
 
 const fetched = scope.fetch.bind(scope)
