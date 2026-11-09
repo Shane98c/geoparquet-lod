@@ -55,8 +55,8 @@ def test_cli_build(tmp_path):
 
 @pytest.mark.parametrize('declared', ['1.0.0', '1.1.0', '2.0.0'])
 def test_output_declares_geoparquet_1_1(tmp_path, declared):
-    """The output is GeoParquet 1.1, whose bbox covering 2.0 drops, whatever
-    version the source declares."""
+    """The output is GeoParquet 1.1, whatever version the source declares: its
+    WKB carries no Parquet GEOMETRY type, which 2.0 requires."""
     source, output = tmp_path / 'source.parquet', tmp_path / 'output.parquet'
     geo = {
         'version': declared,

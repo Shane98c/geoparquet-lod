@@ -74,8 +74,7 @@ def validate(path: str | Path, sample_rows: int = 2000, *, full: bool = False) -
     version = tuple(int(part) for part in re.findall(r'\d+', str(geo.get('version', '')))[:2])
     if not (1, 1) <= version < (2,):
         raise ValidationError(
-            f'geo version {geo.get("version")!r} is not GeoParquet 1.1 or a later 1.x, '
-            'which define the bbox covering'
+            f'geo version {geo.get("version")!r} is not GeoParquet 1.1 or a later 1.x'
         )
     _check_covering(f.schema_arrow.field('bbox'), covering, geometry)
     key = lod.get('key')

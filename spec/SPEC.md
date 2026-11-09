@@ -376,12 +376,13 @@ this layout is in which rows a coarse view reads and how it finds them.
   so coarse views read many pages; the reference reader skips geometries that
   collapse at the level's resolution and stops at 650,000 features per query.
   This layout drops features per zoom instead, as tippecanoe does.
-- **GeoParquet 2.0** (2.0.0-rc.1): the primary geometry is WKB in both 1.1
-  and 2.0; 2.0 requires Parquet's `GEOMETRY` or `GEOGRAPHY` type on it and
-  allows no other encoding, which is why the GeoArrow-shaped layout appears
-  only in the LOD columns. 2.0 also drops the bbox covering for Parquet's
-  geospatial statistics, which bound a row group but not a page, so this
-  layout stays on 1.1, whose covering lets a reader prune pages.
+- **GeoParquet 2.0** (2.0.0): the primary geometry is WKB in both 1.1 and
+  2.0; 2.0 requires Parquet's `GEOMETRY` or `GEOGRAPHY` type on it and allows
+  no other encoding, which is why the GeoArrow-shaped layout appears only in
+  the LOD columns. 2.0 keeps the bbox covering as optional: Parquet's
+  geospatial statistics bound a row group, and the covering's page index
+  bounds a page. This layout stays on 1.1 because its writer stores the WKB
+  without the `GEOMETRY` type.
 
 ## Open questions
 

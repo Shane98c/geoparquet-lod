@@ -794,11 +794,11 @@ def _null_at(column, row):
         ('declared', 'geo.columns.geometry.covering.bbox must declare xmin, ymin, xmax and ymax'),
         (
             '1.0.0',
-            "geo version '1.0.0' is not GeoParquet 1.1 or a later 1.x, which define the bbox covering",
+            "geo version '1.0.0' is not GeoParquet 1.1 or a later 1.x",
         ),
         (
             '2.0.0',
-            "geo version '2.0.0' is not GeoParquet 1.1 or a later 1.x, which define the bbox covering",
+            "geo version '2.0.0' is not GeoParquet 1.1 or a later 1.x",
         ),
         ('geometry', 'primary geometry column geometry missing'),
         ('wkt', 'primary geometry column geometry must be WKB binary, not string'),

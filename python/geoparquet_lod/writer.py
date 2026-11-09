@@ -62,7 +62,7 @@ KEY_FIELD = pa.field(KEY_COLUMN, pa.int64(), nullable=True)
 # columns the writer computes carry a prefix no source column uses; thinnings see them unprefixed
 THINNING_COLUMNS = ('id', 'cx', 'cy', 'diag', 'area', 'nv', 'u')
 LOD_VERSION = '0.1.0'
-# 1.1 defines the bbox covering; 2.0 drops it for Parquet's row-group statistics
+# 1.1 defines the bbox covering; 2.0 requires Parquet's GEOMETRY type on the WKB, which the output lacks
 GEOPARQUET_VERSION = '1.1.0'
 # OGC:CRS84 and EPSG:4326, both read as x/y
 CRS84_IDS = (('OGC', 'CRS84'), ('EPSG', '4326'))
