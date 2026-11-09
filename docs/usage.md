@@ -176,11 +176,12 @@ uv run geoparquet-lod write buildings.parquet buildings.lod.parquet \
 ```python
 from geoparquet_lod import write, combine, drop_rate, only, size_threshold
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     write(
-        "buildings.parquet", "buildings.lod.parquet",
-        thinning=only("risk > 0", combine(size_threshold(4), drop_rate(2.5))),
-        carry=["risk"],
+        'buildings.parquet',
+        'buildings.lod.parquet',
+        thinning=only('risk > 0', combine(size_threshold(4), drop_rate(2.5))),
+        carry=['risk'],
     )
 ```
 

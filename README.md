@@ -61,11 +61,12 @@ extension.
 ```python
 from geoparquet_lod import chain, drop_smallest, tiny_polygons, write
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     write(
-        "buildings.parquet", "buildings.lod.parquet",
+        'buildings.parquet',
+        'buildings.lod.parquet',
         thinning=chain(drop_smallest(850_000), tiny_polygons()),
-        carry=["height", "class"],
+        carry=['height', 'class'],
     )
 ```
 
