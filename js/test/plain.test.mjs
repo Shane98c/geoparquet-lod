@@ -1,7 +1,8 @@
 // A GeoParquet file without LODs: every zoom's tile draws the primary geometry
 // of the rows whose covering meets it, with the requested source attributes.
 //   node test/plain.test.mjs file.parquet cases.json
-// cases.json: { rows, cases: [{ row, bbox, tiles: [[z, x, y], ...], properties: {...} }] }
+// cases.json: { rows, cases: [{ row, bbox, tiles: [[z, x, y], ...], properties: {...}, matches }] }
+// where `matches` counts the rows whose bbox meets the case's.
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { VectorTile } from '@mapbox/vector-tile'
@@ -28,7 +29,7 @@ const features = async ([z, x, y], properties) => {
 }
 
 assert.equal((await features([0, 0, 0], [])).length, rows, 'z0 draws every row')
-for (const { row, bbox, tiles, properties } of cases) {
+for (const { row, bbox, tiles, properties, matches } of cases) {
   for (const tile of tiles) {
     const found = (await features(tile, names)).find((f) => f.id === row)
     assert.ok(found, `row ${row} is in tile ${tile}`)
@@ -38,6 +39,7 @@ for (const { row, bbox, tiles, properties } of cases) {
   assert.deepEqual({ ...bare.properties }, {}, 'no properties unless requested')
   const batch = await readFeatures(reader, { bbox, resolution: 1, columns: names })
   assert.equal(batch.source, 'primary')
+  assert.equal(batch.rowIndex.length, matches, `rows meeting row ${row}'s bbox`)
   const at = batch.rowIndex.indexOf(row)
   assert.ok(at >= 0, `row ${row} is selected by its bbox`)
   for (const name of names) assert.equal(batch.columns[name][at], properties[name])

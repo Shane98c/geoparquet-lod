@@ -264,21 +264,24 @@ attribute. Neighbouring tiles share pending fetches. When the last consumer of a
 pending fetch or decode leaves, that work is cancelled; completed cache entries
 stay reusable. These budgets bound cache accounting, not total browser memory.
 
-The reader also opens a GeoParquet file without LODs, given a bbox covering
-in OGC:CRS84 or EPSG:4326: the column the `geo` metadata names (`bbox`,
-GDAL's `geometry_bbox`), or a `bbox` column where it names none, as in
-DuckDB's GeoParquet 2.0. Every zoom then draws the exact primary
-geometry of the rows whose covering meets the tile, with no properties unless
-`properties` names source columns, and `readFeatures` returns primary rows.
-Row groups are chosen by the covering's statistics and pages by its column
-index, and a group without covering statistics is read. A chunk without a
-page index is read whole. Its covering and geometry are kept in the page cache
-(4 and 16 MiB) and its attribute values decoded (32 MiB of chunks), least
-recently used first out, so a later tile reuses them; a chunk larger than its
-budget is fetched again for every tile. That suits files of a few MB. 31,000 IBTrACS track
-segments in one row group, sorted by storm and written with zstd, are 452 KB;
-a session's tiles read 409 KB in 11 requests, and a tile then renders in
-about a millisecond, as overview tiles do.
+The reader also opens a GeoParquet file without LODs, in OGC:CRS84 or
+EPSG:4326. Every zoom then draws the exact primary geometry of the rows that
+meet the tile, with no properties unless `properties` names source columns,
+and `readFeatures` returns primary rows. Rows are chosen by the bbox covering:
+the column the `geo` metadata names (`bbox`, GDAL's `geometry_bbox`), or a
+`bbox` column where it names none, as in DuckDB's GeoParquet 2.0. Row groups
+are chosen by the covering's statistics and pages by its column index, and a
+group without covering statistics is read. A file with no covering is chosen
+by Parquet's geospatial statistics on its `GEOMETRY` column, which bound a row
+group, and then by each row's WKB bounds, so every page of a chosen group is
+read. A chunk without a page index is read whole. Covering and geometry pages
+are kept in the page cache (4 and 16 MiB) and attribute values decoded (32 MiB
+of chunks), least recently used first out, so a later tile reuses them; a
+chunk larger than its budget is fetched again for every tile. That suits files
+of a few MB. 31,000 IBTrACS track segments in one row group, sorted by storm
+and written with zstd, are 452 KB; a session's tiles read 409 KB in 11
+requests, and a tile then renders in about a millisecond, as overview tiles
+do.
 
 ### Demo
 
