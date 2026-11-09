@@ -20,6 +20,7 @@ import { decodeProjection, type ProjectionExecutor, type ProjectionTask } from '
 import { GeometryBuilder, type GeometryType, type LodGeometry } from './geometry.js'
 import { tileInterval } from './key.js'
 import { wkbBounds } from './wkb.js'
+import { MAX_LATITUDE } from './web-mercator.js'
 
 export type Bbox = [number, number, number, number]
 
@@ -214,18 +215,22 @@ export class GeoParquetReader {
     return [...top]
   }
 
-  /** Dataset extent from the ordinary covering statistics. */
+  /** Dataset extent from the row groups' statistics. A group without bounds
+   * reaches the world's edge on that side: every longitude where its extent
+   * is unknown or wraps the antimeridian, and the Web Mercator limit in
+   * latitude where unknown. */
   get bounds(): Bbox {
+    const edge = (v: number, limit: number) => (Number.isFinite(v) ? v : Math.sign(v) * limit)
     const bounds: Bbox = [180, 90, -180, -90]
     for (let g = 0; g < this.metadata.row_groups.length; g++) {
-      const box = this.rowGroupBbox(g)
-      if (!box.every(Number.isFinite) || box[0] > box[2] || box[1] > box[3]) continue
-      bounds[0] = Math.min(bounds[0], box[0])
-      bounds[1] = Math.min(bounds[1], box[1])
-      bounds[2] = Math.max(bounds[2], box[2])
-      bounds[3] = Math.max(bounds[3], box[3])
+      const [xmin, ymin, xmax, ymax] = this.rowGroupBbox(g)
+      if (xmin > xmax || ymin > ymax) continue
+      bounds[0] = Math.min(bounds[0], edge(xmin, 180))
+      bounds[1] = Math.min(bounds[1], edge(ymin, MAX_LATITUDE))
+      bounds[2] = Math.max(bounds[2], edge(xmax, 180))
+      bounds[3] = Math.max(bounds[3], edge(ymax, MAX_LATITUDE))
     }
-    return bounds[0] <= bounds[2] ? bounds : [-180, -85.051129, 180, 85.051129]
+    return bounds[0] <= bounds[2] ? bounds : [-180, -MAX_LATITUDE, 180, MAX_LATITUDE]
   }
 
   /** A reader over metadata found elsewhere than the footer, such as an

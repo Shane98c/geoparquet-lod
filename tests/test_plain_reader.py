@@ -144,7 +144,15 @@ def test_every_zoom_draws_primary_geometry_of_a_file_without_lods(tmp_path, layo
             break
     assert len(cases) == 25
     assert cases[-1]['row'] > 2048 * native
-    (tmp_path / 'cases.json').write_text(json.dumps({'rows': t.num_rows, 'cases': cases}))
+    extent = [
+        min(b['xmin'] for b in bbox),
+        min(b['ymin'] for b in bbox),
+        max(b['xmax'] for b in bbox),
+        max(b['ymax'] for b in bbox),
+    ]
+    (tmp_path / 'cases.json').write_text(
+        json.dumps({'rows': t.num_rows, 'extent': extent, 'cases': cases})
+    )
     result = subprocess.run(
         [
             'node',
