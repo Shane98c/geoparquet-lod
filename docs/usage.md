@@ -148,7 +148,7 @@ npm --prefix js run build
 
 Neither package is on PyPI or npm yet; install the Python package with
 `uv pip install -e .` or `pip install -e .`, and the JS package from a local
-path after building it (`npm install ../tiled-geoparquet/js`).
+path after building it (`npm install path/to/clone/js`).
 
 ## Quick start
 
