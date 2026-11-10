@@ -30,15 +30,15 @@ storage, but there is no separate archive of pre-encoded MVT tiles.
 The intended use is a static dataset that people need to both explore and query.
 If map delivery is the only requirement, PMTiles is the simpler choice. Several
 other GeoParquet overview designs exist: COGP, Esri's Spatially Optimized
-Parquet, tylertoo's overviews, and the GeoParquet LOD extension draft. The
-[specification](spec/SPEC.md#relation-to-other-proposals) describes how this
-layout differs from each; [prior work and attribution](THIRD_PARTY.md) lists
-what it builds on.
+Parquet, tylertoo's overviews, and the GeoParquet LOD extension draft
+(PR 299). The [specification](spec/SPEC.md#relation-to-other-proposals)
+describes how this layout differs from each;
+[prior work and attribution](THIRD_PARTY.md) lists what it builds on.
 
 ## Try it
 
-The [hosted demo](https://geoparquet-lod-compare.pages.dev/) shows GeoParquet
-LOD and PMTiles built from the same Japan building source. COGP and Esri panes
+The [hosted demo](https://geoparquet-lod-compare.pages.dev/) shows Tiled
+GeoParquet and PMTiles built from the same Japan building source. COGP and Esri panes
 are optional: select their checkboxes and click **Apply readers**. Start over
 Tokyo, zoom out to see the overviews, then zoom into a neighbourhood. Pan the
 maps together and compare the request and byte counters. Switch from geometry
@@ -51,8 +51,7 @@ measure and where the files come from.
 
 Input is GeoParquet with WKB geometry in longitude/latitude (OGC:CRS84 or
 EPSG:4326 in x/y order), one geometry family per file. The overviews are
-stored in Web Mercator metres. Thinning budgets should
-be tuned to your data.
+stored in Web Mercator metres. Thinning budgets should be tuned to your data.
 
 With Python 3.12+ and uv installed, run `uv sync --locked` from a clone.
 Save the following as `build.py` and run `uv run python build.py`. Supply your
@@ -108,8 +107,11 @@ intermediate file. The CLI does the same with
 `tiled-geoparquet write source.parquet output.parquet`. A generic Parquet rewrite
 loses the spatial access path; rebuild from the source GeoParquet instead.
 
-The tiles are standard Mapbox Vector Tiles, so any map library that lets you
-load a tile's bytes yourself can draw them with `fetchTile`; the
+Neither package is on a registry yet: run `npm --prefix js run build` and
+install the JS package by path (`npm install ../tiled-geoparquet/js`). Its
+worker asset must remain available to your bundler. The tiles are standard
+Mapbox Vector Tiles, so any map library that lets you load a tile's bytes
+yourself can draw them with `fetchTile`; the
 [guide](docs/usage.md#in-other-map-libraries) shows OpenLayers. In a MapLibre
 app, after creating the map and loading its style:
 
@@ -129,21 +131,21 @@ map.addLayer({
 })
 ```
 
-Install the JS package from the built local `js/` directory. Its worker asset
-must remain available to your bundler. The reader also exposes whole-feature
-geometry batches with typed coordinate buffers, plus GeoJSON, GeoArrow IPC, and
-MVT adapters; the [deck.gl example](https://geoparquet-lod-compare.pages.dev/deck/)
-renders the hosted Japan file outside MapLibre. See the [guide](docs/usage.md)
-for source attributes, nested fields,
-custom thinning, validation, and worker configuration.
+The reader also exposes whole-feature geometry batches with typed coordinate
+buffers, plus GeoJSON, GeoArrow IPC, and MVT adapters; the
+[deck.gl example](https://geoparquet-lod-compare.pages.dev/deck/) renders the
+hosted Japan file outside MapLibre. See the [guide](docs/usage.md) for source
+attributes, nested fields, custom thinning, validation, and worker
+configuration.
 
 ## What we have measured
 
 Four readers against the hosted Japan archives, all derived from the same
 53,742,978 Overture building footprints: this layout, released COGP 2.2.2,
 Esri's Spatially Optimized Parquet with its reference reader, and, as the
-map-delivery reference, PMTiles written by tippecanoe. Each cell is a cold read on a fresh reader after one open,
-geometry only, served from the same public bucket. Bytes are decimal.
+map-delivery reference, PMTiles written by tippecanoe. Each cell is a cold
+read on a fresh reader after one open, geometry only, served from the same
+public bucket. Bytes are decimal.
 
 | Tile                  | Tiled GeoParquet             | COGP 2.2.2                  | Esri SOP                    | PMTiles                      |
 | --------------------- | ---------------------------- | --------------------------- | --------------------------- | ---------------------------- |
