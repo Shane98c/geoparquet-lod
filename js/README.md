@@ -1,16 +1,16 @@
-# GeoParquet LOD JavaScript reader
+# Tiled GeoParquet JavaScript reader
 
-Experimental draft 0.1.0. Reads the GeoParquet LOD layout and spatial page
+Experimental draft 0.1.0. Reads the Tiled GeoParquet layout and spatial page
 index emitted by the writer; generates vector tiles for MapLibre. Not yet published to
 npm. See the repository root README, `spec/`, and `docs/usage.md` for format
 status, construction, limitations, and measurements.
 
 Build from this directory with `npm ci && npm run build`. Install the built
-package by local path. Use `geoparquet-lod` for direct reads and
-`geoparquet-lod/maplibre` for the worker-backed protocol:
+package by local path. Use `tiled-geoparquet` for direct reads and
+`tiled-geoparquet/maplibre` for the worker-backed protocol:
 
 ```js
-import { openReader, coalescing, httpSource, renderTile } from 'geoparquet-lod'
+import { openReader, coalescing, httpSource, renderTile } from 'tiled-geoparquet'
 
 const reader = await openReader(coalescing(await httpSource([url])))
 const mvt = await renderTile(reader, z, x, y, { properties: ['height'] })

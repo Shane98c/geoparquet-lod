@@ -9,7 +9,7 @@ filled and the countryside as sparse. Height and class ride along for styling.
 
 import sys
 
-from geoparquet_lod import combine, drop_rate, size_threshold, write
+from tiled_geoparquet import combine, drop_rate, size_threshold, write
 
 # worker processes re-import this file, so the write must not run on import
 if __name__ == '__main__':

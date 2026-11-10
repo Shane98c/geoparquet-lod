@@ -27,7 +27,7 @@ For a build smoke test without an external dataset:
 
 ```sh
 uv run python examples/quickstart.py /tmp/lod-example
-uv run geoparquet-lod validate /tmp/lod-example/buildings.lod.parquet
+uv run tiled-geoparquet validate /tmp/lod-example/buildings.lod.parquet
 ```
 
 This creates 5,000 synthetic rectangles to check the build pipeline, not to
@@ -66,17 +66,17 @@ to bring the physical access design into other GeoParquet overview proposals.
 
 ## Repository map
 
-| Path                     | Purpose                                               |
-| ------------------------ | ----------------------------------------------------- |
-| `python/geoparquet_lod/` | Writer, layout finalization, validator, CLI           |
-| `js/src/`                | Range reader, tile rendering, MapLibre workers        |
-| `js/vendor/`             | Vendored Esri SOP reader for the comparison pane only |
-| `spec/`                  | Logical payload contract and optional physical index  |
-| `tests/`, `js/test/`     | Correctness tests and measurement harnesses           |
-| `examples/`              | Small runnable construction examples                  |
-| `benchmarks/`            | Dataset-specific builds and recorded results          |
-| `docs/`                  | Usage, comparisons, evaluation, design alternatives   |
-| `demo/`                  | Local and hosted comparison UI and deck.gl example    |
+| Path                       | Purpose                                               |
+| -------------------------- | ----------------------------------------------------- |
+| `python/tiled_geoparquet/` | Writer, layout finalization, validator, CLI           |
+| `js/src/`                  | Range reader, tile rendering, MapLibre workers        |
+| `js/vendor/`               | Vendored Esri SOP reader for the comparison pane only |
+| `spec/`                    | Logical payload contract and optional physical index  |
+| `tests/`, `js/test/`       | Correctness tests and measurement harnesses           |
+| `examples/`                | Small runnable construction examples                  |
+| `benchmarks/`              | Dataset-specific builds and recorded results          |
+| `docs/`                    | Usage, comparisons, evaluation, design alternatives   |
+| `demo/`                    | Local and hosted comparison UI and deck.gl example    |
 
 See [THIRD_PARTY.md](THIRD_PARTY.md) before modifying or redistributing vendored
 code. Package publishing and hosted dataset replacement are separate from a

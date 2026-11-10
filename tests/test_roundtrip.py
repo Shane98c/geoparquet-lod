@@ -11,8 +11,8 @@ import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import pytest
 import shapely
-from geoparquet_lod import cluster, drop_rate, importance, only, size_threshold, validate, write
-from geoparquet_lod.writer import DICTIONARY_MAX, is_native_crs84
+from tiled_geoparquet import cluster, drop_rate, importance, only, size_threshold, validate, write
+from tiled_geoparquet.writer import DICTIONARY_MAX, is_native_crs84
 from unpacker import Unpacker
 
 GEO = {
@@ -53,8 +53,8 @@ def buildings(tmp_path):
 
 def copied_straddlers(bounds, keys, zoom):
     """The straddlers that get copies: shapes a pixel or larger at `zoom`."""
-    from geoparquet_lod.key import mercator, resolution
-    from geoparquet_lod.spill import straddlers
+    from tiled_geoparquet.key import mercator, resolution
+    from tiled_geoparquet.spill import straddlers
 
     xmin, ymin, xmax, ymax = bounds.T
     x0, y0 = mercator(xmin, ymin)
@@ -140,7 +140,7 @@ def test_polygons_roundtrip(buildings, tmp_path):
 
 def test_polygon_rings_are_stored_open():
     """A ring's closing vertex is not stored; decoding repeats the first vertex."""
-    from geoparquet_lod.pack import pack
+    from tiled_geoparquet.pack import pack
 
     square = [(0, 0), (2, 0), (2, 2), (0, 2), (0, 0)]
     x, y = (np.array(c, np.int32) for c in zip(*square, strict=True))
@@ -186,8 +186,8 @@ def int64_limits(path, value):
 
 
 def test_carried_integers_reach_the_int64_limits(tmp_path):
-    from geoparquet_lod import read_overview
-    from geoparquet_lod.unpack import carried, lod_values, unpack_batches
+    from tiled_geoparquet import read_overview
+    from tiled_geoparquet.unpack import carried, lod_values, unpack_batches
 
     src = int64_limits(tmp_path / 'limits.parquet', INT64_MAX)
     out = write(
@@ -230,8 +230,8 @@ def test_carried_uint64_above_int64_is_refused(tmp_path):
 
 def test_copies_refuse_uint64_above_int64():
     """The packer checks the values of the copies a row hosts as well as its own."""
-    from geoparquet_lod.pack import pack
-    from geoparquet_lod.unpack import unpack
+    from tiled_geoparquet.pack import pack
+    from tiled_geoparquet.unpack import unpack
 
     x, y = np.array([0, 2, 2, 0, 0], np.int32), np.array([0, 0, 2, 2, 0], np.int32)
     parts = (np.array([0, 1]), np.array([0, 1]), np.array([0, 5]), x, y)
@@ -259,8 +259,8 @@ def test_copies_refuse_uint64_above_int64():
 )
 def test_every_integer_type_packs_its_range(kind):
     """Every integer type packs whole except uint64, which packs up to the int64 maximum."""
-    from geoparquet_lod.pack import pack
-    from geoparquet_lod.unpack import unpack
+    from tiled_geoparquet.pack import pack
+    from tiled_geoparquet.unpack import unpack
 
     t = pa.type_for_alias(kind)
     limits = np.iinfo(kind)
@@ -283,8 +283,8 @@ def test_float16_packs_its_bit_pattern():
     """A carried float16 packs as a varint of its half-precision bits, two
     bytes below 2.0 and three for larger or negative values. Values round to
     the nearest float16, and NaN and the infinities pack as themselves."""
-    from geoparquet_lod.pack import pack
-    from geoparquet_lod.unpack import unpack
+    from tiled_geoparquet.pack import pack
+    from tiled_geoparquet.unpack import unpack
 
     values = pa.array(
         [0.1, 1.5, 1.999, 2.0, -0.5, 65504.0, 65519.0, math.inf, -math.inf, math.nan, None],
@@ -316,7 +316,7 @@ def test_float16_packs_its_bit_pattern():
 )
 def test_a_finite_value_too_large_for_its_float_type_is_refused(source, carried, value, largest):
     """Casting would make it infinite. A value rounding to the largest packs."""
-    from geoparquet_lod.pack import cast_carried
+    from tiled_geoparquet.pack import cast_carried
 
     field = pa.field('v', carried)
     held = cast_carried(pa.array([1, -65519, None], source), field)
@@ -393,8 +393,8 @@ def test_the_writer_refuses_an_override_wider_than_its_column(tmp_path, carried)
 def test_float16_overviews_hold_the_source_rounded(buildings, tmp_path):
     """The source column keeps its float32 values; every LOD, its copies
     included, holds them rounded to float16."""
-    from geoparquet_lod import read_overview
-    from geoparquet_lod.unpack import carried, lod_values, unpack_batches
+    from tiled_geoparquet import read_overview
+    from tiled_geoparquet.unpack import carried, lod_values, unpack_batches
 
     out = write(
         buildings,
@@ -620,8 +620,8 @@ def test_null_geometry_and_source_columns(buildings, tmp_path):
 
 
 def test_null_override_and_combined_tiny(points, tmp_path):
-    from geoparquet_lod import combine, tiny_polygons
-    from geoparquet_lod.thinning import drop_rate
+    from tiled_geoparquet import combine, tiny_polygons
+    from tiled_geoparquet.thinning import drop_rate
 
     def nullify(rows, zoom, ctx):
         kept = drop_rate(2.0)(rows, zoom, ctx)
@@ -647,7 +647,7 @@ def test_null_override_and_combined_tiny(points, tmp_path):
     )
 
     # tiny_polygons keeps accumulating area when composed
-    from geoparquet_lod.thinning import Context
+    from tiled_geoparquet.thinning import Context
 
     n = 16
     rows = pa.table(
@@ -678,14 +678,14 @@ def test_null_override_and_combined_tiny(points, tmp_path):
 
 
 def test_cli_auto_thinning():
-    from geoparquet_lod.cli import parse_thinning
+    from tiled_geoparquet.cli import parse_thinning
 
     assert parse_thinning('auto', None).__name__ == 'drop_rate(2.5)'
     assert parse_thinning('auto', 'risk > 0').__name__.startswith('only(')
 
 
 def test_straddlers_are_copied_into_the_tiles_they_reach(buildings, tmp_path):
-    from geoparquet_lod.key import hilbert_key
+    from tiled_geoparquet.key import hilbert_key
 
     out = write(buildings, tmp_path / 'spill.parquet', workers=1, log=lambda *_: None)
     validate(out)
@@ -851,7 +851,7 @@ def test_parquet_crs_forms(crs, metadata, crs84):
 
 def test_thinnings_see_projected_area(tmp_path):
     """Area is the projected geometry's, exact for tall and multipart polygons too."""
-    from geoparquet_lod.quantize import mercator
+    from tiled_geoparquet.quantize import mercator
 
     polys = [
         shapely.box(10, 0, 11, 80),
@@ -892,7 +892,7 @@ def test_zooms_past_the_key_depth_are_refused_before_sorting(tmp_path):
     """A tile finer than the key's cells is no interval of keys, so the
     writer refuses it; the key's own depth serves, a copy across a tile edge
     included."""
-    from geoparquet_lod.key import KEY_DEPTH
+    from tiled_geoparquet.key import KEY_DEPTH
 
     n = 2**KEY_DEPTH
     west, east = ((5_000_000 + d) / n * 360 - 180 for d in (-0.3, 0.3))
@@ -930,7 +930,7 @@ def test_a_string_a_thinning_introduces_joins_the_value_table(tmp_path, monkeypa
     while the table holds DICTIONARY_MAX values or fewer; past that the
     attribute packs plain strings. The thinning's values are counted a few
     rows at a time, its new one in the last batch."""
-    from geoparquet_lod import read_overview, writer
+    from tiled_geoparquet import read_overview, writer
 
     monkeypatch.setattr(writer, 'DICTIONARY_SCAN_ROWS', 7)
     labels = [f'v{i:03d}' for i in range(count)]
@@ -973,7 +973,7 @@ def test_a_string_past_the_value_table_limit_is_not_counted_in_python(tmp_path, 
     strings the thinning gives `kind` take over a megabyte as Python objects."""
     import tracemalloc
 
-    from geoparquet_lod import read_overview, writer
+    from tiled_geoparquet import read_overview, writer
 
     n = 20_000
     rng = np.random.default_rng(5)
@@ -1038,7 +1038,7 @@ def test_a_string_past_the_value_table_limit_is_not_counted_in_python(tmp_path, 
 
 
 def test_pack_refuses_a_string_outside_its_value_table():
-    from geoparquet_lod.pack import pack
+    from tiled_geoparquet.pack import pack
 
     fields = [pa.field('label', pa.string())]
     points = (np.zeros(2, np.int32), np.zeros(2, np.int32))
@@ -1049,7 +1049,7 @@ def test_pack_refuses_a_string_outside_its_value_table():
 
 
 def test_placeholder_pixels_sets_the_square_size(buildings, tmp_path):
-    from geoparquet_lod.quantize import SUBPIXELS
+    from tiled_geoparquet.quantize import SUBPIXELS
 
     out = write(
         buildings,

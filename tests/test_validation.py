@@ -14,9 +14,9 @@ import pyarrow.parquet as pq
 import pytest
 import shapely
 from click.testing import CliRunner
-from geoparquet_lod import _validate_index, validate, write
-from geoparquet_lod._compact import dumps, get, loads, loads_prefix, set_value
-from geoparquet_lod._layout import (
+from tiled_geoparquet import _validate_index, validate, write
+from tiled_geoparquet._compact import dumps, get, loads, loads_prefix, set_value
+from tiled_geoparquet._layout import (
     _node,
     finalize_layout,
     primary_leaf,
@@ -25,8 +25,8 @@ from geoparquet_lod._layout import (
     read_primary_node,
     row_metadata,
 )
-from geoparquet_lod.cli import cli
-from geoparquet_lod.validate import BOUNDS, ValidationError, _outward
+from tiled_geoparquet.cli import cli
+from tiled_geoparquet.validate import BOUNDS, ValidationError, _outward
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -643,7 +643,7 @@ def test_corrupt_packed_row_beyond_sample(indexed, tmp_path, monkeypatch):
     with pytest.raises(ValidationError, match='trailing bytes'):
         validate(bad, full=True)
     # batches of a few values each; the row still counts from the row group's first
-    monkeypatch.setattr('geoparquet_lod.unpack.BATCH_BYTES', 64)
+    monkeypatch.setattr('tiled_geoparquet.unpack.BATCH_BYTES', 64)
     where = f'row group {target // 64}, row {target % 64}, lod {name}: invalid packed row'
     with pytest.raises(ValidationError, match=where):
         validate(bad, full=True)
@@ -690,7 +690,7 @@ def test_invalid_geometry_names_its_row(indexed, tmp_path, monkeypatch, value, m
     where = f'row group {target // 64}, row {target % 64}, lod {lod.type[0].name}: {message}'
     with pytest.raises(ValidationError, match=where):
         validate(bad, full=True)
-    monkeypatch.setattr('geoparquet_lod.unpack.BATCH_BYTES', 64)
+    monkeypatch.setattr('tiled_geoparquet.unpack.BATCH_BYTES', 64)
     with pytest.raises(ValidationError, match=where):
         validate(bad, full=True)
 

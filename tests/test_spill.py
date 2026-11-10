@@ -8,10 +8,10 @@ import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import pytest
 import shapely
-from geoparquet_lod import validate, write
-from geoparquet_lod.key import KEY_DEPTH, hilbert_key, tile_x, tile_y
-from geoparquet_lod.quantize import render_polygons
-from geoparquet_lod.spill import MARGIN, straddlers, take_ragged
+from tiled_geoparquet import validate, write
+from tiled_geoparquet.key import KEY_DEPTH, hilbert_key, tile_x, tile_y
+from tiled_geoparquet.quantize import render_polygons
+from tiled_geoparquet.spill import MARGIN, straddlers, take_ragged
 from unpacker import Unpacker
 
 

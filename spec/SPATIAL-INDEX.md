@@ -1,4 +1,4 @@
-# GeoParquet LOD spatial page index, version 3
+# Tiled GeoParquet spatial page index, version 3
 
 An optional physical profile of a packed LOD file. The logical
 `geo.lod_columns` metadata and all table values are unchanged; the profile

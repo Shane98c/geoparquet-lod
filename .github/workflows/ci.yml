@@ -15,7 +15,7 @@ jobs:
       - run: uv run pytest -q
       - run: uv run --with 'duckdb>=1.5,<2' pytest -q
       - run: uv run python examples/quickstart.py /tmp/lod-quickstart
-      - run: uv run geoparquet-lod validate /tmp/lod-quickstart/buildings.lod.parquet
+      - run: uv run tiled-geoparquet validate /tmp/lod-quickstart/buildings.lod.parquet
   js:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: js } }

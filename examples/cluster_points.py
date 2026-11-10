@@ -11,7 +11,7 @@ for, so a renderer can size or label dots by it.
 
 import sys
 
-from geoparquet_lod import cluster, write
+from tiled_geoparquet import cluster, write
 
 # worker processes re-import this file, so the write must not run on import
 if __name__ == '__main__':

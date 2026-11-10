@@ -1,4 +1,4 @@
-"""Rewrite a packed GeoParquet LOD file's overviews as an ordinary Parquet table.
+"""Rewrite a packed Tiled GeoParquet file's overviews as an ordinary Parquet table.
 
 One row per shown feature per level, plus one row per boundary copy tagged
 with the tile it serves, in Hilbert order with tile-aligned row groups:
@@ -19,7 +19,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
-from geoparquet_lod.unpack import unpack_batches
+from tiled_geoparquet.unpack import unpack_batches
 
 GEOMETRY = pa.list_(pa.list_(pa.list_(pa.struct([('x', pa.int32()), ('y', pa.int32())]))))
 

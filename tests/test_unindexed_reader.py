@@ -11,10 +11,10 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 import shapely
-from geoparquet_lod import validate
-from geoparquet_lod._layout import finalize_layout
-from geoparquet_lod.writer import _write_unindexed as write
-from geoparquet_lod.writer import hilbert_key
+from tiled_geoparquet import validate
+from tiled_geoparquet._layout import finalize_layout
+from tiled_geoparquet.writer import _write_unindexed as write
+from tiled_geoparquet.writer import hilbert_key
 from unpacker import Unpacker
 
 ROOT = Path(__file__).resolve().parents[1]

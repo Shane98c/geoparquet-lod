@@ -1,4 +1,4 @@
-"""geoparquet-lod: write, validate and inspect LOD column files."""
+"""tiled-geoparquet: write, validate and inspect LOD column files."""
 
 from __future__ import annotations
 

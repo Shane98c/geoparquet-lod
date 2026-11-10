@@ -148,7 +148,7 @@ npm --prefix js run build
 
 Neither package is on PyPI or npm yet; install the Python package with
 `uv pip install -e .` or `pip install -e .`, and the JS package from a local
-path after building it (`npm install ../geoparquet-lod/js`).
+path after building it (`npm install ../tiled-geoparquet/js`).
 
 ## Quick start
 
@@ -160,8 +160,8 @@ class:
 pip install overturemaps
 overturemaps download --bbox=-105.1,39.6,-104.8,39.9 -f geoparquet --type=building -o overture_denver.parquet
 uv run python examples/overture_buildings.py overture_denver.parquet overture_denver.lod.parquet
-uv run geoparquet-lod validate overture_denver.lod.parquet
-uv run geoparquet-lod inspect overture_denver.lod.parquet
+uv run tiled-geoparquet validate overture_denver.lod.parquet
+uv run tiled-geoparquet inspect overture_denver.lod.parquet
 ```
 
 The same from the CLI with a thinning spec, or from Python. In a spec `+`
@@ -169,12 +169,12 @@ unions thinnings (`combine`) and `>` chains them (`chain`), as in
 `smallest:600000>tiny`:
 
 ```bash
-uv run geoparquet-lod write buildings.parquet buildings.lod.parquet \
+uv run tiled-geoparquet write buildings.parquet buildings.lod.parquet \
   --thinning size:4+drop:2.5 --where "risk > 0" --carry risk
 ```
 
 ```python
-from geoparquet_lod import write, combine, drop_rate, only, size_threshold
+from tiled_geoparquet import write, combine, drop_rate, only, size_threshold
 
 if __name__ == '__main__':
     write(
@@ -209,7 +209,7 @@ default) caps DuckDB.
 
 ```js
 import maplibregl from 'maplibre-gl'
-import { registerProtocol, tileUrl, prefetch, readRow } from 'geoparquet-lod/maplibre'
+import { registerProtocol, tileUrl, prefetch, readRow } from 'tiled-geoparquet/maplibre'
 
 const url = 'https://example.com/buildings.lod.parquet'
 prefetch(url) // optional: opens the file in the worker before the map exists
@@ -328,12 +328,12 @@ z14 and overzooms beyond it.
 
 ### Validation
 
-`geoparquet-lod validate file.parquet` checks the layout metadata, the bbox
+`tiled-geoparquet validate file.parquet` checks the layout metadata, the bbox
 covering's schema and declaration, required page indexes, and up to 2,000 rows
 of the first row group: their overview values decode, and each one's covering
 is its geometry's bounds rounded outward to float32, null exactly where the
 geometry has no finite bounds. Use `--sample-rows N` to change that quick
-sample. Use `geoparquet-lod validate file.parquet --full` (Python:
+sample. Use `tiled-geoparquet validate file.parquet --full` (Python:
 `validate(path, full=True)`) to decode every overview value in every row group,
 including boundary copies. Full mode checks every row's covering the same
 way, that the covering and the Hilbert key are null on the same rows, that
@@ -380,7 +380,7 @@ here.
 
 ```python
 import shapely
-from geoparquet_lod import read_overview
+from tiled_geoparquet import read_overview
 
 z10 = read_overview('buildings.lod.parquet', 10)
 shapes = shapely.from_wkb(z10['geometry'].to_numpy(zero_copy_only=False))
@@ -396,7 +396,7 @@ import {
   batchToGeoJSON,
   batchToGeoArrow,
   batchToMvt,
-} from 'geoparquet-lod'
+} from 'tiled-geoparquet'
 
 const reader = await openReader(await httpSource([url]))
 const batch = await readFeatures(reader, {

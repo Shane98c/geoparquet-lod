@@ -10,9 +10,9 @@ import pyarrow.parquet as pq
 import pytest
 import shapely
 from click.testing import CliRunner
-from geoparquet_lod import _layout, write, writer
-from geoparquet_lod.cli import cli
-from geoparquet_lod.validate import validate
+from tiled_geoparquet import _layout, write, writer
+from tiled_geoparquet.cli import cli
+from tiled_geoparquet.validate import validate
 
 
 def test_cli_build(tmp_path):
@@ -147,7 +147,7 @@ def test_a_build_failing_midway_leaves_no_workers_or_files(tmp_path, monkeypatch
 def test_source_column_names_reach_the_overviews_as_written(tmp_path):
     """Carried, thinning and geometry columns named like SQL keywords or with
     dots and quotes build, validate and carry their values."""
-    from geoparquet_lod import read_overview, validate
+    from tiled_geoparquet import read_overview, validate
 
     geometry = 'shape "x"'
     geo = {

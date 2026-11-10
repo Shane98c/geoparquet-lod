@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "geoparquet-lod"
+name = "tiled-geoparquet"
 version = "0.1.0"
-description = "Write and validate GeoParquet LOD files: GeoParquet with per-zoom overview columns and a spatial page index"
+description = "Write and validate Tiled GeoParquet files: GeoParquet with per-zoom overview columns and a spatial page index"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
@@ -15,10 +15,10 @@ dependencies = ["duckdb>=1.5", "pyarrow>=23", "numpy>=2", "shapely>=2.1", "click
 dev = ["pytest>=8", "ruff>=0.12"]
 
 [project.scripts]
-geoparquet-lod = "geoparquet_lod.cli:cli"
+tiled-geoparquet = "tiled_geoparquet.cli:cli"
 
 [tool.hatch.build.targets.wheel]
-packages = ["python/geoparquet_lod"]
+packages = ["python/tiled_geoparquet"]
 
 [tool.ruff]
 line-length = 100

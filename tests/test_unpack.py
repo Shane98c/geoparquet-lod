@@ -8,8 +8,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 import shapely
-from geoparquet_lod import read_overview, write
-from geoparquet_lod.unpack import UnpackError, carried, lod_values, unpack, unpack_batches
+from tiled_geoparquet import read_overview, write
+from tiled_geoparquet.unpack import UnpackError, carried, lod_values, unpack, unpack_batches
 from unpacker import Unpacker
 
 
@@ -202,7 +202,7 @@ def test_read_overview(polygons):
 def test_read_overview_in_batches(polygons, monkeypatch):
     zoom = json.loads(pq.read_schema(polygons).metadata[b'geo'])['lod_columns']['zooms'][-1]
     whole = read_overview(polygons, zoom)
-    monkeypatch.setattr('geoparquet_lod.unpack.BATCH_BYTES', 500)
+    monkeypatch.setattr('tiled_geoparquet.unpack.BATCH_BYTES', 500)
     batched = read_overview(polygons, zoom)
     assert batched['row'].num_chunks > whole['row'].num_chunks
     assert batched.schema.equals(whole.schema, check_metadata=True)

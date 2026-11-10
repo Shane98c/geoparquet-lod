@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-// Modified for geoparquet-lod: reduced to the dataset fields MapLibreParquetLayer reads.
+// Modified for tiled-geoparquet: reduced to the dataset fields MapLibreParquetLayer reads.
 
 export interface PresetDataset {
   parquet: { url: string }

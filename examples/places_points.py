@@ -9,7 +9,7 @@ could drop a capital in favour of a village.
 
 import sys
 
-from geoparquet_lod import importance, write
+from tiled_geoparquet import importance, write
 
 # worker processes re-import this file, so the write must not run on import
 if __name__ == '__main__':

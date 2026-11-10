@@ -1,5 +1,5 @@
 /**
- * Decoder of one packed LOD row, the format python/geoparquet_lod/pack.py
+ * Decoder of one packed LOD row, the format python/tiled_geoparquet/pack.py
  * writes: a row's geometry on the LOD grid, its carried attributes and the
  * straddler copies it hosts, all as LEB128 varints with string payloads
  * trailing in order.

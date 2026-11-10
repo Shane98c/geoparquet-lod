@@ -1,4 +1,4 @@
-# GeoParquet LOD
+# Tiled GeoParquet
 
 _The `lod_columns` extension: a layout and metadata contract for GeoParquet
 files that serve a zoomable map directly. Implemented by the writer and reader in this repository. Draft 0.1.0._

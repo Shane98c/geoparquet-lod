@@ -1,4 +1,4 @@
-# GeoParquet LOD
+# Tiled GeoParquet
 
 **One GeoParquet file for a zoomable map and the original analytical data.**
 
@@ -61,7 +61,7 @@ to carry into the fast map path. The first build may download DuckDB's spatial
 extension.
 
 ```python
-from geoparquet_lod import chain, drop_smallest, tiny_polygons, write
+from tiled_geoparquet import chain, drop_smallest, tiny_polygons, write
 
 if __name__ == '__main__':
     write(
@@ -105,13 +105,13 @@ exposing `Content-Range`. `write()` builds the overviews, tile-aligned pages,
 and the spatial directory in one call and replaces the output only after the
 build succeeds; allow temporary disk space beside the output for its
 intermediate file. The CLI does the same with
-`geoparquet-lod write source.parquet output.parquet`. A generic Parquet rewrite
+`tiled-geoparquet write source.parquet output.parquet`. A generic Parquet rewrite
 loses the spatial access path; rebuild from the source GeoParquet instead.
 
 In a MapLibre app, after creating the map and loading its style:
 
 ```js
-import { registerProtocol, tileUrl } from 'geoparquet-lod/maplibre'
+import { registerProtocol, tileUrl } from 'tiled-geoparquet/maplibre'
 
 registerProtocol(maplibregl)
 map.addSource('buildings', {
@@ -142,7 +142,7 @@ Esri's Spatially Optimized Parquet with its reference reader, and, as the
 map-delivery reference, PMTiles written by tippecanoe. Each cell is a cold read on a fresh reader after one open,
 geometry only, served from the same public bucket. Bytes are decimal.
 
-| Tile                  | GeoParquet LOD               | COGP 2.2.2                  | Esri SOP                    | PMTiles                      |
+| Tile                  | Tiled GeoParquet             | COGP 2.2.2                  | Esri SOP                    | PMTiles                      |
 | --------------------- | ---------------------------- | --------------------------- | --------------------------- | ---------------------------- |
 | open                  | 16 KB, 1 req                 | 1.50 MB, 3 req              | 2.62 MB, 3 req              | 16 KB, 1 req                 |
 | z8 metro, Tokyo       | 0.62 MB, 2 req, 93,801 feat. | 0.12 MB, 8 req, 1,152 feat. | 26.65 MB, 1,048 req, 28,000 | 0.50 MB, 2 req, 95,774 feat. |

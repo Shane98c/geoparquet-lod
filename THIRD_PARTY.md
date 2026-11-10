@@ -31,7 +31,7 @@ commit `10ff683874db8b2d99c0f03b98354b5ea5f8199c`, under Apache-2.0.
 The [upstream license](js/vendor/esri-sop/LICENSE) is retained. The implementation
 files are unchanged; `common/dataset/datasets.ts` reduces the demo dataset type
 and is marked as modified, and `index.ts` is a local export adapter. This code serves only the optional
-comparison pane, not the GeoParquet LOD reader.
+comparison pane, not the Tiled GeoParquet reader.
 
 ## Example and benchmark data
 

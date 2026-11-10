@@ -13,10 +13,10 @@ import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import pytest
 import shapely
-from geoparquet_lod import chain, drop_rate, validate
-from geoparquet_lod import write as build
-from geoparquet_lod._compact import dumps, get, loads
-from geoparquet_lod._layout import (
+from tiled_geoparquet import chain, drop_rate, validate
+from tiled_geoparquet import write as build
+from tiled_geoparquet._compact import dumps, get, loads
+from tiled_geoparquet._layout import (
     RUN_SAVING,
     RUN_TILE,
     covering_cells,
@@ -26,9 +26,9 @@ from geoparquet_lod._layout import (
     read_node,
     read_primary_node,
 )
-from geoparquet_lod._validate_index import check_index
-from geoparquet_lod.writer import _write_unindexed as write
-from geoparquet_lod.writer import hilbert_key
+from tiled_geoparquet._validate_index import check_index
+from tiled_geoparquet.writer import _write_unindexed as write
+from tiled_geoparquet.writer import hilbert_key
 from unpacker import Unpacker
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -122,7 +122,7 @@ def test_spatial_roundtrip(tmp_path, monkeypatch, family, sparse, leaf_pages, pa
     assert dumps(loads(footer)) == footer
     if leaf_pages == 1:
         monkeypatch.setattr(
-            importlib.import_module('geoparquet_lod._layout'), '_ROOT_TARGET_BYTES', 800
+            importlib.import_module('tiled_geoparquet._layout'), '_ROOT_TARGET_BYTES', 800
         )
     if family == 'line':
         # Exercise the public build against the unindexed table and the
@@ -578,7 +578,7 @@ def test_root_shrinks_its_largest_top_node_first(tmp_path, monkeypatch):
         workers=1,
         log=lambda *_: None,
     )
-    layout = importlib.import_module('geoparquet_lod._layout')
+    layout = importlib.import_module('tiled_geoparquet._layout')
     # the target leaves room for the fields added once the trees are final
     reserve = layout.BOOTSTRAP_BYTES - layout._ROOT_TARGET_BYTES
     sizes = {}

@@ -654,7 +654,7 @@ def write(
     temp_dir: str | None = None,
     log=print,
 ) -> Path:
-    """Build a GeoParquet LOD file in one call.
+    """Build a Tiled GeoParquet file in one call.
 
     Rows use one global Hilbert order. ``zooms`` lie in 0..24, the depth of
     its key, so every tile is one interval of keys.
@@ -704,7 +704,7 @@ def _options(given: Mapping) -> SimpleNamespace:
 
 def _write_unindexed(src: str, out: str | Path, **options) -> Path:
     """Write `src` (any GeoParquet with a WKB geometry column) to `out` in the
-    GeoParquet LOD layout, without the tile-aligned pages and spatial
+    Tiled GeoParquet layout, without the tile-aligned pages and spatial
     directory `write` adds after. Takes `write`'s options, with its defaults;
     overview columns are written at zstd level STAGED_LOD_LEVEL, since
     `finalize_layout` encodes them again. Returns the output path. However it

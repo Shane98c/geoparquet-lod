@@ -6,8 +6,8 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import shapely
-from geoparquet_lod import drop_rate, write
-from geoparquet_lod.writer import _write_unindexed
+from tiled_geoparquet import drop_rate, write
+from tiled_geoparquet.writer import _write_unindexed
 from unpacker import Unpacker
 
 

@@ -1,7 +1,7 @@
 # Hosted comparison
 
 The public comparison is at <https://geoparquet-lod-compare.pages.dev/>.
-It serves the GeoParquet LOD build from the
+It serves the Tiled GeoParquet build from the
 [Japan evaluation](japan-evaluation.md), whose thinning budgets are calibrated
 against PMTiles feature counts, beside the matching PMTiles archive. The
 [four-reader comparison](comparison.md) is measured on these hosted files.
@@ -15,7 +15,7 @@ deployed beside it and opens the same GeoParquet file through the
 renderer-neutral batch API; pass `?url=` to point it at another file.
 
 Use the reader checkboxes and **Apply readers** to choose any combination of
-GeoParquet LOD, PMTiles, released COGP, and Esri SOP. Unselected panes are removed
+Tiled GeoParquet, PMTiles, released COGP, and Esri SOP. Unselected panes are removed
 and do not initialize their readers or request their datasets. The selection is
 stored in the URL (`panes=lod,pmtiles,cogp,esri`); the default remains `lod,pmtiles`.
 Applying a selection reloads the readers while preserving the current view and

@@ -9,9 +9,9 @@ import json
 import time
 from pathlib import Path
 
-from geoparquet_lod import chain, drop_smallest, tiny_polygons
-from geoparquet_lod._layout import finalize_layout
-from geoparquet_lod.writer import _write_unindexed as write
+from tiled_geoparquet import chain, drop_smallest, tiny_polygons
+from tiled_geoparquet._layout import finalize_layout
+from tiled_geoparquet.writer import _write_unindexed as write
 
 
 def calibrated_budgets():

@@ -3,7 +3,7 @@
 Four readers against the archives behind the [hosted demo](hosted-comparison.md),
 all derived from the same 53,742,978 Japan building footprints:
 
-- **GeoParquet LOD**: the [Japan evaluation](japan-evaluation.md) build, read
+- **Tiled GeoParquet**: the [Japan evaluation](japan-evaluation.md) build, read
   through its spatial index.
 - **COGP 2.2.2**: a fresh conversion with the released writer
   (`--webmerc-minzoom 10`, otherwise defaults), read with `@cogp/reader` 2.1.4
@@ -20,14 +20,14 @@ bodies in decimal megabytes; "next tile" is the tile one column east on the
 same reader. Elapsed times are not reported because one run from one laptop
 is not a CDN benchmark.
 
-| Reader         | Open           |
-| -------------- | -------------- |
-| GeoParquet LOD | 0.02 MB, 1 req |
-| COGP           | 1.50 MB, 3 req |
-| Esri SOP       | 2.62 MB, 3 req |
-| PMTiles        | 0.02 MB, 1 req |
+| Reader           | Open           |
+| ---------------- | -------------- |
+| Tiled GeoParquet | 0.02 MB, 1 req |
+| COGP             | 1.50 MB, 3 req |
+| Esri SOP         | 2.62 MB, 3 req |
+| PMTiles          | 0.02 MB, 1 req |
 
-| Tile                  | GeoParquet LOD                                | COGP                            | Esri SOP                             | PMTiles                                       |
+| Tile                  | Tiled GeoParquet                              | COGP                            | Esri SOP                             | PMTiles                                       |
 | --------------------- | --------------------------------------------- | ------------------------------- | ------------------------------------ | --------------------------------------------- |
 | z8 metro, Tokyo       | 0.62 MB, 2 req, 93,801 feat.; next 0.02 MB, 1 | 0.12 MB, 8 req, level 0, 1,152  | 26.65 MB, 1,048 req, level 8, 28,000 | 0.50 MB, 2 req, 95,774 feat.; next 0.02 MB, 1 |
 | z11 city, Tokyo       | 0.27 MB, 2 req, 23,371; next 0.15 MB, 1       | 0.25 MB, 17 req, level 1, 860   | 5.39 MB, 143 req, level 12, 177,679  | 0.31 MB, 2 req, 24,373; next 0.17 MB, 1       |
@@ -66,13 +66,13 @@ do not establish whole-session or cross-device parity.
 
 ## What each format stores
 
-| Format         | Row layout                                      | Which rows at coarse zooms                                         | How a tile is found                                           | Overview geometry                                                                           |
-| -------------- | ----------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| GeoParquet LOD | One Hilbert order; every feature once           | Per-zoom thinning, need not nest; recorded in nullable LOD columns | Spatial directory in the first 16 KiB over tile-aligned pages | Packed varint rows on a quantized grid per LOD, with carried attributes and boundary copies |
-| COGP           | Coarse-to-fine row-group prefixes; feature once | Cumulative: a level adds row groups                                | Row-group prefix, then bbox statistics and page index         | Optional `quantized_geoarrow` nested int32 column                                           |
-| Esri SOP       | XZ-code clustering; feature once                | All features at every level                                        | Page index predicate skipping on the cluster code             | Per-level protobuf columns, Douglas-Peucker simplified                                      |
-| tylertoo       | `level` column with simplified WKB rows         | Per-level selection, written once per level in duplicating mode    | Level column and bbox                                         | WKB                                                                                         |
-| PMTiles        | Pre-cut MVT tiles                               | tippecanoe's per-zoom dropping                                     | Directory lookup                                              | Gzipped MVT per tile: integer coordinates on a 4096 grid, simplified and clipped per zoom   |
+| Format           | Row layout                                      | Which rows at coarse zooms                                         | How a tile is found                                           | Overview geometry                                                                           |
+| ---------------- | ----------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Tiled GeoParquet | One Hilbert order; every feature once           | Per-zoom thinning, need not nest; recorded in nullable LOD columns | Spatial directory in the first 16 KiB over tile-aligned pages | Packed varint rows on a quantized grid per LOD, with carried attributes and boundary copies |
+| COGP             | Coarse-to-fine row-group prefixes; feature once | Cumulative: a level adds row groups                                | Row-group prefix, then bbox statistics and page index         | Optional `quantized_geoarrow` nested int32 column                                           |
+| Esri SOP         | XZ-code clustering; feature once                | All features at every level                                        | Page index predicate skipping on the cluster code             | Per-level protobuf columns, Douglas-Peucker simplified                                      |
+| tylertoo         | `level` column with simplified WKB rows         | Per-level selection, written once per level in duplicating mode    | Level column and bbox                                         | WKB                                                                                         |
+| PMTiles          | Pre-cut MVT tiles                               | tippecanoe's per-zoom dropping                                     | Directory lookup                                              | Gzipped MVT per tile: integer coordinates on a 4096 grid, simplified and clipped per zoom   |
 
 The [specification](../spec/SPEC.md#relation-to-other-proposals) discusses the
 design differences and where this layout could fold into those proposals.

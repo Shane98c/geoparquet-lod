@@ -3,7 +3,7 @@
 import duckdb
 import numpy as np
 import pyarrow as pa
-from geoparquet_lod.key import (
+from tiled_geoparquet.key import (
     KEY_DEPTH,
     hilbert_cell,
     hilbert_key,

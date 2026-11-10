@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>GeoParquet LOD comparison</title>
+    <title>Tiled GeoParquet comparison</title>
     <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css" />
     <style>
       html,
@@ -164,7 +164,7 @@
       const cogpUrl = abs(params.get('cogp'))
       const esriUrl = abs(params.get('esri'))
       const available = [
-        ['lod', 'GeoParquet LOD', fileUrl],
+        ['lod', 'Tiled GeoParquet', fileUrl],
         ['pmtiles', 'PMTiles', pmtilesUrl],
         ['cogp', 'COGP (released)', cogpUrl],
         ['esri', 'Esri SOP', esriUrl],
@@ -343,7 +343,7 @@
       const panes = []
       if (enabled('lod'))
         panes.push({
-          title: 'GeoParquet LOD',
+          title: 'Tiled GeoParquet',
           keys: [fileUrl],
           tile: (u) => u.startsWith('lod://') && parseTileUrl(u).config.url === fileUrl,
           lodUrl: fileUrl,

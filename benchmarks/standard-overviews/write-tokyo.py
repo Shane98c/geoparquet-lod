@@ -1,7 +1,7 @@
 """Build the Tokyo files the coarse-prefix and standard-overview measurements read.
 
 Cuts the Tokyo subset (4,881,955 buildings whose bbox meets 139.39–140.10 E,
-35.45–35.90 N) from the hosted Japan GeoParquet LOD file, then writes it with
+35.45–35.90 N) from the hosted Japan Tiled GeoParquet file, then writes it with
 the Japan recipe's calibrated budgets in one Hilbert order:
 
     uv run python benchmarks/standard-overviews/write-tokyo.py tokyo.source.parquet tokyo.packed.parquet
@@ -27,9 +27,9 @@ import time
 from pathlib import Path
 
 import duckdb
-from geoparquet_lod import chain, drop_smallest, tiny_polygons
-from geoparquet_lod._layout import finalize_layout
-from geoparquet_lod.writer import _write_unindexed
+from tiled_geoparquet import chain, drop_smallest, tiny_polygons
+from tiled_geoparquet._layout import finalize_layout
+from tiled_geoparquet.writer import _write_unindexed
 
 JAPAN = 'https://pub-a9c45d804ff74bd19e8f9b7a52d9a90b.r2.dev/geoparquet-lod/releases/0fcab25/japan_buildings.parquet'
 BOX = (139.39, 35.45, 140.10, 35.90)

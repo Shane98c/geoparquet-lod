@@ -13,7 +13,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import shapely
-from geoparquet_lod import chain, drop_smallest, tiny_polygons, write
+from tiled_geoparquet import chain, drop_smallest, tiny_polygons, write
 
 
 def main(directory: Path):

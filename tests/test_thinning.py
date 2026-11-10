@@ -3,8 +3,8 @@
 import numpy as np
 import pyarrow as pa
 import pytest
-from geoparquet_lod.quantize import mercator
-from geoparquet_lod.thinning import Context, density_budget
+from tiled_geoparquet.quantize import mercator
+from tiled_geoparquet.thinning import Context, density_budget
 
 METRES_PER_DEGREE = 111_320
 
@@ -57,7 +57,7 @@ def test_density_budget_takes_a_budget_per_zoom():
 
 
 def test_drop_smallest_sets_one_bar_per_zoom():
-    from geoparquet_lod.thinning import chain, drop_smallest, tile_cost, tiny_polygons
+    from tiled_geoparquet.thinning import chain, drop_smallest, tile_cost, tiny_polygons
 
     rng = np.random.default_rng(1)
     city, town = 20_000, 200
@@ -93,7 +93,7 @@ def test_a_degree_draws_twice_as_tall_at_60n():
 
 
 def test_grid_coordinates_outside_int32_raise():
-    from geoparquet_lod.encoding import round_away
+    from tiled_geoparquet.encoding import round_away
 
     assert round_away(np.array([2**31 - 1.4, -(2**31) + 0.4])).tolist() == [2**31 - 1, -(2**31)]
     with pytest.raises(OverflowError):
