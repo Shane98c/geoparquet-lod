@@ -108,10 +108,13 @@ intermediate file. The CLI does the same with
 `tiled-geoparquet write source.parquet output.parquet`. A generic Parquet rewrite
 loses the spatial access path; rebuild from the source GeoParquet instead.
 
-In a MapLibre app, after creating the map and loading its style:
+The tiles are standard Mapbox Vector Tiles, so any map library that lets you
+load a tile's bytes yourself can draw them with `fetchTile`; the
+[guide](docs/usage.md#in-other-map-libraries) shows OpenLayers. In a MapLibre
+app, after creating the map and loading its style:
 
 ```js
-import { registerProtocol, tileUrl } from 'tiled-geoparquet/maplibre'
+import { registerProtocol, tileUrl } from 'tiled-geoparquet/tiles'
 
 registerProtocol(maplibregl)
 map.addSource('buildings', {

@@ -133,7 +133,7 @@ requests (220 KB in three without attributes) and the next tile east about
 the Delaware file, but its z15 tiles then read about 240 KB each. The reader
 keeps the pages it fetched (16 MiB by default), so zooming further in over
 the same place, or across tiles of one large feature, reuses them instead of
-fetching them again. To overzoom instead, as PMTiles does, set the MapLibre
+fetching them again. To overzoom instead, as PMTiles does, set the map
 source's `maxzoom` to the finest zoom in the file's `lod_columns` metadata.
 
 ## Install
@@ -209,7 +209,7 @@ default) caps DuckDB.
 
 ```js
 import maplibregl from 'maplibre-gl'
-import { registerProtocol, tileUrl, prefetch, readRow } from 'tiled-geoparquet/maplibre'
+import { registerProtocol, tileUrl, prefetch, readRow } from 'tiled-geoparquet/tiles'
 
 const url = 'https://example.com/buildings.lod.parquet'
 prefetch(url) // optional: opens the file in the worker before the map exists
@@ -234,10 +234,47 @@ Style expressions therefore compare numbers with numbers, as in
 property out of the feature: `['has', 'risk']` is false there and
 `['coalesce', ['get', 'risk'], 0]` falls back to 0.
 
+### In other map libraries
+
+The tiles are standard Mapbox Vector Tiles on a 512 px Web Mercator grid.
+`fetchTile(url, signal)` returns the bytes of one tile from a `tileUrl`
+template with its `{z}`, `{x}` and `{y}` filled in, so any library that lets
+you load a tile's bytes yourself can draw the file. In OpenLayers, whose
+vector tile grid is 512 px by default:
+
+```js
+import VectorTileLayer from 'ol/layer/VectorTile.js'
+import VectorTileSource from 'ol/source/VectorTile.js'
+import MVT from 'ol/format/MVT.js'
+import { fetchTile, tileUrl } from 'tiled-geoparquet/tiles'
+
+const layer = new VectorTileLayer({
+  source: new VectorTileSource({
+    format: new MVT(),
+    url: tileUrl({ url, layer: 'buildings', properties: ['risk'] }),
+    tileLoadFunction: (tile, src) => {
+      tile.setLoader(async (extent, resolution, projection) => {
+        try {
+          const data = await fetchTile(src)
+          tile.setFeatures(
+            tile.getFormat().readFeatures(data, { extent, featureProjection: projection }),
+          )
+        } catch {
+          tile.onError()
+        }
+      })
+    },
+  }),
+})
+```
+
+Libraries that fetch tile URLs themselves with no loader hook, and desktop or
+native clients, need the tiles served over HTTP instead.
+
 Tiles are fetched through one shared worker and decoded and encoded in a
-small worker pool. `setWorkerCount(1 | 2 | 3 | 4)` from the MapLibre entry point
-overrides the default before calling `prefetch`, `readMetadata`, or
-`registerProtocol`; one disables the pool. Four helps dense viewports but costs
+small worker pool. `setWorkerCount(1 | 2 | 3 | 4)` from the tiles entry point
+overrides the default before calling `prefetch`, `readMetadata`,
+`registerProtocol` or `fetchTile`; one disables the pool. Four helps dense viewports but costs
 more memory. Exact geometry and analytical row reads stay on the coordinator.
 CPU workers reuse the same `worker.js` URL, so there is no additional worker
 asset to deploy. zstd pages decode with WebAssembly, embedded in the bundle as a
@@ -268,7 +305,7 @@ stay reusable. These budgets bound cache accounting, not total browser memory.
 
 The reader also maps a WKB GeoParquet file without LODs, in OGC:CRS84 or
 EPSG:4326, through the same `openReader`, `renderTile`, `readFeatures` and
-MapLibre protocol. Every zoom then draws the exact primary geometry of the rows that
+tile entry point. Every zoom then draws the exact primary geometry of the rows that
 meet the tile, with no properties unless `properties` names source columns,
 and `readFeatures` returns primary rows. Rows are chosen by the bbox covering:
 the column the `geo` metadata names (`bbox`, GDAL's `geometry_bbox`), or a

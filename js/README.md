@@ -1,13 +1,13 @@
 # Tiled GeoParquet JavaScript reader
 
 Experimental draft 0.1.0. Reads the Tiled GeoParquet layout and spatial page
-index emitted by the writer; generates vector tiles for MapLibre. Not yet published to
+index emitted by the writer; generates Mapbox Vector Tiles for any map library. Not yet published to
 npm. See the repository root README, `spec/`, and `docs/usage.md` for format
 status, construction, limitations, and measurements.
 
 Build from this directory with `npm ci && npm run build`. Install the built
 package by local path. Use `tiled-geoparquet` for direct reads and
-`tiled-geoparquet/maplibre` for the worker-backed protocol:
+`tiled-geoparquet/tiles` for worker-backed tiles:
 
 ```js
 import { openReader, coalescing, httpSource, renderTile } from 'tiled-geoparquet'
@@ -17,7 +17,7 @@ const mvt = await renderTile(reader, z, x, y, { properties: ['height'] })
 ```
 
 Serve immutable files with HTTP Range support and CORS exposing `Content-Range`.
-MapLibre integration requires the distributed `worker.js` and its imports to
+The tiles entry point requires the distributed `worker.js` and its imports to
 remain available to your bundler. Other dependencies remain external in `dist`.
 
 Project code is MIT; the MVT encoder and geometry builder include code adapted

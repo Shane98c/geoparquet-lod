@@ -1,8 +1,9 @@
 /**
- * MapLibre integration: `registerProtocol(maplibregl)` once, then use
- * `tileUrl(config)` as a vector source's tile template. Tiles are rendered in
- * a worker so page scrolling stays smooth; `prefetch(url)` opens the file
- * before the map exists.
+ * Worker-backed Mapbox Vector Tiles for any map library. `tileUrl(config)`
+ * is a `{z}/{x}/{y}` template; `fetchTile(url)` returns one expanded tile's
+ * MVT bytes, and `registerProtocol(maplibregl)` wires it into MapLibre.
+ * Tiles are rendered in a worker so page scrolling stays smooth;
+ * `prefetch(url)` opens the file before the map exists.
  */
 import type { TileOptions } from './tile.js'
 import type { Bbox, LodMetadata } from './reader.js'
@@ -184,6 +185,17 @@ export const readMetadata = async (
   return response.metadata
 }
 
+/**
+ * The Mapbox Vector Tile for one expanded `tileUrl`, rendered in the worker.
+ * Any map library that lets you supply a tile's bytes can call this from its
+ * tile loader. An empty tile is an empty buffer.
+ */
+export const fetchTile = async (url: string, signal?: AbortSignal): Promise<ArrayBuffer> => {
+  const { config, z, x, y } = parseTileUrl(url)
+  const response = await call({ type: 'tile', config, z, x, y }, signal)
+  return 'data' in response ? response.data : new ArrayBuffer(0)
+}
+
 /** Register the `lod://` tile scheme once per MapLibre module instance. */
 export const registerProtocol = (maplibre: {
   addProtocol: (
@@ -194,11 +206,9 @@ export const registerProtocol = (maplibre: {
     ) => Promise<{ data: ArrayBuffer }>,
   ) => void
 }) => {
-  maplibre.addProtocol(PROTOCOL, async (params, controller) => {
-    const { config, z, x, y } = parseTileUrl(params.url)
-    const response = await call({ type: 'tile', config, z, x, y }, controller.signal)
-    return { data: 'data' in response ? response.data : new ArrayBuffer(0) }
-  })
+  maplibre.addProtocol(PROTOCOL, async (params, controller) => ({
+    data: await fetchTile(params.url, controller.signal),
+  }))
 }
 
 export type { TileOptions }

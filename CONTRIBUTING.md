@@ -69,7 +69,7 @@ to bring the physical access design into other GeoParquet overview proposals.
 | Path                       | Purpose                                               |
 | -------------------------- | ----------------------------------------------------- |
 | `python/tiled_geoparquet/` | Writer, layout finalization, validator, CLI           |
-| `js/src/`                  | Range reader, tile rendering, MapLibre workers        |
+| `js/src/`                  | Range reader, tile rendering, tile workers            |
 | `js/vendor/`               | Vendored Esri SOP reader for the comparison pane only |
 | `spec/`                    | Logical payload contract and optional physical index  |
 | `tests/`, `js/test/`       | Correctness tests and measurement harnesses           |

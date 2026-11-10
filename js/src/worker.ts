@@ -2,7 +2,7 @@ import { VisibleTileCache } from './visible-cache.js'
 import { zstdReady } from './compressors.js'
 import { decodeProjection } from './projection.js'
 /// <reference lib="webworker" />
-import type { Transfer, WorkerRequest, WorkerResponse } from './maplibre.js'
+import type { Transfer, WorkerRequest, WorkerResponse } from './tiles.js'
 import { coalescing, httpSource, s3Mirrors } from './range-buffer.js'
 import { openReader, SpatialReader, type TileReader } from './spatial.js'
 import { decodePreparedTile, renderDecodedTile, renderTile } from './tile.js'
